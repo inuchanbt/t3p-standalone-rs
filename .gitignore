@@ -1,0 +1,5 @@
+/build/
+/local/
+/target/
+__pycache__/
+/preview.ppm
