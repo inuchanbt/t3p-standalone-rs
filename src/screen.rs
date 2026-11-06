@@ -1,76 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 use crate::{Overview, SIDE, STRIP_ROWS};
 
-const BG: u16 = 0x0863;
-const CARD: u16 = 0x1106;
-const GRID: u16 = 0x29eb;
+const BG: u16 = 0x0000;
+const PANEL: u16 = 0x0842;
+const GRID: u16 = 0x19c8;
 const TEXT: u16 = 0xffff;
-const MUTED: u16 = 0x9d5b;
-const VOLTS: u16 = 0x5eff;
-const AMPS: u16 = 0x7f75;
-const WATTS: u16 = 0xfde8;
+const MUTED: u16 = 0xb65a;
+const VOLTS: u16 = 0xff05;
+const AMPS: u16 = 0x3e9f;
+const WATTS: u16 = 0x4f8c;
+const PURPLE: u16 = 0xc37f;
 
 struct Strip<'a> {
     pixels: &'a mut [u16; SIDE * STRIP_ROWS],
     top: usize,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn low_power_noise_does_not_fill_graph() {
-        let mut view = Overview::default();
-        view.graph_values[59] = Some(5);
-        let mut pixels = [0; SIDE * STRIP_ROWS];
-        render_demo_strip(&view, 224, &mut pixels);
-        let x = 56 + 59 * 171 / 59;
-        assert_eq!(pixels[(228 - 224) * SIDE + x], WATTS);
-        assert_ne!(pixels[(227 - 224) * SIDE + x], WATTS);
-    }
-
-    #[test]
-    fn graph_scale_rounds_up_and_preserves_gaps() {
-        assert_eq!(graph_scale(0), 1000);
-        assert_eq!(graph_scale(2000), 2000);
-        assert_eq!(graph_scale(2001), 2500);
-        assert_eq!(graph_scale(237_934), 250_000);
-        assert_eq!(graph_scale(1_731_123), 2_000_000);
-        let mut view = Overview::default();
-        view.graph_values[0] = Some(2000);
-        view.graph_values[2] = Some(2000);
-        let mut pixels = [0; SIDE * STRIP_ROWS];
-        render_demo_strip(&view, 192, &mut pixels);
-        let x0 = 56;
-        let x2 = 56 + 2 * 171 / 59;
-        assert_eq!(pixels[(193 - 192) * SIDE + x0], WATTS);
-        assert_ne!(pixels[(193 - 192) * SIDE + x0 + 1], WATTS);
-        assert_eq!(pixels[(193 - 192) * SIDE + x2], WATTS);
-        assert_ne!(pixels[(194 - 192) * SIDE + x0], WATTS);
-    }
-}
-
-// Round to an easy-to-read upper limit, retaining a 1-unit minimum.
-fn graph_scale(max: u32) -> u32 {
-    let mut unit = 1000u32;
-    loop {
-        for candidate in [
-            unit,
-            unit.saturating_mul(2),
-            unit.saturating_mul(5) / 2,
-            unit.saturating_mul(5),
-        ] {
-            if max <= candidate {
-                return candidate;
-            }
-        }
-        let next = unit.saturating_mul(10);
-        if next == unit {
-            return u32::MAX;
-        }
-        unit = next;
-    }
 }
 
 impl Strip<'_> {
@@ -85,17 +28,25 @@ impl Strip<'_> {
         }
     }
 
+    fn outline(&mut self, x: usize, y: usize, w: usize, h: usize, color: u16) {
+        self.rect(x, y, w, h, PANEL);
+        self.rect(x, y, w, 1, color);
+        self.rect(x, y + h - 1, w, 1, color);
+        self.rect(x, y, 1, h, color);
+        self.rect(x + w - 1, y, 1, h, color);
+    }
+
     fn text(&mut self, x: usize, y: usize, value: &[u8], scale: usize, color: u16) {
-        if y >= self.top + STRIP_ROWS || y + 5 * scale <= self.top {
+        if y >= self.top + STRIP_ROWS || y + 7 * scale <= self.top {
             return;
         }
         for (index, &ch) in value.iter().enumerate() {
             let rows = glyph(ch);
-            for row in 0..5 {
-                for col in 0..3 {
-                    if rows & (1 << (4 * (4 - row) + 2 - col)) != 0 {
+            for row in 0..7 {
+                for col in 0..4 {
+                    if rows & (1 << (4 * (6 - row) + 3 - col)) != 0 {
                         self.rect(
-                            x + (index * 4 + col) * scale,
+                            x + (index * 5 + col) * scale,
                             y + row * scale,
                             scale,
                             scale,
@@ -108,50 +59,64 @@ impl Strip<'_> {
     }
 }
 
+const fn rows(r: [u8; 7]) -> u32 {
+    ((r[0] as u32) << 24)
+        | ((r[1] as u32) << 20)
+        | ((r[2] as u32) << 16)
+        | ((r[3] as u32) << 12)
+        | ((r[4] as u32) << 8)
+        | ((r[5] as u32) << 4)
+        | r[6] as u32
+}
+
+// Compact 4x7 typeface for the 240-pixel panel.
 fn glyph(ch: u8) -> u32 {
     match ch {
-        b'0' => 0x75557,
-        b'1' => 0x26227,
-        b'2' => 0x71747,
-        b'3' => 0x71717,
-        b'4' => 0x55711,
-        b'5' => 0x74717,
-        b'6' => 0x74757,
-        b'7' => 0x71111,
-        b'8' => 0x75757,
-        b'9' => 0x75717,
-        b'A' => 0x25755,
-        b'B' => 0x65656,
-        b'C' => 0x74447,
-        b'D' => 0x65556,
-        b'E' => 0x74647,
-        b'F' => 0x74644,
-        b'G' => 0x74557,
-        b'H' => 0x55755,
-        b'I' => 0x72227,
-        b'L' => 0x44447,
-        b'M' => 0x57755,
-        b'N' => 0x57775,
-        b'O' => 0x75557,
-        b'P' => 0x75744,
-        b'R' => 0x75765,
-        b'S' => 0x74717,
-        b'T' => 0x72222,
-        b'U' => 0x55557,
-        b'V' => 0x55552,
-        b'W' => 0x55775,
-        b'X' => 0x55255,
-        b'Y' => 0x55222,
-        b'-' => 0x00700,
-        b'.' => 0x00002,
-        b'+' => 0x02720,
-        b':' => 0x02020,
+        b'0' => rows([6, 9, 11, 13, 9, 9, 6]),
+        b'1' => rows([2, 6, 2, 2, 2, 2, 7]),
+        b'2' => rows([6, 9, 1, 2, 4, 8, 15]),
+        b'3' => rows([14, 1, 1, 6, 1, 1, 14]),
+        b'4' => rows([2, 6, 10, 10, 15, 2, 2]),
+        b'5' => rows([15, 8, 8, 14, 1, 1, 14]),
+        b'6' => rows([6, 8, 8, 14, 9, 9, 6]),
+        b'7' => rows([15, 1, 2, 2, 4, 4, 4]),
+        b'8' => rows([6, 9, 9, 6, 9, 9, 6]),
+        b'9' => rows([6, 9, 9, 7, 1, 1, 6]),
+        b'A' => rows([6, 9, 9, 15, 9, 9, 9]),
+        b'B' => rows([14, 9, 9, 14, 9, 9, 14]),
+        b'C' => rows([7, 8, 8, 8, 8, 8, 7]),
+        b'D' => rows([14, 9, 9, 9, 9, 9, 14]),
+        b'E' => rows([15, 8, 8, 14, 8, 8, 15]),
+        b'F' => rows([15, 8, 8, 14, 8, 8, 8]),
+        b'G' => rows([7, 8, 8, 11, 9, 9, 7]),
+        b'H' => rows([9, 9, 9, 15, 9, 9, 9]),
+        b'I' => rows([7, 2, 2, 2, 2, 2, 7]),
+        b'J' => rows([3, 1, 1, 1, 9, 9, 6]),
+        b'K' => rows([9, 10, 12, 8, 12, 10, 9]),
+        b'L' => rows([8, 8, 8, 8, 8, 8, 15]),
+        b'M' => rows([9, 15, 15, 9, 9, 9, 9]),
+        b'N' => rows([9, 13, 13, 11, 11, 9, 9]),
+        b'O' => rows([6, 9, 9, 9, 9, 9, 6]),
+        b'P' => rows([14, 9, 9, 14, 8, 8, 8]),
+        b'Q' => rows([6, 9, 9, 9, 11, 10, 5]),
+        b'R' => rows([14, 9, 9, 14, 12, 10, 9]),
+        b'S' => rows([7, 8, 8, 6, 1, 1, 14]),
+        b'T' => rows([15, 2, 2, 2, 2, 2, 2]),
+        b'U' => rows([9, 9, 9, 9, 9, 9, 6]),
+        b'V' => rows([9, 9, 9, 9, 9, 6, 6]),
+        b'W' => rows([9, 9, 9, 9, 15, 15, 9]),
+        b'X' => rows([9, 9, 6, 6, 6, 9, 9]),
+        b'Y' => rows([9, 9, 6, 2, 2, 2, 2]),
+        b'Z' => rows([15, 1, 2, 4, 8, 8, 15]),
+        b'-' => rows([0, 0, 0, 15, 0, 0, 0]),
+        b'.' => rows([0, 0, 0, 0, 0, 6, 6]),
+        b':' => rows([0, 6, 6, 0, 6, 6, 0]),
+        b'/' => rows([1, 1, 2, 2, 4, 8, 8]),
+        b'+' => rows([0, 2, 2, 15, 2, 2, 0]),
         _ => 0,
     }
 }
 
-// Fixed decimal output in a small stack buffer. Width is bounded by the
-// available columns even if the meter has been running for years.
 fn milli(value: u64, negative: bool, output: &mut [u8; 11]) -> &[u8] {
     let mut value = value.min(999_999_999);
     let mut start = output.len();
@@ -177,79 +142,185 @@ fn milli(value: u64, negative: bool, output: &mut [u8; 11]) -> &[u8] {
     &output[start..]
 }
 
-pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * STRIP_ROWS]) {
-    assert!(top < SIDE && top % STRIP_ROWS == 0);
-    pixels.fill(BG);
-    let mut p = Strip { pixels, top };
+// Value and unit always fit the card, including signed extremes.
+fn value(
+    p: &mut Strip<'_>,
+    x: usize,
+    y: usize,
+    width: usize,
+    reading: Option<(u64, bool)>,
+    unit: &[u8],
+    color: u16,
+    preferred: usize,
+) {
+    let mut buffer = [0; 11];
+    let number = if let Some((n, negative)) = reading {
+        milli(n, negative, &mut buffer)
+    } else {
+        b"---"
+    };
+    let mut scale = preferred;
+    while scale > 1 && number.len() * 5 * scale + unit.len() * 5 + 2 > width {
+        scale -= 1;
+    }
+    p.text(x, y, number, scale, color);
+    let ux = x + number.len() * 5 * scale + 2;
+    p.text(ux, y + 7 * (scale - 1), unit, 1, color);
+}
+
+fn time_text(seconds: u32) -> [u8; 8] {
+    let hours = seconds / 3600;
+    let mins = seconds / 60 % 60;
+    let secs = seconds % 60;
+    [
+        b'0' + (hours / 10) as u8,
+        b'0' + (hours % 10) as u8,
+        b':',
+        b'0' + (mins / 10) as u8,
+        b'0' + (mins % 10) as u8,
+        b':',
+        b'0' + (secs / 10) as u8,
+        b'0' + (secs % 10) as u8,
+    ]
+}
+
+// Round to an easy-to-read upper limit, retaining a 1-unit minimum.
+pub(crate) fn graph_scale(max: u32) -> u32 {
+    let mut unit = 1000u32;
+    loop {
+        for candidate in [
+            unit,
+            unit.saturating_mul(2),
+            unit.saturating_mul(5) / 2,
+            unit.saturating_mul(5),
+        ] {
+            if max <= candidate {
+                return candidate;
+            }
+        }
+        let next = unit.saturating_mul(10);
+        if next == unit {
+            return u32::MAX;
+        }
+        unit = next;
+    }
+}
+
+fn header(p: &mut Strip<'_>, view: &Overview) {
+    let (title, color): (&[u8], u16) = match view.page {
+        0 => (b"OVERVIEW", AMPS),
+        1 => (b"ENERGY", WATTS),
+        3 => (b"GRAPH", VOLTS),
+        4 => (b"GRAPH", AMPS),
+        _ => (b"GRAPH", WATTS),
+    };
+    p.text(8, 8, title, 2, color);
+    for index in 0..5 {
+        p.rect(
+            120 + index * 10,
+            10,
+            6,
+            10,
+            if view.page as usize == index {
+                color
+            } else {
+                GRID
+            },
+        );
+    }
     p.text(
-        12,
-        12,
-        if view.page == 1 {
-            b"T3P MAX  "
-        } else {
-            b"T3P METER"
-        },
-        3,
-        TEXT,
-    );
-    p.rect(172, 9, 56, 22, WATTS);
-    p.text(
-        179,
-        15,
+        182,
+        10,
         if view.uncalibrated {
             b"UNCAL"
         } else {
             b"DEMO "
         },
         2,
-        BG,
+        VOLTS,
+    );
+    p.rect(8, 28, 224, 1, color);
+    p.rect(8, 219, 224, 1, GRID);
+    p.text(8, 226, b"TAP NEXT  HOLD RESET", 1, MUTED);
+    p.text(186, 226, b"RAM ONLY", 1, MUTED);
+}
+
+fn card(p: &mut Strip<'_>, x: usize, y: usize, w: usize, h: usize, title: &[u8], color: u16) {
+    p.outline(x, y, w, h, color);
+    p.text(x + 5, y + 4, title, 1, color);
+}
+
+fn overview(p: &mut Strip<'_>, view: &Overview) {
+    card(p, 8, 35, 109, 57, b"VOLTAGE", VOLTS);
+    card(p, 123, 35, 109, 57, b"CURRENT", AMPS);
+    card(p, 8, 99, 134, 76, b"POWER", WATTS);
+    card(p, 148, 99, 84, 76, b"MAX", PURPLE);
+    value(
+        p,
+        14,
+        56,
+        97,
+        view.reading.map(|r| (u64::from(r.mv), false)),
+        b"V",
+        VOLTS,
+        3,
+    );
+    value(
+        p,
+        129,
+        56,
+        97,
+        view.reading
+            .map(|r| (u64::from(r.ma.unsigned_abs()), r.ma < 0)),
+        b"A",
+        AMPS,
+        3,
+    );
+    value(
+        p,
+        14,
+        128,
+        122,
+        view.reading
+            .map(|r| (u64::from(r.magnitude_mw()), r.ma < 0)),
+        b"W",
+        WATTS,
+        4,
+    );
+    value(
+        p,
+        154,
+        116,
+        72,
+        view.peaks.map(|(v, _, _)| (u64::from(v), false)),
+        b"V",
+        VOLTS,
+        2,
+    );
+    value(
+        p,
+        154,
+        135,
+        72,
+        view.peaks.map(|(_, a, _)| (u64::from(a), false)),
+        b"A",
+        AMPS,
+        2,
+    );
+    value(
+        p,
+        154,
+        154,
+        72,
+        view.peaks.map(|(_, _, w)| (u64::from(w), false)),
+        b"W",
+        WATTS,
+        2,
     );
 
-    p.rect(12, 39, 216, 87, CARD);
-    let mut digits = [0; 11];
-    for (index, (label, color)) in [(b'V', VOLTS), (b'A', AMPS), (b'W', WATTS)]
-        .into_iter()
-        .enumerate()
-    {
-        let y = 45 + index * 27;
-        p.text(21, y + 2, &[label], 3, color);
-        let display = if view.page == 1 {
-            view.peaks.map(|(v, a, w)| {
-                (
-                    match index {
-                        0 => u64::from(v),
-                        1 => u64::from(a),
-                        _ => u64::from(w),
-                    },
-                    false,
-                )
-            })
-        } else {
-            view.reading.map(|reading| {
-                let value = match index {
-                    0 => u64::from(reading.mv),
-                    1 => u64::from(reading.ma.unsigned_abs()),
-                    _ => u64::from(reading.magnitude_mw()),
-                };
-                (value, index > 0 && reading.ma < 0)
-            })
-        };
-        if let Some((value, negative)) = display {
-            p.text(54, y, milli(value, negative, &mut digits), 4, color);
-        } else {
-            p.text(54, y, b"---", 4, MUTED);
-        }
-    }
-
-    p.rect(12, 133, 105, 33, CARD);
-    p.rect(123, 133, 105, 33, CARD);
-    p.text(19, 138, b"AH", 2, MUTED);
-    p.text(130, 138, b"WH", 2, MUTED);
-    p.text(19, 151, milli(view.mah, false, &mut digits), 2, TEXT);
-    p.text(130, 151, milli(view.mwh, false, &mut digits), 2, TEXT);
-
+    card(p, 8, 181, 224, 31, b"PROTOCOL", AMPS);
     if let Some(registers) = view.pd_diagnostic {
-        p.text(12, 176, b"PD", 2, MUTED);
+        p.text(14, 196, b"PD", 1, AMPS);
         if let Some((first, last)) = registers {
             let digits = b"0123456789ABCDEF";
             for index in 0..5 {
@@ -259,65 +330,62 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
                     (first >> (index * 8)) as u8
                 };
                 p.text(
-                    36 + index * 24,
-                    176,
+                    29 + index * 15,
+                    196,
                     &digits[(byte >> 4) as usize..][..1],
-                    2,
-                    MUTED,
+                    1,
+                    TEXT,
                 );
                 p.text(
-                    44 + index * 24,
-                    176,
+                    34 + index * 15,
+                    196,
                     &digits[(byte & 15) as usize..][..1],
-                    2,
-                    MUTED,
+                    1,
+                    TEXT,
                 );
             }
         } else {
-            p.text(36, 176, b"-- -- -- -- --", 2, MUTED);
+            p.text(29, 196, b"-- -- -- -- --", 1, TEXT);
         }
     } else {
-        p.text(
-            12,
-            176,
-            match view.page {
-                2 => b"VOLT  60S",
-                3 => b"AMPS  60S",
-                _ => b"POWER 60S",
-            },
-            2,
-            MUTED,
-        );
-        let seconds = view.elapsed_seconds;
-        let parts = [seconds / 3600, seconds / 60 % 60, seconds % 60];
-        let digits = b"0123456789";
-        p.text(136, 176, b"T", 2, MUTED);
-        for (index, part) in parts.into_iter().enumerate() {
-            let x = 152 + index * 24;
-            p.text(x, 176, &digits[(part / 10) as usize..][..1], 2, MUTED);
-            p.text(x + 8, 176, &digits[(part % 10) as usize..][..1], 2, MUTED);
-            if index < 2 {
-                p.text(x + 16, 176, b":", 2, MUTED);
-            }
-        }
+        p.text(14, 196, b"PD NOT AVAILABLE", 1, MUTED);
     }
-    p.rect(12, 191, 216, 39, CARD);
-    if top >= 184 {
-        let max = graph_scale(
-            view.graph_values
-                .iter()
-                .copied()
-                .flatten()
-                .max()
-                .unwrap_or(0),
-        )
-        .max(1);
-        let unit = match view.page {
-            2 => b"V",
-            3 => b"A",
-            _ => b"W",
-        };
-        let label = milli(u64::from(max), false, &mut digits);
+}
+
+fn energy(p: &mut Strip<'_>, view: &Overview) {
+    card(p, 8, 35, 224, 55, b"CHARGE", AMPS);
+    card(p, 8, 96, 224, 55, b"ENERGY", WATTS);
+    card(p, 8, 157, 224, 55, b"TIME", PURPLE);
+    value(p, 15, 55, 210, Some((view.mah, false)), b"AH", AMPS, 3);
+    value(p, 15, 116, 210, Some((view.mwh, false)), b"WH", WATTS, 3);
+    p.text(15, 177, &time_text(view.elapsed_seconds), 3, TEXT);
+}
+
+fn graph(p: &mut Strip<'_>, view: &Overview) {
+    let (title, unit, color): (&[u8], &[u8], u16) = match view.page {
+        3 => (b"VOLTAGE 60S", b"V", VOLTS),
+        4 => (b"CURRENT 60S", b"A", AMPS),
+        _ => (b"POWER 60S", b"W", WATTS),
+    };
+    let live = view.reading.map(|r| match view.page {
+        3 => (u64::from(r.mv), false),
+        4 => (u64::from(r.ma.unsigned_abs()), r.ma < 0),
+        _ => (u64::from(r.magnitude_mw()), r.ma < 0),
+    });
+    let max = view.peaks.map(|(v, a, w)| match view.page {
+        3 => (u64::from(v), false),
+        4 => (u64::from(a), false),
+        _ => (u64::from(w), false),
+    });
+    card(p, 8, 35, 109, 51, b"NOW", color);
+    card(p, 123, 35, 109, 51, b"MAX", PURPLE);
+    value(p, 14, 55, 97, live, unit, color, 3);
+    value(p, 129, 55, 97, max, unit, color, 3);
+    p.text(8, 95, title, 2, color);
+    p.rect(8, 112, 224, 100, PANEL);
+    if p.top >= 104 && p.top < 216 {
+        let mut digits = [0; 11];
+        let label = milli(u64::from(view.graph_max), false, &mut digits);
         let mut end = label.len();
         while end > 0 && label[end - 1] == b'0' {
             end -= 1;
@@ -325,50 +393,148 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
         if end > 0 && label[end - 1] == b'.' {
             end -= 1;
         }
-        p.text(12, 192, &label[..end], 2, MUTED);
-        p.text(12 + end * 8, 192, unit, 2, MUTED);
-        p.text(12, 219, b"0", 2, MUTED);
-        for y in [193, 210, 228] {
-            p.rect(56, y, 172, 1, GRID);
+        p.text(10, 114, &label[..end], 2, MUTED);
+        p.text(10 + end * 10, 114, unit, 2, MUTED);
+        p.text(10, 193, b"0", 2, MUTED);
+        for y in [118, 160, 203] {
+            p.rect(65, y, 166, 1, GRID);
         }
-        let color = match view.page {
-            2 => VOLTS,
-            3 => AMPS,
-            _ => WATTS,
-        };
+
         let mut previous: Option<(usize, usize)> = None;
-        for (index, sample) in view.graph_values.iter().enumerate() {
-            if let Some(value) = sample {
-                let x = 56 + index * 171 / 59;
-                let y =
-                    228 - (u64::from(*value).min(u64::from(max)) * 35 / u64::from(max)) as usize;
-                if let Some((px, py)) = previous {
-                    let dx = x - px;
-                    let mut last_y = py;
-                    for step in 1..=dx {
-                        let delta = (y as i32 - py as i32) * step as i32;
-                        let delta = match dx {
-                            2 => delta / 2,
-                            3 => delta / 3,
-                            _ => delta,
-                        };
-                        let current_y = (py as i32 + delta) as usize;
-                        p.rect(
-                            px + step,
-                            last_y.min(current_y),
-                            1,
-                            last_y.abs_diff(current_y) + 1,
-                            color,
-                        );
-                        last_y = current_y;
-                    }
-                } else {
-                    p.rect(x, y, 1, 1, color);
-                }
-                previous = Some((x, y));
-            } else {
+        for (index, height) in view.graph_heights.iter().enumerate() {
+            if *height == 255 {
                 previous = None;
+                continue;
             }
+            let x = 65 + index * 165 / 59;
+            let y = 203 - usize::from(*height);
+            if let Some((px, py)) = previous {
+                let dx = x - px;
+                let mut last_y = py;
+                for step in 1..=dx {
+                    let delta = (y as i32 - py as i32) * step as i32;
+                    let delta = match dx {
+                        2 => delta / 2,
+                        3 => delta / 3,
+                        _ => delta,
+                    };
+                    let current_y = (py as i32 + delta) as usize;
+                    p.rect(
+                        px + step,
+                        last_y.min(current_y),
+                        1,
+                        last_y.abs_diff(current_y) + 1,
+                        color,
+                    );
+                    last_y = current_y;
+                }
+            } else {
+                p.rect(x, y, 1, 1, color);
+            }
+            previous = Some((x, y));
         }
+    }
+}
+
+pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * STRIP_ROWS]) {
+    assert!(top < SIDE && top % STRIP_ROWS == 0);
+    pixels.fill(BG);
+    let mut p = Strip { pixels, top };
+    header(&mut p, view);
+    match view.page {
+        0 => overview(&mut p, view),
+        1 => energy(&mut p, view),
+        _ => graph(&mut p, view),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn graph_scale_rounds_up_and_preserves_gaps() {
+        assert_eq!(graph_scale(0), 1000);
+        assert_eq!(graph_scale(2000), 2000);
+        assert_eq!(graph_scale(2001), 2500);
+        assert_eq!(graph_scale(237_934), 250_000);
+        assert_eq!(graph_scale(1_731_123), 2_000_000);
+        let mut view = Overview::default();
+        view.set_page(2);
+        view.graph_values[0] = Some(2000);
+        view.graph_values[2] = Some(2000);
+        view.update_graph();
+        let mut pixels = [0; SIDE * STRIP_ROWS];
+        render_demo_strip(&view, 112, &mut pixels);
+        let x0 = 65;
+        let x2 = 65 + 2 * 165 / 59;
+        assert_eq!(pixels[(118 - 112) * SIDE + x0], WATTS);
+        assert_ne!(pixels[(118 - 112) * SIDE + x0 + 1], WATTS);
+        assert_eq!(pixels[(118 - 112) * SIDE + x2], WATTS);
+        assert_ne!(pixels[(119 - 112) * SIDE + x0], WATTS);
+    }
+
+    #[test]
+    fn low_power_does_not_fill_the_graph() {
+        let mut view = Overview::default();
+        view.set_page(2);
+        view.graph_values[59] = Some(5);
+        view.update_graph();
+        let mut pixels = [0; SIDE * STRIP_ROWS];
+        render_demo_strip(&view, 200, &mut pixels);
+        let x = 65 + 59 * 165 / 59;
+        assert_eq!(pixels[(203 - 200) * SIDE + x], WATTS);
+        assert_ne!(pixels[(202 - 200) * SIDE + x], WATTS);
+    }
+
+    #[test]
+    fn values_fit_their_cards_at_measurement_extremes() {
+        for (number, negative, width, preferred) in [
+            (52_830, false, 97, 3),
+            (32_768, true, 97, 3),
+            (1_731_133, true, 122, 4),
+            (1_731_133, false, 72, 2),
+            (999_999_999, false, 210, 3),
+        ] {
+            let mut any = false;
+            for top in (0..32).step_by(STRIP_ROWS) {
+                let mut pixels = [0; SIDE * STRIP_ROWS];
+                let mut p = Strip {
+                    pixels: &mut pixels,
+                    top,
+                };
+                value(
+                    &mut p,
+                    10,
+                    0,
+                    width,
+                    Some((number, negative)),
+                    b"W",
+                    WATTS,
+                    preferred,
+                );
+                for row in 0..STRIP_ROWS {
+                    assert!(
+                        pixels[row * SIDE..row * SIDE + 10]
+                            .iter()
+                            .all(|&px| px == 0)
+                    );
+                    assert!(
+                        pixels[row * SIDE + 10 + width..(row + 1) * SIDE]
+                            .iter()
+                            .all(|&px| px == 0)
+                    );
+                    any |= pixels[row * SIDE + 10..row * SIDE + 10 + width].contains(&WATTS);
+                }
+            }
+            assert!(any);
+        }
+    }
+
+    #[test]
+    fn time_labels_show_hours_minutes_and_seconds() {
+        assert_eq!(&time_text(0), b"00:00:00");
+        assert_eq!(&time_text(3661), b"01:01:01");
+        assert_eq!(&time_text(359_999), b"99:59:59");
     }
 }

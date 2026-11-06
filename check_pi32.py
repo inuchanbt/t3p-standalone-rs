@@ -71,6 +71,14 @@ def main():
         raise ValueError(f"Pi32v2 demo frame differs from the host preview. See {actual_path}")
     print(f"Pi32v2: {SIDE * SIDE:,} RGB pixels match ({cpu.steps:,} simulated instructions)")
     if args.measurement:
+        # Exercise the graph with a full minute of changing readings and gaps,
+        # rather than only the single point in the short measurement preview.
+        cpu.call(symbols["meter_next_page"], [])
+        cpu.call(symbols["meter_next_page"], [])
+        cpu.call(symbols["meter_snapshot"], [])
+        if render() != (ROOT / "build/demo-graph.ppm").read_bytes():
+            raise ValueError("Pi32v2 full-history graph differs from host preview")
+        print("Pi32v2 full-history graph frame matches")
         cpu.load_elf((out / "t3p-meter-demo.elf").read_bytes())
         cpu.sp = symbols["__runtime_stack_end"]
         for tick in range(0, 1001, 100):
@@ -80,9 +88,9 @@ def main():
             raise ValueError("Pi32v2 measurement input frame differs from host preview")
         cpu.call(symbols["meter_next_page"], [])
         cpu.call(symbols["meter_snapshot"], [])
-        if render() != (out / "preview-peaks.ppm").read_bytes():
-            raise ValueError("Pi32v2 peak frame differs from host preview")
-        for name in ("voltage", "current"):
+        if render() != (out / "preview-energy.ppm").read_bytes():
+            raise ValueError("Pi32v2 energy frame differs from host preview")
+        for name in ("power", "voltage", "current"):
             cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / f"preview-{name}.ppm").read_bytes():
@@ -92,7 +100,7 @@ def main():
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():
             raise ValueError("Pi32v2 missing-reading frame differs from host preview")
-        print("Pi32v2 measurement, peak, voltage, current and missing-reading frames match")
+        print("Pi32v2 overview, energy, power, voltage, current and missing-reading frames match")
         if args.pd_diagnostic:
             cpu.call(symbols["meter_pd_diagnostic"], [1, 0x04030291, 0x05])
             cpu.call(symbols["meter_snapshot"], [])

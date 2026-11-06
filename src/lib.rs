@@ -50,6 +50,8 @@ pub struct Overview {
     peaks: Option<(u16, u16, u32)>,
     page: u32,
     graph_values: [Option<u32>; 60],
+    graph_max: u32,
+    graph_heights: [u8; 60],
 }
 
 impl Default for Overview {
@@ -70,6 +72,8 @@ impl Overview {
             peaks: None,
             page: 0,
             graph_values: [None; 60],
+            graph_max: 1000,
+            graph_heights: [255; 60],
         }
     }
 
@@ -82,7 +86,24 @@ impl Overview {
     }
 
     pub fn set_page(&mut self, page: u32) {
-        self.page = page % 4;
+        self.page = page % 5;
+    }
+
+    fn update_graph(&mut self) {
+        self.graph_max = screen::graph_scale(
+            self.graph_values
+                .iter()
+                .copied()
+                .flatten()
+                .max()
+                .unwrap_or(0),
+        )
+        .max(1);
+        for (out, sample) in self.graph_heights.iter_mut().zip(self.graph_values.iter()) {
+            *out = sample
+                .map(|value| (u64::from(value) * 85 / u64::from(self.graph_max)) as u8)
+                .unwrap_or(255);
+        }
     }
 }
 
@@ -154,8 +175,8 @@ impl Meter {
         view.mwh = self.tracker.totals.milliwatt_hours();
         view.elapsed_seconds = (self.tracker.totals.elapsed_ms / 1000).min(359_999) as u32;
         let trace = match view.page {
-            2 => GraphTrace::Voltage,
-            3 => GraphTrace::Current,
+            3 => GraphTrace::Voltage,
+            4 => GraphTrace::Current,
             _ => GraphTrace::Power,
         };
         for (out, sample) in view
@@ -164,6 +185,9 @@ impl Meter {
             .zip(self.history.recent(GraphWindow::Min1))
         {
             *out = sample.map(|s| trace.value(s));
+        }
+        if view.page >= 2 {
+            view.update_graph();
         }
     }
 }
@@ -280,7 +304,14 @@ mod tests {
         );
         meter.sample(1000, None);
         let mut view = Overview::default();
-        for (page, expected) in [(0, 10000), (1, 10000), (2, 5000), (3, 2000), (4, 10000)] {
+        for (page, expected) in [
+            (0, 10000),
+            (1, 10000),
+            (2, 10000),
+            (3, 5000),
+            (4, 2000),
+            (5, 10000),
+        ] {
             view.set_page(page);
             meter.overview(&mut view);
             assert_eq!(view.graph_values[59], Some(expected));

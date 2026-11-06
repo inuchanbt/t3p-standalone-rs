@@ -63,7 +63,7 @@ unsafe extern "C" fn meter_reset_totals() {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_next_page() {
-    unsafe { *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % 4 };
+    unsafe { *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % 5 };
 }
 
 #[unsafe(no_mangle)]

@@ -13,18 +13,27 @@ fn main() -> io::Result<()> {
     let measurement = flags.iter().any(|x| x == "--measurement");
     let missing = flags.iter().any(|x| x == "--missing");
     let pd = flags.iter().any(|x| x == "--pd");
-    let peaks = flags.iter().any(|x| x == "--peaks");
+    let energy = flags.iter().any(|x| x == "--energy");
+    let power = flags.iter().any(|x| x == "--power");
     let voltage = flags.iter().any(|x| x == "--voltage");
     let current = flags.iter().any(|x| x == "--current");
+    let extreme = flags.iter().any(|x| x == "--extreme");
     let mut output = BufWriter::new(File::create(path)?);
     let mut meter = Meter::new(0);
     if measurement {
         for tick in (0..=1_000).step_by(100) {
             meter.sample(
                 tick,
-                Some(Reading {
-                    mv: 5000,
-                    ma: -2000,
+                Some(if extreme {
+                    Reading {
+                        mv: 52_830,
+                        ma: i16::MIN,
+                    }
+                } else {
+                    Reading {
+                        mv: 5000,
+                        ma: -2000,
+                    }
                 }),
             );
         }
@@ -37,12 +46,14 @@ fn main() -> io::Result<()> {
         }
     }
     let mut view = Overview::default();
-    view.set_page(if peaks {
+    view.set_page(if energy {
         1
-    } else if voltage {
+    } else if power {
         2
-    } else if current {
+    } else if voltage {
         3
+    } else if current {
+        4
     } else {
         0
     });
