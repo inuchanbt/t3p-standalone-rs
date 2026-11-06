@@ -25,9 +25,51 @@ mod tests {
         view.graph_values[59] = Some(5);
         let mut pixels = [0; SIDE * STRIP_ROWS];
         render_demo_strip(&view, 224, &mut pixels);
-        let x = 13 + 59 * 214 / 60;
+        let x = 56 + 59 * 171 / 59;
         assert_eq!(pixels[(228 - 224) * SIDE + x], WATTS);
         assert_ne!(pixels[(227 - 224) * SIDE + x], WATTS);
+    }
+
+    #[test]
+    fn graph_scale_rounds_up_and_preserves_gaps() {
+        assert_eq!(graph_scale(0), 1000);
+        assert_eq!(graph_scale(2000), 2000);
+        assert_eq!(graph_scale(2001), 2500);
+        assert_eq!(graph_scale(237_934), 250_000);
+        assert_eq!(graph_scale(1_731_123), 2_000_000);
+        let mut view = Overview::default();
+        view.graph_values[0] = Some(2000);
+        view.graph_values[2] = Some(2000);
+        let mut pixels = [0; SIDE * STRIP_ROWS];
+        render_demo_strip(&view, 192, &mut pixels);
+        let x0 = 56;
+        let x2 = 56 + 2 * 171 / 59;
+        assert_eq!(pixels[(193 - 192) * SIDE + x0], WATTS);
+        assert_ne!(pixels[(193 - 192) * SIDE + x0 + 1], WATTS);
+        assert_eq!(pixels[(193 - 192) * SIDE + x2], WATTS);
+        assert_ne!(pixels[(194 - 192) * SIDE + x0], WATTS);
+    }
+}
+
+// Round to an easy-to-read upper limit, retaining a 1-unit minimum.
+fn graph_scale(max: u32) -> u32 {
+    let mut unit = 1000u32;
+    loop {
+        for candidate in [
+            unit,
+            unit.saturating_mul(2),
+            unit.saturating_mul(5) / 2,
+            unit.saturating_mul(5),
+        ] {
+            if max <= candidate {
+                return candidate;
+            }
+        }
+        let next = unit.saturating_mul(10);
+        if next == unit {
+            return u32::MAX;
+        }
+        unit = next;
     }
 }
 
@@ -261,27 +303,71 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
     }
     p.rect(12, 191, 216, 39, CARD);
     if top >= 184 {
-        for y in [191, 209, 229] {
-            p.rect(12, y, 216, 1, GRID);
+        let max = graph_scale(
+            view.graph_values
+                .iter()
+                .copied()
+                .flatten()
+                .max()
+                .unwrap_or(0),
+        )
+        .max(1);
+        let unit = match view.page {
+            2 => b"V",
+            3 => b"A",
+            _ => b"W",
+        };
+        let label = milli(u64::from(max), false, &mut digits);
+        let mut end = label.len();
+        while end > 0 && label[end - 1] == b'0' {
+            end -= 1;
         }
-        let max = view
-            .graph_values
-            .iter()
-            .copied()
-            .flatten()
-            .max()
-            // Minimum full scale: 1 W, 1 V, or 1 A, depending on the trace.
-            .unwrap_or(1000)
-            .max(1000);
+        if end > 0 && label[end - 1] == b'.' {
+            end -= 1;
+        }
+        p.text(12, 192, &label[..end], 2, MUTED);
+        p.text(12 + end * 8, 192, unit, 2, MUTED);
+        p.text(12, 219, b"0", 2, MUTED);
+        for y in [193, 210, 228] {
+            p.rect(56, y, 172, 1, GRID);
+        }
+        let color = match view.page {
+            2 => VOLTS,
+            3 => AMPS,
+            _ => WATTS,
+        };
+        let mut previous: Option<(usize, usize)> = None;
         for (index, sample) in view.graph_values.iter().enumerate() {
-            if let Some(mw) = sample {
-                let height = (*mw * 37 / max).max(1) as usize;
-                let color = match view.page {
-                    2 => VOLTS,
-                    3 => AMPS,
-                    _ => WATTS,
-                };
-                p.rect(13 + index * 214 / 60, 229 - height, 2, height, color);
+            if let Some(value) = sample {
+                let x = 56 + index * 171 / 59;
+                let y =
+                    228 - (u64::from(*value).min(u64::from(max)) * 35 / u64::from(max)) as usize;
+                if let Some((px, py)) = previous {
+                    let dx = x - px;
+                    let mut last_y = py;
+                    for step in 1..=dx {
+                        let delta = (y as i32 - py as i32) * step as i32;
+                        let delta = match dx {
+                            2 => delta / 2,
+                            3 => delta / 3,
+                            _ => delta,
+                        };
+                        let current_y = (py as i32 + delta) as usize;
+                        p.rect(
+                            px + step,
+                            last_y.min(current_y),
+                            1,
+                            last_y.abs_diff(current_y) + 1,
+                            color,
+                        );
+                        last_y = current_y;
+                    }
+                } else {
+                    p.rect(x, y, 1, 1, color);
+                }
+                previous = Some((x, y));
+            } else {
+                previous = None;
             }
         }
     }
