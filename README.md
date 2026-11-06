@@ -26,6 +26,8 @@ In a later test with a USB-C breakout inserted between the source cable and T3P,
 
 With a Framework FRANDVCH00 source, Sumitomo Electric DC-010338 cable, and ASD-PD31 load, photographs show current readings of 1.002 / 1.000 A, 1.500 / 1.500 A, and 3.007 / 3.000 A (T3P / ASD-PD31) at a fixed 5 V request. At 20 V and 48 V fixed requests, the readings were 5.011 / 5.000 A and 5.012 / 5.000 A; the 48 V photograph shows 47.435 V and 237.754 W on T3P. HID was powered through an isolator connected to a PC. These are comparisons with another instrument, not calibration; voltage measurement points can differ. The ASD-PD31 requests the PD contracts. Accumulation timing and energy accuracy remain unverified on hardware.
 
+In an approximately 8 min 35 s continuous 1 A test, T3P displayed 0.143 Ah and 0.724 Wh; the photographed instantaneous values were 1.001 A and 5.069 W. The result is consistent with the approximate duration and load, although the initial timing, load variations, display refresh and calibration limit precision. The graph now uses a minimum 1 W full-scale so milliwatt-level noise does not fill it; numeric readings and integration are unchanged. This display change has not yet been tested on the device.
+
 ## PC preview
 
 Install Rust 2024 and Cargo, then run:

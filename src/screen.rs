@@ -15,6 +15,22 @@ struct Strip<'a> {
     top: usize,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn low_power_noise_does_not_fill_graph() {
+        let mut view = Overview::default();
+        view.power_mw[59] = Some(5);
+        let mut pixels = [0; SIDE * STRIP_ROWS];
+        render_demo_strip(&view, 224, &mut pixels);
+        let x = 13 + 59 * 214 / 60;
+        assert_eq!(pixels[(228 - 224) * SIDE + x], WATTS);
+        assert_ne!(pixels[(227 - 224) * SIDE + x], WATTS);
+    }
+}
+
 impl Strip<'_> {
     fn rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: u16) {
         let left = x.min(SIDE);
@@ -195,8 +211,9 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
             .copied()
             .flatten()
             .max()
-            .unwrap_or(1)
-            .max(1);
+            // Keep milliwatt-level zero noise from filling the entire graph.
+            .unwrap_or(1000)
+            .max(1000);
         for (index, sample) in view.power_mw.iter().enumerate() {
             if let Some(mw) = sample {
                 let height = (*mw * 37 / max).max(1) as usize;
