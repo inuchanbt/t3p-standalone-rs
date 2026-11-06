@@ -47,6 +47,8 @@ pub struct Overview {
     mah: u64,
     mwh: u64,
     elapsed_seconds: u32,
+    peaks: Option<(u16, u16, u32)>,
+    show_peaks: bool,
     power_mw: [Option<u32>; 60],
 }
 
@@ -65,6 +67,8 @@ impl Overview {
             mah: 0,
             mwh: 0,
             elapsed_seconds: 0,
+            peaks: None,
+            show_peaks: false,
             power_mw: [None; 60],
         }
     }
@@ -76,6 +80,10 @@ impl Overview {
     pub fn set_pd_diagnostic(&mut self, registers: Option<(u32, u8)>) {
         self.pd_diagnostic = Some(registers);
     }
+
+    pub fn set_show_peaks(&mut self, show: bool) {
+        self.show_peaks = show;
+    }
 }
 
 pub struct Meter {
@@ -84,6 +92,7 @@ pub struct Meter {
     reading: Option<Reading>,
     last_tick: u32,
     now_ms: u64,
+    peaks: Option<(u16, u16, u32)>,
 }
 
 impl Meter {
@@ -98,6 +107,7 @@ impl Meter {
             reading: None,
             last_tick: tick,
             now_ms: 0,
+            peaks: None,
         }
     }
 
@@ -107,6 +117,14 @@ impl Meter {
         self.now_ms += u64::from(tick.wrapping_sub(self.last_tick));
         self.last_tick = tick;
         self.reading = reading;
+        if let Some(r) = reading {
+            let (v, a, w) = self.peaks.unwrap_or((0, 0, 0));
+            self.peaks = Some((
+                v.max(r.mv),
+                a.max(r.ma.unsigned_abs()),
+                w.max(r.magnitude_mw()),
+            ));
+        }
         self.tracker.sample(
             self.now_ms,
             reading.map(|r| (u32::from(r.mv), i32::from(r.ma))),
@@ -126,10 +144,12 @@ impl Meter {
 
     pub fn reset_totals(&mut self) {
         self.tracker.reset();
+        self.peaks = None;
     }
 
     pub fn overview(&self, view: &mut Overview) {
         view.reading = self.reading;
+        view.peaks = self.peaks;
         view.mah = self.tracker.totals.milliamp_hours();
         view.mwh = self.tracker.totals.milliwatt_hours();
         view.elapsed_seconds = (self.tracker.totals.elapsed_ms / 1000).min(359_999) as u32;
@@ -216,5 +236,30 @@ mod tests {
         meter.sample(u32::MAX, None);
         meter.overview(&mut view);
         assert_eq!(view.elapsed_seconds, 359_999);
+    }
+
+    #[test]
+    fn peaks_use_independent_magnitudes_and_reset_without_losing_reading() {
+        let mut meter = Meter::new(0);
+        meter.sample(
+            0,
+            Some(Reading {
+                mv: 5000,
+                ma: -3000,
+            }),
+        );
+        meter.sample(100, Some(Reading { mv: 20000, ma: 500 }));
+        meter.sample(200, None);
+        let mut view = Overview::default();
+        meter.overview(&mut view);
+        assert_eq!(view.peaks, Some((20000, 3000, 15000)));
+        meter.sample(300, Some(Reading { mv: 5000, ma: 1000 }));
+        meter.reset_totals();
+        meter.overview(&mut view);
+        assert_eq!(view.peaks, None);
+        assert_eq!(view.reading.map(|r| (r.mv, r.ma)), Some((5000, 1000)));
+        meter.sample(400, Some(Reading { mv: 5000, ma: 1000 }));
+        meter.overview(&mut view);
+        assert_eq!(view.peaks, Some((5000, 1000, 5000)));
     }
 }

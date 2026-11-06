@@ -139,7 +139,17 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
     assert!(top < SIDE && top % STRIP_ROWS == 0);
     pixels.fill(BG);
     let mut p = Strip { pixels, top };
-    p.text(12, 12, b"T3P METER", 3, TEXT);
+    p.text(
+        12,
+        12,
+        if view.show_peaks {
+            b"T3P MAX  "
+        } else {
+            b"T3P METER"
+        },
+        3,
+        TEXT,
+    );
     p.rect(172, 9, 56, 22, WATTS);
     p.text(
         179,
@@ -161,19 +171,29 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
     {
         let y = 45 + index * 27;
         p.text(21, y + 2, &[label], 3, color);
-        if let Some(reading) = view.reading {
-            let value = match index {
-                0 => u64::from(reading.mv),
-                1 => u64::from(reading.ma.unsigned_abs()),
-                _ => u64::from(reading.magnitude_mw()),
-            };
-            p.text(
-                54,
-                y,
-                milli(value, index > 0 && reading.ma < 0, &mut digits),
-                4,
-                color,
-            );
+        let display = if view.show_peaks {
+            view.peaks.map(|(v, a, w)| {
+                (
+                    match index {
+                        0 => u64::from(v),
+                        1 => u64::from(a),
+                        _ => u64::from(w),
+                    },
+                    false,
+                )
+            })
+        } else {
+            view.reading.map(|reading| {
+                let value = match index {
+                    0 => u64::from(reading.mv),
+                    1 => u64::from(reading.ma.unsigned_abs()),
+                    _ => u64::from(reading.magnitude_mw()),
+                };
+                (value, index > 0 && reading.ma < 0)
+            })
+        };
+        if let Some((value, negative)) = display {
+            p.text(54, y, milli(value, negative, &mut digits), 4, color);
         } else {
             p.text(54, y, b"---", 4, MUTED);
         }
@@ -191,9 +211,25 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
         if let Some((first, last)) = registers {
             let digits = b"0123456789ABCDEF";
             for index in 0..5 {
-                let byte = if index == 4 { last } else { (first >> (index * 8)) as u8 };
-                p.text(36 + index * 24, 176, &digits[(byte >> 4) as usize..][..1], 2, MUTED);
-                p.text(44 + index * 24, 176, &digits[(byte & 15) as usize..][..1], 2, MUTED);
+                let byte = if index == 4 {
+                    last
+                } else {
+                    (first >> (index * 8)) as u8
+                };
+                p.text(
+                    36 + index * 24,
+                    176,
+                    &digits[(byte >> 4) as usize..][..1],
+                    2,
+                    MUTED,
+                );
+                p.text(
+                    44 + index * 24,
+                    176,
+                    &digits[(byte & 15) as usize..][..1],
+                    2,
+                    MUTED,
+                );
             }
         } else {
             p.text(36, 176, b"-- -- -- -- --", 2, MUTED);

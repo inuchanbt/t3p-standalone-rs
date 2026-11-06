@@ -19,6 +19,7 @@ static mut PD_PRESENT: bool = false;
 static mut PD_VALID: bool = false;
 static mut PD_FIRST: u32 = 0;
 static mut PD_LAST: u8 = 0;
+static mut SHOW_PEAKS: bool = false;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_demo_sample(tick: u32) {
@@ -61,10 +62,16 @@ unsafe extern "C" fn meter_reset_totals() {
 }
 
 #[unsafe(no_mangle)]
+unsafe extern "C" fn meter_toggle_peaks() {
+    unsafe { *(&raw mut SHOW_PEAKS) = !*(&raw const SHOW_PEAKS) };
+}
+
+#[unsafe(no_mangle)]
 unsafe extern "C" fn meter_snapshot() {
     unsafe {
         let view = &mut *(&raw mut VIEW);
         (&*(&raw const METER)).overview(view);
+        view.set_show_peaks(*(&raw const SHOW_PEAKS));
         if *(&raw const UNCALIBRATED) {
             view.set_uncalibrated();
         }

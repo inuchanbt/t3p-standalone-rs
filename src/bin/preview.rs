@@ -13,6 +13,7 @@ fn main() -> io::Result<()> {
     let measurement = flags.iter().any(|x| x == "--measurement");
     let missing = flags.iter().any(|x| x == "--missing");
     let pd = flags.iter().any(|x| x == "--pd");
+    let peaks = flags.iter().any(|x| x == "--peaks");
     let mut output = BufWriter::new(File::create(path)?);
     let mut meter = Meter::new(0);
     if measurement {
@@ -35,6 +36,7 @@ fn main() -> io::Result<()> {
     }
     let mut view = Overview::default();
     meter.overview(&mut view);
+    view.set_show_peaks(peaks);
     if measurement {
         view.set_uncalibrated();
     }

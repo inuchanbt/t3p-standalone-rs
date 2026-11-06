@@ -78,11 +78,16 @@ def main():
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-measurement.ppm").read_bytes():
             raise ValueError("Pi32v2 measurement input frame differs from host preview")
+        cpu.call(symbols["meter_toggle_peaks"], [])
+        cpu.call(symbols["meter_snapshot"], [])
+        if render() != (out / "preview-peaks.ppm").read_bytes():
+            raise ValueError("Pi32v2 peak frame differs from host preview")
+        cpu.call(symbols["meter_toggle_peaks"], [])
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():
             raise ValueError("Pi32v2 missing-reading frame differs from host preview")
-        print("Pi32v2 measurement and missing-reading frames match")
+        print("Pi32v2 measurement, peak and missing-reading frames match")
         if args.pd_diagnostic:
             cpu.call(symbols["meter_pd_diagnostic"], [1, 0x04030291, 0x05])
             cpu.call(symbols["meter_snapshot"], [])

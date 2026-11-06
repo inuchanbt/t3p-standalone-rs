@@ -2,6 +2,7 @@
 #include "t3p_boot.h"
 #include "t3p_bsp.h"
 #include "t3p_signal.h"
+#include "t3p_button.h"
 #ifdef T3P_MEASURE
 #include "t3p_meter.h"
 #endif
@@ -15,14 +16,14 @@ void meter_demo_sample(uint32_t tick);
 void meter_live_sample(uint32_t tick, uint32_t valid, uint32_t mv, int32_t ma);
 void meter_pd_diagnostic(uint32_t valid, uint32_t first_four, uint32_t last);
 void meter_reset_totals(void);
+void meter_toggle_peaks(void);
 void meter_snapshot(void);
 void meter_demo_render(uint32_t top, uint16_t pixels[PANEL_SIDE * STRIP_ROWS]);
 
 static struct t3p_bsp board;
 static uint16_t strip[PANEL_SIDE * STRIP_ROWS];
 static volatile uint32_t startup_cookie = 0x54335044u;
-static unsigned raw_key, stable_key;
-static uint32_t key_changed;
+static struct t3p_button button;
 
 static void init_key(void)
 {
@@ -42,18 +43,9 @@ static unsigned key_pressed(void)
 
 static unsigned poll_key(uint32_t now)
 {
-    unsigned key = key_pressed();
-    if (key != raw_key) {
-        raw_key = key;
-        key_changed = now;
-    }
-    if (key != stable_key && now - key_changed >= 30) {
-        stable_key = key;
-        if (key) {
-            meter_reset_totals();
-            return 1;
-        }
-    }
+    enum t3p_button_event event = t3p_button_poll(&button, now, key_pressed());
+    if (event == T3P_BUTTON_SHORT) { meter_reset_totals(); return 1; }
+    if (event == T3P_BUTTON_LONG) { meter_toggle_peaks(); return 1; }
     return 0;
 }
 
@@ -80,8 +72,7 @@ void t3p_board_start(void)
     uint32_t pd_at = start - 2000;
 #endif
 #endif
-    raw_key = stable_key = key_pressed();
-    key_changed = start;
+    t3p_button_init(&button, start, key_pressed());
     unsigned redraw = 0;
     for (;;) {
         uint32_t now = t3p_bsp_millis(&board);
