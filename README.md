@@ -6,9 +6,11 @@ Experimental Rust firmware for the ATORCH T3P USB power meter, building on [KWS-
 
 ## Status
 
-The current build is a **startup and display demo with simulated readings**. It displays voltage, signed current and power, charge and energy totals, and a 60-second power graph. PA11 resets the totals. Real measurement, USB PD and charger protocols remain to be implemented. The Rust demo has not yet been verified on a physical T3P.
+The current build is a **startup and display demo with simulated readings**. It displays voltage, signed current and power, charge and energy totals, and a 60-second power graph. A PA11 total reset is implemented. Real measurement, USB PD and charger protocols remain to be implemented.
 
-The startup and display approach was previously tested on T3P hardware. The Pi32v2 machine code was compared with the PC renderer in an instruction simulator for one 62-second demo sequence. All 57,600 pixels matched. Physical behavior and other inputs need further verification.
+On 2026-11-06 the user reported flashing the demo to a T3P and supplied photographs showing the demo screen, two different simulated readings, changing totals and graph history. The reported test used the prepared demo image, whose local SHA-256 is `b557f5fd89697917a11d07538279e0a6b78f83325ad2aa23b85af3db35f4f0ef`. The photographs do not verify the button, exact timing, cold boot, or real measurement.
+
+The Pi32v2 machine code was also compared with the PC renderer in an instruction simulator for one 62-second demo sequence. All 57,600 pixels matched. Other inputs need further verification.
 
 ## PC preview
 
