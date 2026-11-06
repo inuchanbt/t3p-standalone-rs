@@ -10,7 +10,7 @@ The current build is a **startup and display demo with simulated readings**. It 
 
 On 2026-11-06 the user reported flashing the demo to a T3P and supplied photographs showing the demo screen, two different simulated readings, changing totals and graph history. The reported test used the prepared demo image, whose local SHA-256 is `b557f5fd89697917a11d07538279e0a6b78f83325ad2aa23b85af3db35f4f0ef`. The photographs do not verify the button, exact timing, cold boot, or real measurement.
 
-The user subsequently reported that pressing the left button did not show zero totals. The current code polls the button between display strips and requests a fresh snapshot after a detected reset. This change has a host-side regression test and awaits a physical test.
+The user subsequently reported difficulty seeing the zero totals. In a later video, both Ah and Wh are visibly `0.000` after the button press, then begin increasing again. The video does not establish which image revision was installed. The current code polls the button between display strips and requests a fresh snapshot after a detected reset; that specific revision still needs confirmation on the device.
 
 The Pi32v2 machine code was also compared with the PC renderer in an instruction simulator for one 62-second demo sequence. All 57,600 pixels matched. Other inputs need further verification.
 
