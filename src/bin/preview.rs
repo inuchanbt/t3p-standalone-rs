@@ -5,7 +5,8 @@ use std::{
     io::{self, BufWriter, Write},
 };
 use t3p_standalone::{
-    Meter, Overview, Reading, SIDE, STRIP_ROWS, SourceCaps, demo_reading, render_demo_strip,
+    EprCapture, EprEvent, Meter, Overview, Reading, SIDE, STRIP_ROWS, SourceCaps, demo_reading,
+    render_demo_strip,
 };
 
 fn main() -> io::Result<()> {
@@ -18,6 +19,9 @@ fn main() -> io::Result<()> {
     let profiles_ui = flags.iter().any(|x| x == "--profiles-ui");
     let profiles_page = flags.iter().any(|x| x == "--profiles-page");
     let profiles_offer = flags.iter().any(|x| x == "--profiles-offer");
+    let epr_page = flags.iter().any(|x| x == "--epr-page");
+    let epr_offer = flags.iter().any(|x| x == "--epr-offer");
+    let epr_partial = flags.iter().any(|x| x == "--epr-partial");
     let energy = flags.iter().any(|x| x == "--energy");
     let power = flags.iter().any(|x| x == "--power");
     let voltage = flags.iter().any(|x| x == "--voltage");
@@ -73,10 +77,32 @@ fn main() -> io::Result<()> {
             .unwrap()
             .expect("test source offer");
         view.set_pd_profiles(2, 1, Some(caps));
-    } else if profiles_ui || profiles_page {
+    } else if profiles_ui || profiles_page || epr_page || epr_offer || epr_partial {
         view.set_pd_profiles(0, 0, None);
     }
-    view.set_page(if profiles_page || profiles_offer {
+    if epr_offer || epr_partial {
+        let parse = |text: &str| -> Vec<u8> {
+            text.split_whitespace()
+                .map(|hex| u8::from_str_radix(hex, 16).unwrap())
+                .collect()
+        };
+        let first = parse(include_str!("../../tests/epr_chunk0.hex"));
+        let second = parse(include_str!("../../tests/epr_chunk1.hex"));
+        let mut capture = EprCapture::new();
+        if epr_offer {
+            assert!(matches!(capture.push(&first, 100), Ok(EprEvent::Started)));
+        }
+        let caps = match capture.push(&second, 120).unwrap() {
+            EprEvent::Complete(caps) if epr_offer => caps,
+            EprEvent::Partial(caps) if epr_partial => caps,
+            _ => panic!("unexpected test EPR frame"),
+        };
+        view.set_pd_profiles(if epr_offer { 2 } else { 10 }, 1, None);
+        view.set_epr_profiles(1, Some(caps));
+    }
+    view.set_page(if epr_page || epr_offer || epr_partial {
+        6
+    } else if profiles_page || profiles_offer {
         5
     } else if energy {
         1

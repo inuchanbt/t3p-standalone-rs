@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-use crate::pd::{PROFILES_PAGE, Pdo, Profiles};
+use crate::pd::{EPR_PAGE, PROFILES_PAGE, Pdo, Profiles};
 use crate::{Overview, SIDE, STRIP_ROWS};
 
 const BG: u16 = 0x0000;
@@ -214,29 +214,18 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         3 => (b"GRAPH", VOLTS),
         4 => (b"GRAPH", AMPS),
         PROFILES_PAGE => (b"PD PROFILES", WATTS),
+        EPR_PAGE => (b"EPR OFFER", PURPLE),
         _ => (b"GRAPH", WATTS),
     };
     p.text(8, 8, title, 2, color);
-    for index in 0..5 {
+    let tabs = if view.pd_profiles.is_some() { 7 } else { 5 };
+    for index in 0..tabs {
         p.rect(
-            120 + index * 10,
+            120 + index * if tabs == 7 { 8 } else { 10 },
             10,
-            6,
+            if tabs == 7 { 5 } else { 6 },
             10,
             if view.page as usize == index {
-                color
-            } else {
-                GRID
-            },
-        );
-    }
-    if view.pd_profiles.is_some() {
-        p.rect(
-            170,
-            10,
-            6,
-            10,
-            if view.page == PROFILES_PAGE {
                 color
             } else {
                 GRID
@@ -260,7 +249,7 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         8,
         226,
         match view.page {
-            PROFILES_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
+            PROFILES_PAGE | EPR_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
             2..PROFILES_PAGE => b"TAP NEXT 2X RANGE HOLD RESET",
             _ => b"TAP NEXT  HOLD RESET",
         },
@@ -374,7 +363,7 @@ fn overview(p: &mut Strip<'_>, view: &Overview) {
         }
     } else if let Some(profiles) = view.pd_profiles {
         p.text(14, 196, b"PD PROFILES", 1, AMPS);
-        p.text(84, 196, profiles.status(), 1, TEXT);
+        p.text(84, 196, profiles.status(profiles.mode), 1, TEXT);
     } else {
         p.text(14, 196, b"PD NOT AVAILABLE", 1, MUTED);
     }
@@ -400,14 +389,19 @@ fn pd_number(
 
 fn profiles(p: &mut Strip<'_>, pd: Profiles) {
     p.text(8, 36, b"SPR OFFER", 1, WATTS);
-    p.text(94, 36, pd.status(), 1, TEXT);
-    if pd.cc != 0 {
+    p.text(94, 36, pd.status(0), 1, TEXT);
+    if pd.mode == 0 && pd.cc != 0 {
         p.text(215, 36, if pd.cc == 1 { b"CC1" } else { b"CC2" }, 1, AMPS);
     }
     let Some(caps) = pd.caps else {
         p.outline(8, 54, 224, 142, GRID);
         p.text(18, 70, b"RX ONLY", 2, WATTS);
-        let (message, hint): (&[u8], &[u8]) = match pd.state {
+        let state = if pd.mode == 0 || matches!(pd.state, 4 | 5 | 9) {
+            pd.state
+        } else {
+            0
+        };
+        let (message, hint): (&[u8], &[u8]) = match state {
             0 => (b"2X TO START ON CC1", b"USE A 5V TEST SETUP"),
             1 => (
                 b"WAITING FOR SOURCE CAPABILITIES",
@@ -464,7 +458,7 @@ fn profiles(p: &mut Strip<'_>, pd: Profiles) {
                     pd_number(p, end, y + 4, ma_above_15v, b"A", 1, AMPS);
                 }
             }
-            Pdo::Raw(word) => {
+            Pdo::Raw(_) | Pdo::EprAvs { .. } => {
                 p.text(26, y + 4, b"RAW", 1, MUTED);
                 let digits = b"0123456789ABCDEF";
                 let mut hex = [0; 8];
@@ -482,6 +476,84 @@ fn profiles(p: &mut Strip<'_>, pd: Profiles) {
             b"AVS A: 9-15V / 15-20V"
         } else {
             b"SOURCE ADVERTISED VALUES"
+        },
+        1,
+        MUTED,
+    );
+}
+
+fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
+    p.text(8, 36, b"EPR PDO 8-11", 1, PURPLE);
+    p.text(94, 36, pd.status(1), 1, TEXT);
+    if pd.mode == 1 && pd.cc != 0 {
+        p.text(215, 36, if pd.cc == 1 { b"CC1" } else { b"CC2" }, 1, AMPS);
+    }
+    let Some(caps) = pd.epr else {
+        p.outline(8, 54, 224, 142, GRID);
+        p.text(18, 70, b"RX ONLY", 2, PURPLE);
+        let state = if pd.mode == 1 || matches!(pd.state, 4 | 5 | 9) {
+            pd.state
+        } else {
+            0
+        };
+        let (message, hint): (&[u8], &[u8]) = match state {
+            1 => (b"WAITING FOR EPR OFFER", b"QUERY FROM A PD SINK"),
+            3 => (b"NO EPR OFFER RECEIVED", b"2X TO TRY THE OTHER CC"),
+            4 | 5 | 9 => (b"CAPTURE UNAVAILABLE", b"POWER CYCLE TO RETRY"),
+            _ => (b"2X TO LISTEN FOR EPR OFFER", b"QUERY FROM A PD SINK"),
+        };
+        p.text(18, 108, message, 1, TEXT);
+        p.text(18, 129, hint, 1, MUTED);
+        return;
+    };
+    if caps.rows().is_empty() {
+        p.text(16, 70, b"NO EPR PDO IN OFFER", 1, MUTED);
+    }
+    for (index, &word) in caps.rows().iter().enumerate() {
+        let top = 54 + index * 30;
+        if top >= p.top + STRIP_ROWS || top + 25 <= p.top {
+            continue;
+        }
+        p.rect(8, top, 224, 25, PANEL);
+        let y = top + 5;
+        let numbers: [&[u8]; 4] = [b"8", b"9", b"10", b"11"];
+        p.text(12, y + 4, numbers[index], 1, MUTED);
+        match Pdo::decode(word) {
+            Pdo::Fixed { mv, ma } if word != 0 => {
+                p.text(27, y + 4, b"FIX", 1, MUTED);
+                pd_number(p, 52, y, mv, b"V", 2, VOLTS);
+                pd_number(p, 124, y, ma, b"A", 2, AMPS);
+                pd_number(p, 192, y + 4, mv * ma / 1000, b"W", 1, WATTS);
+            }
+            Pdo::EprAvs {
+                min_mv,
+                max_mv,
+                pdp_w,
+            } => {
+                p.text(27, y + 4, b"AVS", 1, MUTED);
+                let end = pd_number(p, 52, y + 4, min_mv, b"-", 1, VOLTS);
+                pd_number(p, end, y + 4, max_mv, b"V", 1, VOLTS);
+                p.text(124, y + 4, b"PDP", 1, MUTED);
+                pd_number(p, 146, y, pdp_w * 1000, b"W", 2, WATTS);
+            }
+            _ => {
+                p.text(27, y + 4, b"RAW", 1, MUTED);
+                let digits = b"0123456789ABCDEF";
+                let mut hex = [0; 8];
+                for (i, digit) in hex.iter_mut().enumerate() {
+                    *digit = digits[((word >> (28 - i * 4)) & 15) as usize];
+                }
+                p.text(52, y, &hex, 2, TEXT);
+            }
+        }
+    }
+    p.text(
+        8,
+        204,
+        if caps.complete {
+            b"SOURCE ADVERTISED VALUES"
+        } else {
+            b"CHUNK 1 ONLY - PARTIAL"
         },
         1,
         MUTED,
@@ -602,6 +674,11 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
         PROFILES_PAGE => {
             if let Some(pd) = view.pd_profiles {
                 profiles(&mut p, pd);
+            }
+        }
+        EPR_PAGE => {
+            if let Some(pd) = view.pd_profiles {
+                epr_profiles(&mut p, pd);
             }
         }
         _ => graph(&mut p, view),

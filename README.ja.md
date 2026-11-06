@@ -6,7 +6,7 @@ ATORCH T3P USB 電力計向けの実験的な Rust ファームウェアです�
 
 ## 現在の状態
 
-標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近1・2・5・10分の電力・電圧・電流を表示します。別ビルドの **PD PROFILES** では電源が広告した SPR の PDO を受信・表示できます。
+標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近1・2・5・10分の電力・電圧・電流を表示します。別ビルドでは電源が提示した SPR と EPR の PDO を受信・表示できます。
 
 ENERGY 画面の時間は起動時または積算リセット後の経過時間です。測定値が取得できない間や電流ゼロの間も進みます。旧画面の実機で時間が進み Ah・Wh とともにリセットされることを確認しました。表示は `99:59:59` で止まり（実機未確認）、積算値と時間は再起動後に復元されません。PD 診断版では OVERVIEW の PROTOCOL 欄に生の診断値を表示します。
 
@@ -16,9 +16,11 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 
 ## PD PROFILES 試験版
 
-`--pd-profiles` でビルドすると、電流グラフの次に **PD PROFILES** が出ます。左ボタンのダブル押しで CC1 の受信を10秒間待ち、5 V の試験構成で電源をつなぎ直します。HID から別給電すると、測定側の電源をつなぐ前に受信を開始できます。ダブル押しするたびに、受信対象をもう一方の CC に切り替えます。最初に CRC が一致した SPR の Source_Capabilities を表示し、再取得または電源断まで RAM に保持します。
+`--pd-profiles` でビルドすると、電流グラフの次に **PD PROFILES** が出ます。左ボタンのダブル押しで CC1 の受信を10秒間待ち、5 V の試験構成で電源をつなぎ直します。HID から別給電すると、測定側の電源をつなぐ前に受信を開始できます。同じ画面でダブル押しするたびに受信対象の CC を切り替えます。最初に CRC が一致した SPR の Source_Capabilities を表示し、再取得または電源断まで RAM に保持します。SPR の5件の PDO は T3P 実機で受信・表示できました。
 
-固定 PDO は電圧・最大電流・計算した電力、PPS は電圧範囲と電流上限を表示します。SPR AVS は 9～15 V の電流上限に加え、対応していれば 15～20 V の上限も表示します。それ以外の PDO は生の16進数で表示します。一覧の値は電源が提示した値です。起動時の CC 終端を保ち、PD 送信と自動 GoodCRC を無効のまま受信します。EPR の PDO、成立した契約、充電器への問い合わせ、ケーブル識別は今後の対象です。受信、CC の経路、I²C のタイミングは実機確認待ちです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
+次の **EPR OFFER** ではダブル押しで30秒間受信を待ちます。5 V から始め、接続した ASD-PD31 などの PD シンクから EPR 情報を問い合わせるか EPR モードに入ります。画面を切り替えた直後の取得では直前に選択した CC を使い、同じ画面で再度ダブル押しすると CC が切り替わります。EPR_Source_Capabilities は通常2つのチャンクに分かれます。両方の CRC が一致し順に受信できたら `CAPTURED`、チャンク1だけを受信したときはその EPR PDO を `PARTIAL` と表示します。`NO EPR CAPS` は待機時間中に完全な情報を捕捉できなかったことを示します。
+
+固定 PDO は電圧・最大電流・計算した電力、PPS は電圧範囲と電流上限を表示します。SPR AVS は 9～15 V と 15～20 V の電流上限、EPR AVS は電圧範囲と PDP を表示します。それ以外の PDO は生の16進数で表示します。一覧の値は電源が提示した値です。起動時の CC 終端を保ち、PD 送信と自動 GoodCRC を無効のまま受信します。EPR 情報の取得には別のシンクからの問い合わせが必要で、EPR の受信とタイミングは実機確認待ちです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
 
 ## 実機での検証
 
@@ -71,9 +73,9 @@ python check_pi32.py --sim PI32V2_ISAのパス
 
 PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記7枚の実測比較画像を `build/pd-diagnostic` に生成し、共有の `build/demo-graph.ppm` と、`cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd` で診断表示を生成して、`python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PI32V2_ISAのパス` で照合します。表示される5バイトは順に 0x01、0x02、0x08、0x0B、0x40 レジスターの値です。
 
-PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm` は `--measurement --profiles-page`、`preview-profiles-offer.ppm` は `--measurement --profiles-offer` で生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
+PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm` は `--measurement --profiles-page`、`preview-profiles-offer.ppm` は `--measurement --profiles-offer` で生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-offer`、`--epr-partial` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
 
-`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_PROFILES_3.0.3.bin` でローカルの更新ファイルを作ります。
+`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_EPR_3.0.3.bin` でローカルの更新ファイルを作ります。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

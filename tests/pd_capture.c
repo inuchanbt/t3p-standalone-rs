@@ -25,6 +25,7 @@ int t3p_pd_rx_read(struct t3p_meter_bus *bus, uint8_t reg, uint8_t *out, unsigne
         assert(phy->consumed + count <= sizeof(offer));
         memcpy(out, offer + phy->consumed, count);
         phy->consumed += count;
+        if (phy->consumed == sizeof(offer)) phy->registers[0x41] = 0x28;
     } else {
         assert(reg + count <= sizeof(phy->registers));
         memcpy(out, phy->registers + reg, count);
@@ -48,11 +49,13 @@ int t3p_pd_rx_config(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
 }
 
 static unsigned records;
-int32_t meter_pd_record(const uint8_t *frame, uint32_t count)
+static int32_t record_result = 1;
+int32_t meter_pd_record(const uint8_t *frame, uint32_t count, uint32_t mode, uint32_t now)
 {
+    (void)mode; (void)now;
     assert(count == sizeof(offer) && !memcmp(frame, offer, count));
     ++records;
-    return 1;
+    return record_result;
 }
 
 int main(void)
@@ -61,15 +64,15 @@ int main(void)
     struct t3p_meter_bus bus = {.context = &phy};
     struct t3p_pd_capture pd = {0};
     phy.registers[0x03] = 4; /* auto GoodCRC is on */
-    t3p_pd_start_capture(&pd, &bus, 0);
+    t3p_pd_start_capture(&pd, &bus, 0, T3P_PD_SPR);
     assert(pd.state == T3P_PD_CONFIG && phy.writes == 0);
 
     phy = reset_phy();
     pd = (struct t3p_pd_capture){0};
-    t3p_pd_start_capture(&pd, &bus, 0);
+    t3p_pd_start_capture(&pd, &bus, 0, T3P_PD_SPR);
     assert(pd.state == T3P_PD_LISTENING && pd.cc == 1);
     assert(phy.registers[0x02] == 7 && phy.registers[0x0b] == 7);
-    t3p_pd_start_capture(&pd, &bus, 500);
+    t3p_pd_start_capture(&pd, &bus, 500, T3P_PD_SPR);
     assert(pd.state == T3P_PD_LISTENING && pd.cc == 2);
     assert(phy.registers[0x02] == 0x0b && phy.registers[0x0b] == 7);
 
@@ -81,9 +84,38 @@ int main(void)
     assert(pd.state == T3P_PD_CAPTURED && records == 1);
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
 
-    t3p_pd_start_capture(&pd, &bus, 1000);
+    t3p_pd_start_capture(&pd, &bus, 1000, T3P_PD_SPR);
     t3p_pd_poll_capture(&pd, &bus, 11000);
     assert(pd.state == T3P_PD_TIMEOUT);
+    assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
+
+    t3p_pd_start_capture(&pd, &bus, 12000, T3P_PD_EPR);
+    assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_EPR && pd.cc == 1);
+    phy.consumed = 0;
+    phy.registers[0x41] = 0x08;
+    phy.registers[0x42] = 0x10;
+    record_result = 2; /* only the second EPR chunk was observed */
+    t3p_pd_poll_capture(&pd, &bus, 12005);
+    assert(pd.state == T3P_PD_LISTENING && pd.partial);
+    t3p_pd_poll_capture(&pd, &bus, 22000);
+    assert(pd.state == T3P_PD_LISTENING);
+    t3p_pd_poll_capture(&pd, &bus, 42000);
+    assert(pd.state == T3P_PD_PARTIAL);
+    assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
+    t3p_pd_start_capture(&pd, &bus, 43000, T3P_PD_EPR);
+    assert(pd.state == T3P_PD_LISTENING && pd.cc == 2);
+    phy.consumed = 0;
+    phy.registers[0x41] = 0x08;
+    phy.registers[0x42] = 0x10;
+    record_result = 3; /* EPR chunk 0 */
+    t3p_pd_poll_capture(&pd, &bus, 43005);
+    assert(pd.state == T3P_PD_LISTENING && !pd.partial);
+    phy.consumed = 0;
+    phy.registers[0x41] = 0x08;
+    phy.registers[0x42] = 0x10;
+    record_result = 1; /* EPR chunk 1 completed the offer */
+    t3p_pd_poll_capture(&pd, &bus, 43010);
+    assert(pd.state == T3P_PD_CAPTURED);
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
     return 0;
 }

@@ -18,7 +18,7 @@
 void meter_demo_sample(uint32_t tick);
 void meter_live_sample(uint32_t tick, uint32_t valid, uint32_t mv, int32_t ma);
 void meter_pd_diagnostic(uint32_t valid, uint32_t first_four, uint32_t last);
-void meter_pd_status(uint32_t state, uint32_t cc);
+void meter_pd_status(uint32_t state, uint32_t cc, uint32_t mode);
 void meter_reset_totals(void);
 void meter_next_page(void);
 uint32_t meter_double_press(void);
@@ -46,13 +46,16 @@ static unsigned key_pressed(void)
     return !(board.io.read32(board.io.context, PA_BASE) & PA11);
 }
 
-enum redraw_request { REDRAW = 1u, START_CAPTURE = 2u };
+enum redraw_request { REDRAW = 1u, START_CAPTURE = 2u, START_EPR = 4u };
 
 static unsigned poll_key(uint32_t now)
 {
     enum t3p_button_event event = t3p_button_poll(&button, now, key_pressed());
     if (event == T3P_BUTTON_SHORT) { meter_next_page(); return REDRAW; }
-    if (event == T3P_BUTTON_DOUBLE) return meter_double_press() ? START_CAPTURE : REDRAW;
+    if (event == T3P_BUTTON_DOUBLE) {
+        uint32_t action = meter_double_press();
+        return action ? action << 1 : REDRAW;
+    }
     if (event == T3P_BUTTON_LONG) { meter_reset_totals(); return REDRAW; }
     return 0;
 }
@@ -63,7 +66,7 @@ static unsigned poll_pd(struct t3p_pd_capture *pd, struct t3p_meter_bus *bus, ui
     enum t3p_pd_state before = pd->state;
     t3p_pd_poll_capture(pd, bus, now);
     if (pd->state == before) return 0;
-    meter_pd_status(pd->state, pd->cc);
+    meter_pd_status(pd->state, pd->cc, pd->mode);
     return REDRAW;
 }
 #endif
@@ -91,7 +94,7 @@ void t3p_board_start(void)
     struct t3p_meter_bus fast_bus = meter_bus;
     struct t3p_pd_capture pd = {0};
     if (t3p_meter_fast_bus(&board, &fast_bus)) pd.state = T3P_PD_TIMER_ERROR;
-    meter_pd_status(pd.state, 0);
+    meter_pd_status(pd.state, 0, pd.mode);
 #endif
 #ifdef T3P_PD_DIAGNOSTIC
     uint32_t pd_at = start - 2000;
@@ -103,9 +106,10 @@ void t3p_board_start(void)
         uint32_t now = t3p_bsp_millis(&board);
         redraw |= poll_key(now);
 #ifdef T3P_PD_PROFILES
-        if (redraw & START_CAPTURE) {
-            t3p_pd_start_capture(&pd, &fast_bus, now);
-            meter_pd_status(pd.state, pd.cc);
+        if (redraw & (START_CAPTURE | START_EPR)) {
+            enum t3p_pd_mode mode = (redraw & START_EPR) ? T3P_PD_EPR : T3P_PD_SPR;
+            t3p_pd_start_capture(&pd, &fast_bus, now, mode);
+            meter_pd_status(pd.state, pd.cc, pd.mode);
             redraw = REDRAW;
         }
         redraw |= poll_pd(&pd, &fast_bus, now);
@@ -165,6 +169,10 @@ void t3p_board_start(void)
             t3p_bsp_backlight(&board, 1);
             rendered = now;
         }
-        if (t3p_bsp_delay(&board, 5)) t3p_signal_failure(5);
+        uint32_t pause_ms = 5;
+#ifdef T3P_PD_PROFILES
+        if (pd.state == T3P_PD_LISTENING) pause_ms = 1;
+#endif
+        if (t3p_bsp_delay(&board, pause_ms)) t3p_signal_failure(5);
     }
 }

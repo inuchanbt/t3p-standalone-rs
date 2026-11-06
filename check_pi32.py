@@ -114,20 +114,46 @@ def main():
             if cpu.call(symbols["meter_double_press"], [])[0] != 1:
                 raise ValueError("Pi32v2 PD profiles double press did not request capture")
             frame = bytes.fromhex((ROOT / "tests/pd_offer.hex").read_text(encoding="ascii"))
-            cpu.call(symbols["meter_pd_status"], [1, 1])
+            cpu.call(symbols["meter_pd_status"], [1, 1, 0])
             cpu.mem.write(strip, frame[:-1] + bytes([frame[-1] ^ 1]))
-            if cpu.call(symbols["meter_pd_record"], [strip, len(frame)])[0] != 0xffffffff:
+            if cpu.call(symbols["meter_pd_record"], [strip, len(frame), 0, 0])[0] != 0xffffffff:
                 raise ValueError("Pi32v2 accepted a corrupt PD frame")
             cpu.mem.write(strip, frame)
-            if cpu.call(symbols["meter_pd_record"], [strip, len(frame)])[0] != 1:
+            if cpu.call(symbols["meter_pd_record"], [strip, len(frame), 0, 0])[0] != 1:
                 raise ValueError("Pi32v2 rejected the test source offer")
-            cpu.call(symbols["meter_pd_status"], [2, 1])
+            cpu.call(symbols["meter_pd_status"], [2, 1, 0])
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-profiles-offer.ppm").read_bytes():
                 raise ValueError("Pi32v2 captured PD profiles frame differs from host preview")
             print("Pi32v2 PD profiles and source-offer decoding match")
             cpu.call(symbols["meter_next_page"], [])
-            cpu.call(symbols["meter_pd_status"], [0, 0])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-epr-ready.ppm").read_bytes():
+                raise ValueError("Pi32v2 initial EPR frame differs from host preview")
+            if cpu.call(symbols["meter_double_press"], [])[0] != 2:
+                raise ValueError("Pi32v2 EPR double press did not request EPR capture")
+            chunks = [bytes.fromhex((ROOT / "tests" / f"epr_chunk{i}.hex").read_text(encoding="ascii"))
+                      for i in range(2)]
+            cpu.call(symbols["meter_pd_status"], [1, 1, 1])
+            for chunk, now, expected_result in zip(chunks, (100, 120), (3, 1)):
+                cpu.mem.write(strip, chunk)
+                if cpu.call(symbols["meter_pd_record"], [strip, len(chunk), 1, now])[0] != expected_result:
+                    raise ValueError("Pi32v2 failed to decode an EPR chunk")
+            cpu.call(symbols["meter_pd_status"], [2, 1, 1])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-epr-offer.ppm").read_bytes():
+                raise ValueError("Pi32v2 EPR offer frame differs from host preview")
+            cpu.call(symbols["meter_pd_status"], [1, 1, 1])
+            cpu.mem.write(strip, chunks[1])
+            if cpu.call(symbols["meter_pd_record"], [strip, len(chunks[1]), 1, 120])[0] != 2:
+                raise ValueError("Pi32v2 did not identify the partial EPR offer")
+            cpu.call(symbols["meter_pd_status"], [10, 1, 1])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-epr-partial.ppm").read_bytes():
+                raise ValueError("Pi32v2 partial EPR frame differs from host preview")
+            print("Pi32v2 complete and partial EPR offers match")
+            cpu.call(symbols["meter_next_page"], [])
+            cpu.call(symbols["meter_pd_status"], [0, 0, 0])
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():

@@ -12,8 +12,8 @@
 #define TX_IDLE_MASK 0x0f
 #define TX_IDLE 0x08
 
-/* Returns 1 for a source offer, 0 for another valid packet, -1 on bad framing. */
-int32_t meter_pd_record(const uint8_t *, uint32_t);
+/* 1: complete, 2: partial EPR, 3: first EPR chunk, 0: ignored, -1: bad frame. */
+int32_t meter_pd_record(const uint8_t *, uint32_t, uint32_t, uint32_t);
 
 static int configured(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
 {
@@ -31,13 +31,16 @@ static void stop_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *b
     capture->state = state;
 }
 
-void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, uint32_t now)
+void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, uint32_t now,
+                          enum t3p_pd_mode mode)
 {
     if (capture->state == T3P_PD_LISTENING) stop_capture(capture, bus, T3P_PD_READY);
     if (capture->state == T3P_PD_BUS_ERROR || capture->state == T3P_PD_CONFIG ||
         capture->state == T3P_PD_TIMER_ERROR)
         return;
-    capture->cc = capture->cc == 1 ? 2 : 1;
+    if (mode == capture->mode || capture->cc == 0)
+        capture->cc = capture->cc == 1 ? 2 : 1;
+    capture->mode = mode;
 
     uint8_t registers[9], power, status[5];
     capture->state = T3P_PD_BUS_ERROR;
@@ -75,6 +78,7 @@ void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *
     capture->started = now;
     capture->polled = now - 4;
     capture->draining = 0;
+    capture->partial = 0;
     capture->state = T3P_PD_LISTENING;
 }
 
@@ -82,8 +86,9 @@ void t3p_pd_poll_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *b
 {
     if (capture->state != T3P_PD_LISTENING || now - capture->polled < 4) return;
     capture->polled = now;
-    if (now - capture->started >= 10000) {
-        stop_capture(capture, bus, T3P_PD_TIMEOUT);
+    uint32_t timeout = capture->mode == T3P_PD_EPR ? 30000 : 10000;
+    if (now - capture->started >= timeout) {
+        stop_capture(capture, bus, capture->partial ? T3P_PD_PARTIAL : T3P_PD_TIMEOUT);
         return;
     }
 
@@ -130,7 +135,11 @@ void t3p_pd_poll_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *b
         capture->state = T3P_PD_BUS_ERROR;
         return;
     }
-    int32_t result = meter_pd_record(frame, 3 + body);
-    if (result != 0)
+    /* Drain a queued follow-up on the next pass without another poll delay. */
+    capture->polled = now - 4;
+    int32_t result = meter_pd_record(frame, 3 + body, capture->mode, now);
+    if (result == 2) capture->partial = 1;
+    if (result == 3) capture->partial = 0;
+    if (result == 1 || result < 0)
         stop_capture(capture, bus, result > 0 ? T3P_PD_CAPTURED : T3P_PD_BAD_FRAME);
 }

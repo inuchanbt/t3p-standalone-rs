@@ -23,7 +23,7 @@ mod settings {
 }
 
 use energy::{Totals, Tracker};
-pub use pd::SourceCaps;
+pub use pd::{EprCaps, EprCapture, EprEvent, SourceCaps};
 use pd::{PROFILES_PAGE, Profiles};
 use power_history::{GraphTrace, GraphWindow, History, Sample};
 use settings::TimerMode;
@@ -95,11 +95,24 @@ impl Overview {
     }
 
     pub fn set_pd_profiles(&mut self, state: u32, cc: u32, caps: Option<SourceCaps>) {
-        self.pd_profiles = Some(Profiles { state, cc, caps });
+        self.pd_profiles = Some(Profiles {
+            state,
+            cc,
+            caps,
+            epr: None,
+            mode: 0,
+        });
+    }
+
+    pub fn set_epr_profiles(&mut self, mode: u32, caps: Option<EprCaps>) {
+        if let Some(ref mut profiles) = self.pd_profiles {
+            profiles.mode = mode;
+            profiles.epr = caps;
+        }
     }
 
     pub fn set_page(&mut self, page: u32) {
-        self.page = page % (PROFILES_PAGE + u32::from(self.pd_profiles.is_some()));
+        self.page = page % (PROFILES_PAGE + 2 * u32::from(self.pd_profiles.is_some()));
     }
 
     pub fn set_graph_window(&mut self, window: u32) {
