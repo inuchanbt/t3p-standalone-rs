@@ -16,6 +16,8 @@ void meter_demo_render(uint32_t top, uint16_t pixels[PANEL_SIDE * STRIP_ROWS]);
 static struct t3p_bsp board;
 static uint16_t strip[PANEL_SIDE * STRIP_ROWS];
 static volatile uint32_t startup_cookie = 0x54335044u;
+static unsigned raw_key, stable_key;
+static uint32_t key_changed;
 
 static void init_key(void)
 {
@@ -33,6 +35,23 @@ static unsigned key_pressed(void)
     return !(board.io.read32(board.io.context, PA_BASE) & PA11);
 }
 
+static unsigned poll_key(uint32_t now)
+{
+    unsigned key = key_pressed();
+    if (key != raw_key) {
+        raw_key = key;
+        key_changed = now;
+    }
+    if (key != stable_key && now - key_changed >= 30) {
+        stable_key = key;
+        if (key) {
+            meter_reset_totals();
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void t3p_board_start(void)
 {
     struct t3p_bsp_io io;
@@ -47,31 +66,26 @@ void t3p_board_start(void)
     uint32_t start = t3p_bsp_millis(&board);
     uint32_t sampled = start - 100;
     uint32_t rendered = start - 1000;
-    unsigned raw_key = key_pressed(), stable_key = raw_key;
-    uint32_t changed = start;
+    raw_key = stable_key = key_pressed();
+    key_changed = start;
+    unsigned redraw = 0;
     for (;;) {
         uint32_t now = t3p_bsp_millis(&board);
-        unsigned key = key_pressed();
-        if (key != raw_key) {
-            raw_key = key;
-            changed = now;
-        }
-        if (key != stable_key && now - changed >= 30) {
-            stable_key = key;
-            if (key) meter_reset_totals();
-        }
+        redraw |= poll_key(now);
         if (now - sampled >= 100) {
             meter_demo_sample(now - start);
             sampled = now;
         }
-        if (now - rendered >= 1000) {
+        if (redraw || now - rendered >= 1000) {
             meter_snapshot();
+            redraw = 0;
             for (uint32_t top = 0; top < PANEL_SIDE; top += STRIP_ROWS) {
                 meter_demo_render(top, strip);
                 if (t3p_bsp_rectangle(&board, 0, PANEL_SIDE - 1, top, top + STRIP_ROWS - 1,
                                       strip, PANEL_SIDE * STRIP_ROWS)) {
                     t3p_signal_failure(4);
                 }
+                redraw |= poll_key(t3p_bsp_millis(&board));
             }
             t3p_bsp_backlight(&board, 1);
             rendered = now;

@@ -28,7 +28,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bsp", type=Path, default=ROOT.parent / "doom_on_t3p")
     parser.add_argument("--sim", type=Path)
+    parser.add_argument("--output-name", default=IMAGE_NAME, help="Output filename within build/")
     args = parser.parse_args()
+    if Path(args.output_name).name != args.output_name or not args.output_name.lower().endswith(".bin"):
+        parser.error("--output-name must be a .bin filename")
 
     sys.path.insert(0, str(args.bsp / "scripts"))
     from audit_stock_recovery import entry, require
@@ -62,7 +65,7 @@ def main():
     require(len(encoded) == len(stock), "Container length changed")
     unpacker = args.bsp / "vendor/jl-misctools/firmware/fwunpack_newfw.py"
     with TemporaryDirectory(dir=out) as scratch:
-        staging = Path(scratch) / IMAGE_NAME
+        staging = Path(scratch) / args.output_name
         staging.write_bytes(encoded)
         unpacked = Path(scratch) / "unpacked"
         result = subprocess.run([sys.executable, unpacker, "--dirname", unpacked, staging],
@@ -84,11 +87,11 @@ def main():
         require(read_files(extracted / "top") == read_files(unpacked / "top"),
                 "An unpacked boot file changed")
 
-        staging.replace(out / IMAGE_NAME)
+        staging.replace(out / args.output_name)
 
     report = {
         "status": "Bench demo packaged and audited offline; on-device execution pending",
-        "image": IMAGE_NAME,
+        "image": args.output_name,
         "image_sha256": sha(encoded),
         "image_bytes": len(encoded),
         "stock_sha256": STOCK_SHA,
@@ -103,9 +106,10 @@ def main():
         "simulated_rgb_pixels_matched": 57600,
         "demo_input_only": True,
     }
-    (out / "demo-update-unpack.log").write_bytes(result.stdout)
-    (out / "demo-update-audit.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(f"{out / IMAGE_NAME}\nSHA-256 {report['image_sha256']}")
+    report_name = "demo-update" if args.output_name == IMAGE_NAME else Path(args.output_name).stem
+    (out / f"{report_name}-unpack.log").write_bytes(result.stdout)
+    (out / f"{report_name}-audit.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(f"{out / args.output_name}\nSHA-256 {report['image_sha256']}")
 
 
 if __name__ == "__main__":
