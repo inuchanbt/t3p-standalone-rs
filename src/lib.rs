@@ -43,6 +43,7 @@ impl Reading {
 pub struct Overview {
     reading: Option<Reading>,
     uncalibrated: bool,
+    pd_diagnostic: Option<Option<(u32, u8)>>,
     mah: u64,
     mwh: u64,
     power_mw: [Option<u32>; 60],
@@ -59,6 +60,7 @@ impl Overview {
         Self {
             reading: None,
             uncalibrated: false,
+            pd_diagnostic: None,
             mah: 0,
             mwh: 0,
             power_mw: [None; 60],
@@ -67,6 +69,10 @@ impl Overview {
 
     pub fn set_uncalibrated(&mut self) {
         self.uncalibrated = true;
+    }
+
+    pub fn set_pd_diagnostic(&mut self, registers: Option<(u32, u8)>) {
+        self.pd_diagnostic = Some(registers);
     }
 }
 

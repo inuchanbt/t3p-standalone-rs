@@ -117,6 +117,21 @@ int t3p_meter_read_register(struct t3p_meter_bus *b, uint8_t reg, uint16_t *out)
     *out = (uint16_t)((uint16_t)high << 8 | low);
     return 0;
 }
+int t3p_pd_read_register(struct t3p_meter_bus *b, uint8_t reg, uint8_t *out)
+{
+    if (!b || !out || !b->scl || !b->sda || !b->read_scl || !b->read_sda || !b->delay)
+        return -1;
+    /* Only device ID, switch, control, power and non-clearing status registers. */
+    if (reg != 0x01 && reg != 0x02 && reg != 0x08 && reg != 0x0b && reg != 0x40)
+        return -1;
+    uint8_t value;
+    int error = start(b) || write_byte(b, 0x44) || write_byte(b, reg) ||
+                start(b) || write_byte(b, 0x45) || read_byte(b, &value, 0);
+    stop(b);
+    if (error) return -1;
+    *out = value;
+    return 0;
+}
 int t3p_meter_identify(struct t3p_meter_bus *b)
 {
     uint16_t id, config;

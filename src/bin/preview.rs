@@ -9,8 +9,10 @@ use t3p_standalone::{Meter, Overview, Reading, SIDE, STRIP_ROWS, demo_reading, r
 fn main() -> io::Result<()> {
     let mut args = env::args_os().skip(1);
     let path = args.next().unwrap_or_else(|| "t3p-preview.ppm".into());
-    let measurement = args.next().as_deref() == Some(std::ffi::OsStr::new("--measurement"));
-    let missing = args.next().as_deref() == Some(std::ffi::OsStr::new("--missing"));
+    let flags: Vec<_> = args.collect();
+    let measurement = flags.iter().any(|x| x == "--measurement");
+    let missing = flags.iter().any(|x| x == "--missing");
+    let pd = flags.iter().any(|x| x == "--pd");
     let mut output = BufWriter::new(File::create(path)?);
     let mut meter = Meter::new(0);
     if measurement {
@@ -35,6 +37,9 @@ fn main() -> io::Result<()> {
     meter.overview(&mut view);
     if measurement {
         view.set_uncalibrated();
+    }
+    if pd {
+        view.set_pd_diagnostic(Some((0x04030291, 0x05)));
     }
     let mut pixels = [0; SIDE * STRIP_ROWS];
     write!(output, "P6\n{SIDE} {SIDE}\n255\n")?;

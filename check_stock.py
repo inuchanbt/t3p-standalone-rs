@@ -22,6 +22,9 @@ EVIDENCE = {
                  "80 ff 9e b0 01 00 40 e1 01 70 80 ff fa b0 01 00"),
     # Copy the software I2C config into RAM.
     0x0C0EA58C: "c0 ff f0 db 11 00 c1 ff fc bc 11 0c 10 86 12 05 82 05",
+    # Register reads and writes to 0x44 use the same I2C helper as the meter.
+    0x0C00DC1C: "89 83 8a 82 50 24 43 21 80 ff d8 18 0c 00",
+    0x0C00DC3E: "89 83 8a 82 50 24 43 21 80 ff 2e 19 0c 00",
     0x0C1119C8: "f4 9b 15 0c",
     0x0C159BF4: b"fusb302_task\0".hex(),
 }
@@ -41,7 +44,7 @@ def main():
     bus = struct.unpack_from("<7I", app, 0x0C11BCFC - BASE)
     if bus != (0, 0x12, 0x11, 0x11, 0, 400000, 0x10000):
         raise ValueError("Unexpected software I2C configuration")
-    print("Stock 3.0.3: PB2/PB1 software I2C, 0x40 registers 0x02/0x01, fusb302_task")
+    print("Stock 3.0.3: PB2/PB1 software I2C, 0x40 meter, 0x22 register access, fusb302_task")
 
 
 if __name__ == "__main__":

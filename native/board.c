@@ -13,6 +13,7 @@
 
 void meter_demo_sample(uint32_t tick);
 void meter_live_sample(uint32_t tick, uint32_t valid, uint32_t mv, int32_t ma);
+void meter_pd_diagnostic(uint32_t valid, uint32_t first_four, uint32_t last);
 void meter_reset_totals(void);
 void meter_snapshot(void);
 void meter_demo_render(uint32_t top, uint16_t pixels[PANEL_SIDE * STRIP_ROWS]);
@@ -75,6 +76,9 @@ void t3p_board_start(void)
     t3p_meter_gpio_init(&board, &meter_bus);
     int identified = 0;
     uint32_t identified_at = start - 1000;
+#ifdef T3P_PD_DIAGNOSTIC
+    uint32_t pd_at = start - 2000;
+#endif
 #endif
     raw_key = stable_key = key_pressed();
     key_changed = start;
@@ -82,6 +86,23 @@ void t3p_board_start(void)
     for (;;) {
         uint32_t now = t3p_bsp_millis(&board);
         redraw |= poll_key(now);
+#ifdef T3P_PD_DIAGNOSTIC
+        if (now - pd_at >= 2000) {
+            static const uint8_t registers[] = {0x01, 0x02, 0x08, 0x0b, 0x40};
+            uint8_t values[sizeof(registers)] = {0};
+            int valid = 1;
+            for (unsigned i = 0; i < sizeof(registers); ++i) {
+                if (t3p_pd_read_register(&meter_bus, registers[i], &values[i])) {
+                    valid = 0;
+                    break;
+                }
+            }
+            uint32_t first_four = (uint32_t)values[0] | (uint32_t)values[1] << 8 |
+                                  (uint32_t)values[2] << 16 | (uint32_t)values[3] << 24;
+            meter_pd_diagnostic(valid, first_four, values[4]);
+            pd_at = now;
+        }
+#endif
         if (now - sampled >= 100) {
 #ifdef T3P_MEASURE
             uint16_t mv = 0;

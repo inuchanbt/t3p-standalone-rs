@@ -51,6 +51,15 @@ static void answer(struct fake *f, uint16_t data)
     f->reads[f->count++] = 0; /* read address ACK */
     for (int bit = 15; bit >= 0; --bit) f->reads[f->count++] = (data >> bit) & 1;
 }
+static void answer_byte(struct fake *f, uint8_t data)
+{
+    f->reads[f->count++] = 1;
+    f->reads[f->count++] = 0;
+    f->reads[f->count++] = 0;
+    f->reads[f->count++] = 1;
+    f->reads[f->count++] = 0;
+    for (int bit = 7; bit >= 0; --bit) f->reads[f->count++] = (data >> bit) & 1;
+}
 static struct t3p_meter_bus bus(struct fake *f)
 {
     return (struct t3p_meter_bus){f, set_scl, set_sda, get_scl, get_sda, tick};
@@ -117,5 +126,20 @@ int main(void)
     f = (struct fake){.stuck = 1};
     assert(t3p_meter_read_register(&b, 2, &mv));
     assert(f.sda && f.scl);
+
+    f = (struct fake){0};
+    answer_byte(&f, 0x91);
+    uint8_t id = 0;
+    assert(!t3p_pd_read_register(&b, 1, &id));
+    assert(id == 0x91 && f.cursor == f.count && f.sda && f.scl);
+    static const int pd_write[] = {0,1,0,0,0,1,0,0};
+    static const int pd_read[] = {0,1,0,0,0,1,0,1};
+    for (unsigned i = 0; i < 8; ++i) {
+        assert(f.clock_data[1 + i] == pd_write[i]);
+        assert(f.clock_data[20 + i] == pd_read[i]);
+    }
+    f = (struct fake){0};
+    assert(t3p_pd_read_register(&b, 0x42, &id)); /* interrupt is read-clear */
+    assert(f.clocks == 0);
     return 0;
 }

@@ -104,8 +104,11 @@ def main():
     parser.add_argument("--stock-app", type=Path, default=ROOT.parent / "doom_on_t3p/local/unpacked/T3P Firmware Version 3.0.3.bin/files/app.bin")
     parser.add_argument("--jieli-clang", type=Path)
     parser.add_argument("--measurement", action="store_true", help="Build the uncalibrated measurement candidate")
+    parser.add_argument("--pd-diagnostic", action="store_true", help="Add read-only CC-controller diagnostics")
     args = parser.parse_args()
-    out = ROOT / "build" / ("measurement" if args.measurement else "")
+    if args.pd_diagnostic:
+        args.measurement = True
+    out = ROOT / "build" / ("pd-diagnostic" if args.pd_diagnostic else "measurement" if args.measurement else "")
     out.mkdir(parents=True, exist_ok=True)
 
     if run(args.rustc, "--version", capture=True).strip() != f"rustc {RUST_VERSION}":
@@ -143,6 +146,8 @@ def main():
                 "-x", "assembler", "-c", source, "-o", obj)
         else:
             flags = ["-DT3P_MEASURE"] if args.measurement else []
+            if args.pd_diagnostic:
+                flags.append("-DT3P_PD_DIAGNOSTIC")
             run(clang, *common, "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
                 "-ffunction-sections", "-fdata-sections", *flags, "-I", bsp, "-c", source, "-o", obj)
         objects.append(obj)
@@ -159,6 +164,8 @@ def main():
     report = inspect_layout(elf)
     report["status"] = ("Pi32v2 ELF audited offline; uncalibrated measurement candidate"
                         if args.measurement else "Pi32v2 ELF audited offline; demo input only")
+    if args.pd_diagnostic:
+        report["status"] += "; read-only PD diagnostic"
     report["rust"] = RUST_VERSION
     report["llvm"] = LLVM_VERSION
     report["elf_sha256"] = hashlib.sha256(elf.read_bytes()).hexdigest()

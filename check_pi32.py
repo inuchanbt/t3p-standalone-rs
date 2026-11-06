@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--sim", type=Path, default=ROOT / "local" / f"pi32v2-isa-{SIM_REVISION}")
     parser.add_argument("--build-dir", type=Path, default=ROOT / "build")
     parser.add_argument("--measurement", action="store_true")
+    parser.add_argument("--pd-diagnostic", action="store_true")
     args = parser.parse_args()
     sys.path.insert(0, str(args.sim / "tools/llvm"))
     from sim import CPU
@@ -82,6 +83,12 @@ def main():
         if render() != (out / "preview-missing.ppm").read_bytes():
             raise ValueError("Pi32v2 missing-reading frame differs from host preview")
         print("Pi32v2 measurement and missing-reading frames match")
+        if args.pd_diagnostic:
+            cpu.call(symbols["meter_pd_diagnostic"], [1, 0x04030291, 0x05])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-pd.ppm").read_bytes():
+                raise ValueError("Pi32v2 PD diagnostic frame differs from host preview")
+            print("Pi32v2 read-only PD diagnostic frame matches")
 
 
 if __name__ == "__main__":

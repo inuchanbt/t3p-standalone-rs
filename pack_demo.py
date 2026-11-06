@@ -49,6 +49,8 @@ def main():
     check = [sys.executable, ROOT / "check_pi32.py", "--build-dir", out]
     if "measurement candidate" in build_audit["status"]:
         check.append("--measurement")
+    if "read-only PD diagnostic" in build_audit["status"]:
+        check.append("--pd-diagnostic")
     if args.sim:
         check += ["--sim", args.sim]
     subprocess.run(check, check=True)

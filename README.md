@@ -6,7 +6,7 @@ Experimental Rust firmware for the ATORCH T3P USB power meter, building on [KWS-
 
 ## Status
 
-The current build is a **startup and display demo with simulated readings**. It displays voltage, signed current and power, charge and energy totals, and a 60-second power graph. A PA11 total reset is implemented. Real measurement, USB PD and charger protocols remain to be implemented.
+The default build is a **startup and display demo with simulated readings**. It displays voltage, signed current and power, charge and energy totals, and a 60-second power graph. A PA11 total reset and an experimental, uncalibrated measurement build are implemented. USB PD and charger protocols remain to be implemented.
 
 On 2026-11-06 the user reported flashing the demo to a T3P and supplied photographs showing the demo screen, two different simulated readings, changing totals and graph history. The reported test used the prepared demo image, whose local SHA-256 is `b557f5fd89697917a11d07538279e0a6b78f83325ad2aa23b85af3db35f4f0ef`. The photographs do not verify the button, exact timing, cold boot, or real measurement.
 
@@ -14,7 +14,11 @@ The user subsequently reported difficulty seeing the zero totals. In a later vid
 
 The Pi32v2 machine code was also compared with the PC renderer in an instruction simulator for one 62-second demo sequence. All 57,600 pixels matched. Other inputs need further verification.
 
-An optional experimental measurement build reads the monitor at 0x40 over the PB2/PB1 software I²C bus. It checks the stock firmware's die ID `0x2260` and continuous-conversion mode before reading bus and shunt registers. It displays nominal, **uncalibrated** values under `UNCAL`, and shows `---` if identification or communication fails. It does not load per-unit calibration. Polarity, conversion accuracy, timing and operation on a physical T3P remain unverified.
+An optional experimental measurement build reads the monitor at 0x40 over the PB2/PB1 software I²C bus. It checks the stock firmware's die ID `0x2260` and continuous-conversion mode before reading bus and shunt registers. It displays nominal, **uncalibrated** values under `UNCAL`, and shows `---` if identification or communication fails. It does not load per-unit calibration. Polarity, conversion accuracy and timing remain unverified.
+
+On 2026-11-06, the user reported a first hardware test of the measurement candidate. Photographs show 3.008 V with no measurement cable, 4.991 V with the cable in the reported CC2 orientation, and 1.839 V in the reported CC1 orientation. The source was the C1 port of an AOHI AOC-C022. Current was usually displayed as zero, occasionally reaching −0.001 A. The actual VBUS at the T3P has not yet been independently measured in either orientation. The cable-orientation difference and open-port reading remain under investigation, and the values have not been calibrated against a reference.
+
+The source's ASD-PD31 log reported a 5 V / 3 A fixed PDO after one empty PDO result and a retry. It does not establish the voltage delivered in the T3P test. The stock application accesses 7-bit I²C address 0x22 through the same bus as the meter and has a `fusb302_task`; actual chip identity remains to be confirmed. The optional `--pd-diagnostic` build adds read-only snapshots of registers 0x01, 0x02, 0x08, 0x0B and 0x40. It does not configure CC, request PD contracts, or clear interrupt registers. The on-device output remains untested.
 
 ## PC preview
 
@@ -40,6 +44,8 @@ python check_pi32.py --sim PATH_TO_PI32V2_ISA
 ```
 
 For the measurement candidate, add `--measurement` to `build.py`. Generate host references with `cargo run --offline --bin preview -- build/measurement/preview-measurement.ppm --measurement` and `cargo run --offline --bin preview -- build/measurement/preview-missing.ppm --measurement --missing`, then run `python check_pi32.py --build-dir build/measurement --measurement --sim PATH_TO_PI32V2_ISA`.
+
+For the optional PD diagnostic, build with `python build.py --pd-diagnostic`. Generate the same two references under `build/pd-diagnostic`, plus `cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd`; check them with `python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PATH_TO_PI32V2_ISA`. The five displayed bytes are registers 0x01, 0x02, 0x08, 0x0B and 0x40 in that order.
 
 The simulator check requires the pinned [pi32v2-isa revision](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f). The output ELF is for offline evaluation. `pack_demo.py` currently depends on the separate local `doom_on_t3p` research workspace, unpacked stock firmware, and its packing tools. Manufacturer firmware and update binaries are not distributed here.
 

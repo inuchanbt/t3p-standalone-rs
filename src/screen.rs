@@ -169,7 +169,21 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
     p.text(19, 151, milli(view.mah, false, &mut digits), 2, TEXT);
     p.text(130, 151, milli(view.mwh, false, &mut digits), 2, TEXT);
 
-    p.text(12, 176, b"POWER 60S", 2, MUTED);
+    if let Some(registers) = view.pd_diagnostic {
+        p.text(12, 176, b"PD", 2, MUTED);
+        if let Some((first, last)) = registers {
+            let digits = b"0123456789ABCDEF";
+            for index in 0..5 {
+                let byte = if index == 4 { last } else { (first >> (index * 8)) as u8 };
+                p.text(36 + index * 24, 176, &digits[(byte >> 4) as usize..][..1], 2, MUTED);
+                p.text(44 + index * 24, 176, &digits[(byte & 15) as usize..][..1], 2, MUTED);
+            }
+        } else {
+            p.text(36, 176, b"-- -- -- -- --", 2, MUTED);
+        }
+    } else {
+        p.text(12, 176, b"POWER 60S", 2, MUTED);
+    }
     p.rect(12, 191, 216, 39, CARD);
     if top >= 184 {
         for y in [191, 209, 229] {
