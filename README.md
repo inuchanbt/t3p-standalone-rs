@@ -24,6 +24,8 @@ The diagnostic build was subsequently tested on the device: all three photograph
 
 In a later test with a USB-C breakout inserted between the source cable and T3P, the user measured 4.992 V in the reported CC2 orientation and approximately 1.733 V in CC1, matching the T3P display to three decimal places. In CC1, the measured voltage started above 2 V and decreased over time. These observations support the displayed voltage at those two test points, but do not establish its accuracy over the full range or explain the low-voltage condition. The breakout can affect the connection, so the test is not identical to the earlier direct-cable photographs.
 
+With a Framework FRANDVCH00 source, Sumitomo Electric DC-010338 cable, and ASD-PD31 load, photographs show current readings of 1.002 / 1.000 A, 1.500 / 1.500 A, and 3.007 / 3.000 A (T3P / ASD-PD31) at a fixed 5 V request. At 20 V and 48 V fixed requests, the readings were 5.011 / 5.000 A and 5.012 / 5.000 A; the 48 V photograph shows 47.435 V and 237.754 W on T3P. HID was powered through an isolator connected to a PC. These are comparisons with another instrument, not calibration; voltage measurement points can differ. The ASD-PD31 requests the PD contracts. Accumulation timing and energy accuracy remain unverified on hardware.
+
 ## PC preview
 
 Install Rust 2024 and Cargo, then run:
