@@ -42,6 +42,7 @@ impl Reading {
 
 pub struct Overview {
     reading: Option<Reading>,
+    uncalibrated: bool,
     mah: u64,
     mwh: u64,
     power_mw: [Option<u32>; 60],
@@ -57,10 +58,15 @@ impl Overview {
     const fn new() -> Self {
         Self {
             reading: None,
+            uncalibrated: false,
             mah: 0,
             mwh: 0,
             power_mw: [None; 60],
         }
+    }
+
+    pub fn set_uncalibrated(&mut self) {
+        self.uncalibrated = true;
     }
 }
 

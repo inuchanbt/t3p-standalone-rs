@@ -14,6 +14,8 @@ ATORCH T3P USB 電力計向けの実験的な Rust ファームウェアです�
 
 Pi32v2 機械語を命令シミュレーターで実行し、デモ62秒分の画面を PC 版と比較した結果、57,600画素が一致しました。その他の入力は引き続き検証が必要です。
 
+実験的な実測候補も追加しました。PB2/PB1 のソフト I²C で 0x40 の計測回路に接続し、純正ファームが使うチップ ID `0x2260` と連続変換モードを確認してから電圧・シャント電圧を読みます。画面には `UNCAL` と表示し、個体校正を適用しない名目換算値を示します。ID または通信に失敗すると `---` を表示します。極性、換算精度、時間の精度と実機動作は未確認です。
+
 ## PC プレビュー
 
 Rust 2024 と Cargo を用意して実行します。
@@ -36,6 +38,8 @@ python build.py --rustc RUSTCのパス --llvm PI32V2_LLVMのパス --jieli-clang
 cargo run --offline --bin preview -- build/preview.ppm
 python check_pi32.py --sim PI32V2_ISAのパス
 ```
+
+実測候補は `build.py` に `--measurement` を付けます。PC 比較画像を `cargo run --offline --bin preview -- build/measurement/preview-measurement.ppm --measurement` と `cargo run --offline --bin preview -- build/measurement/preview-missing.ppm --measurement --missing` で生成し、`python check_pi32.py --build-dir build/measurement --measurement --sim PI32V2_ISAのパス` で照合します。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

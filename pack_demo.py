@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--bsp", type=Path, default=ROOT.parent / "doom_on_t3p")
     parser.add_argument("--sim", type=Path)
     parser.add_argument("--output-name", default=IMAGE_NAME, help="Output filename within build/")
+    parser.add_argument("--build-dir", type=Path, default=ROOT / "build")
     args = parser.parse_args()
     if Path(args.output_name).name != args.output_name or not args.output_name.lower().endswith(".bin"):
         parser.error("--output-name must be a .bin filename")
@@ -39,13 +40,15 @@ def main():
     from check_stock_app_container import rebuild_in_memory
     from runtime_layout_evidence import inspect_layout
 
-    out = ROOT / "build"
+    out = args.build_dir
     elf = out / "t3p-meter-demo.elf"
     elf_sha = sha(elf.read_bytes())
     build_audit = json.loads((out / "audit.json").read_bytes())
     require(elf_sha == build_audit["elf_sha256"], "ELF does not match build audit")
     inspect_layout(elf)
-    check = [sys.executable, ROOT / "check_pi32.py"]
+    check = [sys.executable, ROOT / "check_pi32.py", "--build-dir", out]
+    if "measurement candidate" in build_audit["status"]:
+        check.append("--measurement")
     if args.sim:
         check += ["--sim", args.sim]
     subprocess.run(check, check=True)
@@ -90,7 +93,7 @@ def main():
         staging.replace(out / args.output_name)
 
     report = {
-        "status": "Bench demo packaged and audited offline; on-device execution pending",
+        "status": "Candidate packaged and audited offline; on-device execution pending",
         "image": args.output_name,
         "image_sha256": sha(encoded),
         "image_bytes": len(encoded),
@@ -104,7 +107,8 @@ def main():
         "full_decrypt_matches": True,
         "nested_crcs_checked": 4,
         "simulated_rgb_pixels_matched": 57600,
-        "demo_input_only": True,
+        "demo_input_only": "demo input only" in build_audit["status"],
+        "measurement_input_simulated": "measurement candidate" in build_audit["status"],
     }
     report_name = "demo-update" if args.output_name == IMAGE_NAME else Path(args.output_name).stem
     (out / f"{report_name}-unpack.log").write_bytes(result.stdout)

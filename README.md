@@ -14,6 +14,8 @@ The user subsequently reported difficulty seeing the zero totals. In a later vid
 
 The Pi32v2 machine code was also compared with the PC renderer in an instruction simulator for one 62-second demo sequence. All 57,600 pixels matched. Other inputs need further verification.
 
+An optional experimental measurement build reads the monitor at 0x40 over the PB2/PB1 software I²C bus. It checks the stock firmware's die ID `0x2260` and continuous-conversion mode before reading bus and shunt registers. It displays nominal, **uncalibrated** values under `UNCAL`, and shows `---` if identification or communication fails. It does not load per-unit calibration. Polarity, conversion accuracy, timing and operation on a physical T3P remain unverified.
+
 ## PC preview
 
 Install Rust 2024 and Cargo, then run:
@@ -36,6 +38,8 @@ python build.py --rustc PATH_TO_RUSTC --llvm PATH_TO_PI32V2_LLVM --jieli-clang P
 cargo run --offline --bin preview -- build/preview.ppm
 python check_pi32.py --sim PATH_TO_PI32V2_ISA
 ```
+
+For the measurement candidate, add `--measurement` to `build.py`. Generate host references with `cargo run --offline --bin preview -- build/measurement/preview-measurement.ppm --measurement` and `cargo run --offline --bin preview -- build/measurement/preview-missing.ppm --measurement --missing`, then run `python check_pi32.py --build-dir build/measurement --measurement --sim PATH_TO_PI32V2_ISA`.
 
 The simulator check requires the pinned [pi32v2-isa revision](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f). The output ELF is for offline evaluation. `pack_demo.py` currently depends on the separate local `doom_on_t3p` research workspace, unpacked stock firmware, and its packing tools. Manufacturer firmware and update binaries are not distributed here.
 

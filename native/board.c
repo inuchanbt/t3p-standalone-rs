@@ -2,6 +2,9 @@
 #include "t3p_boot.h"
 #include "t3p_bsp.h"
 #include "t3p_signal.h"
+#ifdef T3P_MEASURE
+#include "t3p_meter.h"
+#endif
 
 #define PA_BASE 0xfd3000u
 #define PA11 (1u << 11)
@@ -9,6 +12,7 @@
 #define STRIP_ROWS 8u
 
 void meter_demo_sample(uint32_t tick);
+void meter_live_sample(uint32_t tick, uint32_t valid, uint32_t mv, int32_t ma);
 void meter_reset_totals(void);
 void meter_snapshot(void);
 void meter_demo_render(uint32_t top, uint16_t pixels[PANEL_SIDE * STRIP_ROWS]);
@@ -66,6 +70,12 @@ void t3p_board_start(void)
     uint32_t start = t3p_bsp_millis(&board);
     uint32_t sampled = start - 100;
     uint32_t rendered = start - 1000;
+#ifdef T3P_MEASURE
+    struct t3p_meter_bus meter_bus;
+    t3p_meter_gpio_init(&board, &meter_bus);
+    int identified = 0;
+    uint32_t identified_at = start - 1000;
+#endif
     raw_key = stable_key = key_pressed();
     key_changed = start;
     unsigned redraw = 0;
@@ -73,7 +83,19 @@ void t3p_board_start(void)
         uint32_t now = t3p_bsp_millis(&board);
         redraw |= poll_key(now);
         if (now - sampled >= 100) {
+#ifdef T3P_MEASURE
+            uint16_t mv = 0;
+            int16_t ma = 0;
+            if (!identified && now - identified_at >= 1000) {
+                identified = !t3p_meter_identify(&meter_bus);
+                identified_at = now;
+            }
+            int valid = identified && !t3p_meter_sample(&meter_bus, &mv, &ma);
+            if (!valid) identified = 0;
+            meter_live_sample(t3p_bsp_millis(&board) - start, valid, mv, ma);
+#else
             meter_demo_sample(now - start);
+#endif
             sampled = now;
         }
         if (redraw || now - rendered >= 1000) {

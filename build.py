@@ -103,9 +103,10 @@ def main():
                         "tools/rustup/toolchains/stable-x86_64-pc-windows-gnu/bin/rustc.exe")
     parser.add_argument("--stock-app", type=Path, default=ROOT.parent / "doom_on_t3p/local/unpacked/T3P Firmware Version 3.0.3.bin/files/app.bin")
     parser.add_argument("--jieli-clang", type=Path)
+    parser.add_argument("--measurement", action="store_true", help="Build the uncalibrated measurement candidate")
     args = parser.parse_args()
-    out = ROOT / "build"
-    out.mkdir(exist_ok=True)
+    out = ROOT / "build" / ("measurement" if args.measurement else "")
+    out.mkdir(parents=True, exist_ok=True)
 
     if run(args.rustc, "--version", capture=True).strip() != f"rustc {RUST_VERSION}":
         raise ValueError("Use the pinned Rust compiler for this experimental build")
@@ -129,7 +130,11 @@ def main():
         "-x", "ir", pi32_ir, "-o", rust_object)
 
     objects = [rust_object]
-    for source in [*(lcd_source if name == "t3p_lcd_sequence.c" else bsp / name for name in BSP_FILES), ROOT / "native/board.c", ROOT / "native/memory.c"]:
+    sources = [*(lcd_source if name == "t3p_lcd_sequence.c" else bsp / name for name in BSP_FILES),
+               bsp / "board.c", bsp / "memory.c"]
+    if args.measurement:
+        sources.append(bsp / "t3p_meter.c")
+    for source in sources:
         obj = out / (source.name + ".o")
         if source.name == "runtime_start.S":
             # Keep the exact long-call encoding already audited on the T3P.
@@ -137,20 +142,23 @@ def main():
             run(jieli, *common, "-integrated-as", "-mllvm", "-pi32v2-large-program=true",
                 "-x", "assembler", "-c", source, "-o", obj)
         else:
+            flags = ["-DT3P_MEASURE"] if args.measurement else []
             run(clang, *common, "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
-                "-ffunction-sections", "-fdata-sections", "-I", bsp, "-c", source, "-o", obj)
+                "-ffunction-sections", "-fdata-sections", *flags, "-I", bsp, "-c", source, "-o", obj)
         objects.append(obj)
 
     runtime = args.llvm / "lib/clang/23/lib/pi32v2/libclang_rt.builtins.a"
     elf = out / "t3p-meter-demo.elf"
-    run(bins / "ld.lld.exe", "-T", bsp / "runtime_layout.ld", "--gc-sections", "--no-relax",
+    keep_demo = ["--undefined=meter_demo_sample"] if args.measurement else []
+    run(bins / "ld.lld.exe", "-T", bsp / "runtime_layout.ld", "--gc-sections", "--no-relax", *keep_demo,
         f"-Map={out / 't3p-meter-demo.map'}", "-o", elf, *objects, runtime)
     if run(bins / "llvm-nm.exe", "--undefined-only", elf, capture=True).strip():
         raise ValueError("Unresolved symbols in T3P demo")
 
     from runtime_layout_evidence import inspect_layout
     report = inspect_layout(elf)
-    report["status"] = "Pi32v2 ELF audited offline; demo input only"
+    report["status"] = ("Pi32v2 ELF audited offline; uncalibrated measurement candidate"
+                        if args.measurement else "Pi32v2 ELF audited offline; demo input only")
     report["rust"] = RUST_VERSION
     report["llvm"] = LLVM_VERSION
     report["elf_sha256"] = hashlib.sha256(elf.read_bytes()).hexdigest()

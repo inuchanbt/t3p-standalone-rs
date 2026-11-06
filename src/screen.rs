@@ -124,7 +124,17 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
     let mut p = Strip { pixels, top };
     p.text(12, 12, b"T3P METER", 3, TEXT);
     p.rect(172, 9, 56, 22, WATTS);
-    p.text(179, 15, b"DEMO", 2, BG);
+    p.text(
+        179,
+        15,
+        if view.uncalibrated {
+            b"UNCAL"
+        } else {
+            b"DEMO "
+        },
+        2,
+        BG,
+    );
 
     p.rect(12, 39, 216, 87, CARD);
     let mut digits = [0; 11];

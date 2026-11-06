@@ -14,10 +14,31 @@ fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
 // Startup initializes RAM and creates a snapshot before the first draw.
 static mut METER: Meter = Meter::new(0);
 static mut VIEW: Overview = Overview::new();
+static mut UNCALIBRATED: bool = false;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_demo_sample(tick: u32) {
     unsafe { (&mut *(&raw mut METER)).sample(tick, demo_reading(tick)) };
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_live_sample(tick: u32, valid: u32, mv: u32, ma: i32) {
+    unsafe {
+        *(&raw mut UNCALIBRATED) = true;
+        let reading = if valid != 0
+            && mv <= u16::MAX as u32
+            && ma >= i16::MIN as i32
+            && ma <= i16::MAX as i32
+        {
+            Some(crate::Reading {
+                mv: mv as u16,
+                ma: ma as i16,
+            })
+        } else {
+            None
+        };
+        (&mut *(&raw mut METER)).sample(tick, reading);
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -27,7 +48,13 @@ unsafe extern "C" fn meter_reset_totals() {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_snapshot() {
-    unsafe { (&*(&raw const METER)).overview(&mut *(&raw mut VIEW)) };
+    unsafe {
+        let view = &mut *(&raw mut VIEW);
+        (&*(&raw const METER)).overview(view);
+        if *(&raw const UNCALIBRATED) {
+            view.set_uncalibrated();
+        }
+    };
 }
 
 #[unsafe(no_mangle)]
