@@ -103,6 +103,7 @@ fn glyph(ch: u8) -> u32 {
         b'-' => 0x00700,
         b'.' => 0x00002,
         b'+' => 0x02720,
+        b':' => 0x02020,
         _ => 0,
     }
 }
@@ -199,6 +200,18 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
         }
     } else {
         p.text(12, 176, b"POWER 60S", 2, MUTED);
+        let seconds = view.elapsed_seconds;
+        let parts = [seconds / 3600, seconds / 60 % 60, seconds % 60];
+        let digits = b"0123456789";
+        p.text(136, 176, b"T", 2, MUTED);
+        for (index, part) in parts.into_iter().enumerate() {
+            let x = 152 + index * 24;
+            p.text(x, 176, &digits[(part / 10) as usize..][..1], 2, MUTED);
+            p.text(x + 8, 176, &digits[(part % 10) as usize..][..1], 2, MUTED);
+            if index < 2 {
+                p.text(x + 16, 176, b":", 2, MUTED);
+            }
+        }
     }
     p.rect(12, 191, 216, 39, CARD);
     if top >= 184 {

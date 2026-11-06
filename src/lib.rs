@@ -46,6 +46,7 @@ pub struct Overview {
     pd_diagnostic: Option<Option<(u32, u8)>>,
     mah: u64,
     mwh: u64,
+    elapsed_seconds: u32,
     power_mw: [Option<u32>; 60],
 }
 
@@ -63,6 +64,7 @@ impl Overview {
             pd_diagnostic: None,
             mah: 0,
             mwh: 0,
+            elapsed_seconds: 0,
             power_mw: [None; 60],
         }
     }
@@ -130,6 +132,7 @@ impl Meter {
         view.reading = self.reading;
         view.mah = self.tracker.totals.milliamp_hours();
         view.mwh = self.tracker.totals.milliwatt_hours();
+        view.elapsed_seconds = (self.tracker.totals.elapsed_ms / 1000).min(359_999) as u32;
         for (out, sample) in view
             .power_mw
             .iter_mut()
@@ -194,5 +197,24 @@ mod tests {
         meter.overview(&mut view);
         assert_eq!(view.power_mw[58..], [Some(5000), None]);
         assert_eq!((view.mah, view.mwh), (0, 0));
+    }
+
+    #[test]
+    fn elapsed_time_counts_missing_samples_and_resets() {
+        let mut meter = Meter::new(0);
+        meter.sample(0, None);
+        meter.sample(65_999, None);
+        let mut view = Overview::default();
+        meter.overview(&mut view);
+        assert_eq!(view.elapsed_seconds, 65);
+        meter.reset_totals();
+        meter.overview(&mut view);
+        assert_eq!(view.elapsed_seconds, 0);
+        meter.sample(66_999, None);
+        meter.overview(&mut view);
+        assert_eq!(view.elapsed_seconds, 1);
+        meter.sample(u32::MAX, None);
+        meter.overview(&mut view);
+        assert_eq!(view.elapsed_seconds, 359_999);
     }
 }

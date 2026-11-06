@@ -8,6 +8,8 @@ Experimental Rust firmware for the ATORCH T3P USB power meter, building on [KWS-
 
 The default build is a **startup and display demo with simulated readings**. It displays voltage, signed current and power, charge and energy totals, and a 60-second power graph. A PA11 total reset and an experimental, uncalibrated measurement build are implemented. USB PD and charger protocols remain to be implemented.
 
+The overview also shows `T HH:MM:SS`, elapsed time since startup or the last total reset, counting even when the reading is missing or current is zero. A left-button press resets the time together with Ah and Wh. The display stops at `99:59:59`; totals and elapsed time are not retained on restart. The separate PD-diagnostic build uses this area for its diagnostic line. The elapsed-time display still needs an on-device test.
+
 On 2026-11-06 the user reported flashing the demo to a T3P and supplied photographs showing the demo screen, two different simulated readings, changing totals and graph history. The reported test used the prepared demo image, whose local SHA-256 is `b557f5fd89697917a11d07538279e0a6b78f83325ad2aa23b85af3db35f4f0ef`. The photographs do not verify the button, exact timing, cold boot, or real measurement.
 
 The user subsequently reported difficulty seeing the zero totals. In a later video, both Ah and Wh are visibly `0.000` after the button press, then begin increasing again. The video does not establish which image revision was installed. The current code polls the button between display strips and requests a fresh snapshot after a detected reset; that specific revision still needs confirmation on the device.
@@ -26,7 +28,9 @@ In a later test with a USB-C breakout inserted between the source cable and T3P,
 
 With a Framework FRANDVCH00 source, Sumitomo Electric DC-010338 cable, and ASD-PD31 load, photographs show current readings of 1.002 / 1.000 A, 1.500 / 1.500 A, and 3.007 / 3.000 A (T3P / ASD-PD31) at a fixed 5 V request. At 20 V and 48 V fixed requests, the readings were 5.011 / 5.000 A and 5.012 / 5.000 A; the 48 V photograph shows 47.435 V and 237.754 W on T3P. HID was powered through an isolator connected to a PC. These are comparisons with another instrument, not calibration; voltage measurement points can differ. The ASD-PD31 requests the PD contracts. Accumulation timing and energy accuracy remain unverified on hardware.
 
-In an approximately 8 min 35 s continuous 1 A test, T3P displayed 0.143 Ah and 0.724 Wh; the photographed instantaneous values were 1.001 A and 5.069 W. The result is consistent with the approximate duration and load, although the initial timing, load variations, display refresh and calibration limit precision. The graph now uses a minimum 1 W full-scale so milliwatt-level noise does not fill it; numeric readings and integration are unchanged. This display change has not yet been tested on the device.
+In an approximately 8 min 35 s continuous 1 A test, T3P displayed 0.143 Ah and 0.724 Wh; the photographed instantaneous values were 1.001 A and 5.069 W. The result is consistent with the approximate duration and load, although the initial timing, load variations, display refresh and calibration limit precision. The graph now uses a minimum 1 W full-scale so milliwatt-level noise does not fill it; numeric readings and integration are unchanged.
+
+The user later tested the graph change on the device: photographs show low bars with no load and a rising graph at approximately 1 A. The photograph of the latter shows 1.000 A on both T3P and ASD-PD31.
 
 ## PC preview
 
