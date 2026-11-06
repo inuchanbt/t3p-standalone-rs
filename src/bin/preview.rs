@@ -14,6 +14,8 @@ fn main() -> io::Result<()> {
     let missing = flags.iter().any(|x| x == "--missing");
     let pd = flags.iter().any(|x| x == "--pd");
     let peaks = flags.iter().any(|x| x == "--peaks");
+    let voltage = flags.iter().any(|x| x == "--voltage");
+    let current = flags.iter().any(|x| x == "--current");
     let mut output = BufWriter::new(File::create(path)?);
     let mut meter = Meter::new(0);
     if measurement {
@@ -35,8 +37,16 @@ fn main() -> io::Result<()> {
         }
     }
     let mut view = Overview::default();
+    view.set_page(if peaks {
+        1
+    } else if voltage {
+        2
+    } else if current {
+        3
+    } else {
+        0
+    });
     meter.overview(&mut view);
-    view.set_show_peaks(peaks);
     if measurement {
         view.set_uncalibrated();
     }

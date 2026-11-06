@@ -10,7 +10,7 @@ ATORCH T3P USB 電力計向けの実験的な Rust ファームウェアです�
 
 画面の `T HH:MM:SS` は起動時または積算リセット後の経過時間です。測定値が取得できない間や電流ゼロの間も進みます。実機で時間が進み Ah・Wh とともにリセットされることを確認しました。表示は `99:59:59` で止まり（実機未確認）、積算値と時間は再起動後に復元されません。PD 診断版では同じ領域に診断値を表示します。
 
-実験的な最大値画面は、起動時またはリセット後の電圧・電流の大きさ・電力の大きさの最大値をそれぞれ記録します。左ボタンを約1秒長押しすると `T3P METER` と `T3P MAX` を切り替えます。短く押して**離す**と Ah・Wh・経過時間と最大値がリセットされます。長押しで積算値を消さないよう、短押しのリセットはボタンを離した時に行います。どちらの画面でも積算とグラフは進みます。各最大値は異なる時点の値になり得るため、最大電圧と最大電流の積が最大電力と一致するとは限りません。最大値画面と変更後のボタン操作は実機確認待ちです。
+最大値画面と従来のボタン操作は実機で確認され、最大値は電源断で消えることも報告されました。新しい実験版では、左ボタンの短押し・離す操作で、電力グラフ、最大値、電圧グラフ、電流グラフを順に切り替えます。約1秒の長押しで Ah・Wh・経過時間と最大値をリセットします。電流グラフは絶対値を表示します。グラフ履歴は画面間で共有し、リセットしても消えません。各最大値は異なる時点の値になり得るため、最大電圧と最大電流の積が最大電力と一致するとは限りません。新しい操作とグラフ種別は実機確認待ちです。
 
 2026-11-06 にユーザーからデモを T3P へ書き込んだ報告と写真を受領しました。写真ではデモ画面、2種類の模擬値、積算値とグラフ履歴の変化を確認できます。報告された試験用に準備したデモ画像のローカル SHA-256 は `b557f5fd89697917a11d07538279e0a6b78f83325ad2aa23b85af3db35f4f0ef` です。写真だけではボタン、正確な時間、電源を入れ直した後の起動、実測は確認できていません。
 
@@ -57,9 +57,9 @@ cargo run --offline --bin preview -- build/preview.ppm
 python check_pi32.py --sim PI32V2_ISAのパス
 ```
 
-実測候補は `build.py` に `--measurement` を付けます。PC 比較画像を `cargo run --offline --bin preview -- build/measurement/preview-measurement.ppm --measurement`、`cargo run --offline --bin preview -- build/measurement/preview-peaks.ppm --measurement --peaks`、`cargo run --offline --bin preview -- build/measurement/preview-missing.ppm --measurement --missing` で生成し、`python check_pi32.py --build-dir build/measurement --measurement --sim PI32V2_ISAのパス` で照合します。
+実測候補は `build.py` に `--measurement` を付けます。PC 比較画像を `cargo run --offline --bin preview -- build/measurement/preview-measurement.ppm --measurement` と、同様に `preview-peaks.ppm --measurement --peaks`、`preview-voltage.ppm --measurement --voltage`、`preview-current.ppm --measurement --current`、`preview-missing.ppm --measurement --missing` で生成し、`python check_pi32.py --build-dir build/measurement --measurement --sim PI32V2_ISAのパス` で照合します。
 
-PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記3枚の比較画像を `build/pd-diagnostic` に生成し、さらに `cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd` で診断表示を生成して、`python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PI32V2_ISAのパス` で照合します。表示される5バイトは順に 0x01、0x02、0x08、0x0B、0x40 レジスターの値です。
+PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記5枚の比較画像を `build/pd-diagnostic` に生成し、さらに `cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd` で診断表示を生成して、`python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PI32V2_ISAのパス` で照合します。表示される5バイトは順に 0x01、0x02、0x08、0x0B、0x40 レジスターの値です。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

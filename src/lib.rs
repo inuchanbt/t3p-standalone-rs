@@ -22,7 +22,7 @@ mod settings {
 }
 
 use energy::{Totals, Tracker};
-use power_history::{GraphWindow, History, Sample};
+use power_history::{GraphTrace, GraphWindow, History, Sample};
 use settings::TimerMode;
 
 pub const SIDE: usize = 240;
@@ -48,8 +48,8 @@ pub struct Overview {
     mwh: u64,
     elapsed_seconds: u32,
     peaks: Option<(u16, u16, u32)>,
-    show_peaks: bool,
-    power_mw: [Option<u32>; 60],
+    page: u32,
+    graph_values: [Option<u32>; 60],
 }
 
 impl Default for Overview {
@@ -68,8 +68,8 @@ impl Overview {
             mwh: 0,
             elapsed_seconds: 0,
             peaks: None,
-            show_peaks: false,
-            power_mw: [None; 60],
+            page: 0,
+            graph_values: [None; 60],
         }
     }
 
@@ -81,8 +81,8 @@ impl Overview {
         self.pd_diagnostic = Some(registers);
     }
 
-    pub fn set_show_peaks(&mut self, show: bool) {
-        self.show_peaks = show;
+    pub fn set_page(&mut self, page: u32) {
+        self.page = page % 4;
     }
 }
 
@@ -153,12 +153,17 @@ impl Meter {
         view.mah = self.tracker.totals.milliamp_hours();
         view.mwh = self.tracker.totals.milliwatt_hours();
         view.elapsed_seconds = (self.tracker.totals.elapsed_ms / 1000).min(359_999) as u32;
+        let trace = match view.page {
+            2 => GraphTrace::Voltage,
+            3 => GraphTrace::Current,
+            _ => GraphTrace::Power,
+        };
         for (out, sample) in view
-            .power_mw
+            .graph_values
             .iter_mut()
             .zip(self.history.recent(GraphWindow::Min1))
         {
-            *out = sample.map(|s| s.mw);
+            *out = sample.map(|s| trace.value(s));
         }
     }
 }
@@ -198,12 +203,12 @@ mod tests {
         let mut view = Overview::default();
         meter.overview(&mut view);
         assert_eq!((view.mah, view.mwh), (1, 5));
-        assert_eq!(view.power_mw[59], Some(18_000));
+        assert_eq!(view.graph_values[59], Some(18_000));
         meter.reset_totals();
         meter.sample(first.wrapping_add(1100), None);
         meter.overview(&mut view);
         assert_eq!((view.mah, view.mwh), (0, 0));
-        assert_eq!(view.power_mw[59], Some(18_000));
+        assert_eq!(view.graph_values[59], Some(18_000));
         assert!(view.reading.is_none());
     }
 
@@ -215,7 +220,7 @@ mod tests {
         meter.sample(2000, Some(Reading { mv: 5000, ma: 2000 }));
         let mut view = Overview::default();
         meter.overview(&mut view);
-        assert_eq!(view.power_mw[58..], [Some(5000), None]);
+        assert_eq!(view.graph_values[58..], [Some(5000), None]);
         assert_eq!((view.mah, view.mwh), (0, 0));
     }
 
@@ -261,5 +266,24 @@ mod tests {
         meter.sample(400, Some(Reading { mv: 5000, ma: 1000 }));
         meter.overview(&mut view);
         assert_eq!(view.peaks, Some((5000, 1000, 5000)));
+    }
+
+    #[test]
+    fn graph_pages_select_the_existing_history_without_losing_it() {
+        let mut meter = Meter::new(0);
+        meter.sample(
+            0,
+            Some(Reading {
+                mv: 5000,
+                ma: -2000,
+            }),
+        );
+        meter.sample(1000, None);
+        let mut view = Overview::default();
+        for (page, expected) in [(0, 10000), (1, 10000), (2, 5000), (3, 2000), (4, 10000)] {
+            view.set_page(page);
+            meter.overview(&mut view);
+            assert_eq!(view.graph_values[59], Some(expected));
+        }
     }
 }

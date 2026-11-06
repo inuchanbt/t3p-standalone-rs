@@ -22,7 +22,7 @@ mod tests {
     #[test]
     fn low_power_noise_does_not_fill_graph() {
         let mut view = Overview::default();
-        view.power_mw[59] = Some(5);
+        view.graph_values[59] = Some(5);
         let mut pixels = [0; SIDE * STRIP_ROWS];
         render_demo_strip(&view, 224, &mut pixels);
         let x = 13 + 59 * 214 / 60;
@@ -142,7 +142,7 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
     p.text(
         12,
         12,
-        if view.show_peaks {
+        if view.page == 1 {
             b"T3P MAX  "
         } else {
             b"T3P METER"
@@ -171,7 +171,7 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
     {
         let y = 45 + index * 27;
         p.text(21, y + 2, &[label], 3, color);
-        let display = if view.show_peaks {
+        let display = if view.page == 1 {
             view.peaks.map(|(v, a, w)| {
                 (
                     match index {
@@ -235,7 +235,17 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
             p.text(36, 176, b"-- -- -- -- --", 2, MUTED);
         }
     } else {
-        p.text(12, 176, b"POWER 60S", 2, MUTED);
+        p.text(
+            12,
+            176,
+            match view.page {
+                2 => b"VOLT  60S",
+                3 => b"AMPS  60S",
+                _ => b"POWER 60S",
+            },
+            2,
+            MUTED,
+        );
         let seconds = view.elapsed_seconds;
         let parts = [seconds / 3600, seconds / 60 % 60, seconds % 60];
         let digits = b"0123456789";
@@ -255,18 +265,23 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
             p.rect(12, y, 216, 1, GRID);
         }
         let max = view
-            .power_mw
+            .graph_values
             .iter()
             .copied()
             .flatten()
             .max()
-            // Keep milliwatt-level zero noise from filling the entire graph.
+            // Minimum full scale: 1 W, 1 V, or 1 A, depending on the trace.
             .unwrap_or(1000)
             .max(1000);
-        for (index, sample) in view.power_mw.iter().enumerate() {
+        for (index, sample) in view.graph_values.iter().enumerate() {
             if let Some(mw) = sample {
                 let height = (*mw * 37 / max).max(1) as usize;
-                p.rect(13 + index * 214 / 60, 229 - height, 2, height, WATTS);
+                let color = match view.page {
+                    2 => VOLTS,
+                    3 => AMPS,
+                    _ => WATTS,
+                };
+                p.rect(13 + index * 214 / 60, 229 - height, 2, height, color);
             }
         }
     }
