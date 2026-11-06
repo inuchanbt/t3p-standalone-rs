@@ -241,7 +241,17 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
     );
     p.rect(8, 28, 224, 1, color);
     p.rect(8, 219, 224, 1, GRID);
-    p.text(8, 226, b"TAP NEXT  HOLD RESET", 1, MUTED);
+    p.text(
+        8,
+        226,
+        if view.page >= 2 {
+            b"TAP NEXT 2X RANGE HOLD RESET"
+        } else {
+            b"TAP NEXT  HOLD RESET"
+        },
+        1,
+        MUTED,
+    );
     p.text(186, 226, b"RAM ONLY", 1, MUTED);
 }
 
@@ -363,9 +373,9 @@ fn energy(p: &mut Strip<'_>, view: &Overview) {
 
 fn graph(p: &mut Strip<'_>, view: &Overview) {
     let (title, unit, color): (&[u8], &[u8], u16) = match view.page {
-        3 => (b"VOLTAGE 60S", b"V", VOLTS),
-        4 => (b"CURRENT 60S", b"A", AMPS),
-        _ => (b"POWER 60S", b"W", WATTS),
+        3 => (b"VOLTAGE", b"V", VOLTS),
+        4 => (b"CURRENT", b"A", AMPS),
+        _ => (b"POWER", b"W", WATTS),
     };
     let live = view.reading.map(|r| match view.page {
         3 => (u64::from(r.mv), false),
@@ -382,6 +392,18 @@ fn graph(p: &mut Strip<'_>, view: &Overview) {
     value(p, 14, 55, 97, live, unit, color, 3);
     value(p, 129, 55, 97, max, unit, color, 3);
     p.text(8, 95, title, 2, color);
+    p.text(
+        170,
+        95,
+        match view.graph_window {
+            1 => b"2 MIN ",
+            2 => b"5 MIN ",
+            3 => b"10 MIN",
+            _ => b"1 MIN ",
+        },
+        2,
+        color,
+    );
     p.rect(8, 112, 224, 100, PANEL);
     if p.top >= 104 && p.top < 216 {
         let mut digits = [0; 11];
@@ -405,6 +427,9 @@ fn graph(p: &mut Strip<'_>, view: &Overview) {
             if *height == 255 {
                 previous = None;
                 continue;
+            }
+            if view.graph_breaks[index] {
+                previous = None;
             }
             let x = 65 + index * 165 / 59;
             let y = 203 - usize::from(*height);
@@ -431,7 +456,11 @@ fn graph(p: &mut Strip<'_>, view: &Overview) {
             } else {
                 p.rect(x, y, 1, 1, color);
             }
-            previous = Some((x, y));
+            previous = if view.graph_breaks[index] {
+                None
+            } else {
+                Some((x, y))
+            };
         }
     }
 }
@@ -485,6 +514,26 @@ mod tests {
         let x = 65 + 59 * 165 / 59;
         assert_eq!(pixels[(203 - 200) * SIDE + x], WATTS);
         assert_ne!(pixels[(202 - 200) * SIDE + x], WATTS);
+    }
+
+    #[test]
+    fn partly_missing_bins_do_not_join_neighbouring_points() {
+        let mut view = Overview::default();
+        view.set_page(2);
+        view.graph_values[0..3].fill(Some(2000));
+        view.graph_breaks[1] = true;
+        view.update_graph();
+        let mut pixels = [0; SIDE * STRIP_ROWS];
+        render_demo_strip(&view, 112, &mut pixels);
+        let row = (118 - 112) * SIDE;
+        let x0 = 65;
+        let x1 = 65 + 165 / 59;
+        let x2 = 65 + 2 * 165 / 59;
+        assert_eq!(pixels[row + x0], WATTS);
+        assert_eq!(pixels[row + x1], WATTS);
+        assert_eq!(pixels[row + x2], WATTS);
+        assert_ne!(pixels[row + x0 + 1], WATTS);
+        assert_ne!(pixels[row + x1 + 1], WATTS);
     }
 
     #[test]

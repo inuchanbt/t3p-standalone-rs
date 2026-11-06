@@ -49,7 +49,9 @@ pub struct Overview {
     elapsed_seconds: u32,
     peaks: Option<(u16, u16, u32)>,
     page: u32,
+    graph_window: u32,
     graph_values: [Option<u32>; 60],
+    graph_breaks: [bool; 60],
     graph_max: u32,
     graph_heights: [u8; 60],
 }
@@ -71,7 +73,9 @@ impl Overview {
             elapsed_seconds: 0,
             peaks: None,
             page: 0,
+            graph_window: 0,
             graph_values: [None; 60],
+            graph_breaks: [false; 60],
             graph_max: 1000,
             graph_heights: [255; 60],
         }
@@ -87,6 +91,10 @@ impl Overview {
 
     pub fn set_page(&mut self, page: u32) {
         self.page = page % 5;
+    }
+
+    pub fn set_graph_window(&mut self, window: u32) {
+        self.graph_window = window % 4;
     }
 
     fn update_graph(&mut self) {
@@ -174,19 +182,43 @@ impl Meter {
         view.mah = self.tracker.totals.milliamp_hours();
         view.mwh = self.tracker.totals.milliwatt_hours();
         view.elapsed_seconds = (self.tracker.totals.elapsed_ms / 1000).min(359_999) as u32;
-        let trace = match view.page {
-            3 => GraphTrace::Voltage,
-            4 => GraphTrace::Current,
-            _ => GraphTrace::Power,
-        };
-        for (out, sample) in view
-            .graph_values
-            .iter_mut()
-            .zip(self.history.recent(GraphWindow::Min1))
-        {
-            *out = sample.map(|s| trace.value(s));
-        }
         if view.page >= 2 {
+            let trace = match view.page {
+                3 => GraphTrace::Voltage,
+                4 => GraphTrace::Current,
+                _ => GraphTrace::Power,
+            };
+            let window = match view.graph_window {
+                1 => GraphWindow::Min2,
+                2 => GraphWindow::Min5,
+                3 => GraphWindow::Min10,
+                _ => GraphWindow::Min1,
+            };
+            let per_bin = window.seconds() / 60;
+            let mut history = self.history.recent(window);
+            for (out, gap) in view
+                .graph_values
+                .iter_mut()
+                .zip(view.graph_breaks.iter_mut())
+            {
+                let mut sum = 0u32;
+                let mut count = 0u32;
+                let mut missing = false;
+                for _ in 0..per_bin {
+                    if let Some(Some(sample)) = history.next() {
+                        sum = sum.saturating_add(trace.value(sample));
+                        count += 1;
+                    } else {
+                        missing = true;
+                    }
+                }
+                *out = if count == 0 {
+                    None
+                } else {
+                    Some(sum / count.max(1))
+                };
+                *gap = missing && count != 0;
+            }
             view.update_graph();
         }
     }
@@ -225,6 +257,7 @@ mod tests {
         meter.sample(first, reading);
         meter.sample(first.wrapping_add(1000), reading);
         let mut view = Overview::default();
+        view.set_page(2);
         meter.overview(&mut view);
         assert_eq!((view.mah, view.mwh), (1, 5));
         assert_eq!(view.graph_values[59], Some(18_000));
@@ -243,6 +276,7 @@ mod tests {
         meter.sample(1000, None);
         meter.sample(2000, Some(Reading { mv: 5000, ma: 2000 }));
         let mut view = Overview::default();
+        view.set_page(2);
         meter.overview(&mut view);
         assert_eq!(view.graph_values[58..], [Some(5000), None]);
         assert_eq!((view.mah, view.mwh), (0, 0));
@@ -304,17 +338,41 @@ mod tests {
         );
         meter.sample(1000, None);
         let mut view = Overview::default();
-        for (page, expected) in [
-            (0, 10000),
-            (1, 10000),
-            (2, 10000),
-            (3, 5000),
-            (4, 2000),
-            (5, 10000),
-        ] {
+        for (page, expected) in [(2, 10000), (3, 5000), (4, 2000), (7, 10000)] {
             view.set_page(page);
             meter.overview(&mut view);
             assert_eq!(view.graph_values[59], Some(expected));
         }
+    }
+
+    #[test]
+    fn longer_windows_average_bins_and_mark_partial_gaps() {
+        let mut meter = Meter::new(0);
+        meter.sample(0, Some(Reading { mv: 5000, ma: 1000 }));
+        meter.sample(1000, Some(Reading { mv: 5000, ma: 2000 }));
+        meter.sample(2000, None);
+        meter.sample(3000, Some(Reading { mv: 5000, ma: 3000 }));
+        meter.sample(4000, None);
+        let mut view = Overview::default();
+        view.set_page(2);
+        view.set_graph_window(1);
+        meter.overview(&mut view);
+        assert_eq!(view.graph_values[58..], [Some(7500), Some(15000)]);
+        assert_eq!(view.graph_breaks[58..], [false, true]);
+        view.set_graph_window(2);
+        meter.overview(&mut view);
+        assert_eq!(view.graph_values[59], Some(10000));
+        assert!(view.graph_breaks[59]);
+        view.set_graph_window(3);
+        meter.overview(&mut view);
+        assert_eq!(view.graph_values[59], Some(10000));
+        assert!(view.graph_breaks[59]);
+        view.set_graph_window(4);
+        meter.overview(&mut view);
+        assert_eq!(view.graph_window, 0);
+        assert_eq!(
+            view.graph_values[56..],
+            [Some(5000), Some(10000), None, Some(15000)]
+        );
     }
 }

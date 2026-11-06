@@ -20,6 +20,7 @@ static mut PD_VALID: bool = false;
 static mut PD_FIRST: u32 = 0;
 static mut PD_LAST: u8 = 0;
 static mut PAGE: u32 = 0;
+static mut GRAPH_WINDOW: u32 = 0;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_demo_sample(tick: u32) {
@@ -67,10 +68,22 @@ unsafe extern "C" fn meter_next_page() {
 }
 
 #[unsafe(no_mangle)]
+unsafe extern "C" fn meter_double_press() {
+    unsafe {
+        if *(&raw const PAGE) >= 2 {
+            *(&raw mut GRAPH_WINDOW) = (*(&raw const GRAPH_WINDOW) + 1) % 4;
+        } else {
+            *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % 5;
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 unsafe extern "C" fn meter_snapshot() {
     unsafe {
         let view = &mut *(&raw mut VIEW);
         view.set_page(*(&raw const PAGE));
+        view.set_graph_window(*(&raw const GRAPH_WINDOW));
         (&*(&raw const METER)).overview(view);
         if *(&raw const UNCALIBRATED) {
             view.set_uncalibrated();

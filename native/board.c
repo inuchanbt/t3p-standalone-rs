@@ -17,6 +17,7 @@ void meter_live_sample(uint32_t tick, uint32_t valid, uint32_t mv, int32_t ma);
 void meter_pd_diagnostic(uint32_t valid, uint32_t first_four, uint32_t last);
 void meter_reset_totals(void);
 void meter_next_page(void);
+void meter_double_press(void);
 void meter_snapshot(void);
 void meter_demo_render(uint32_t top, uint16_t pixels[PANEL_SIDE * STRIP_ROWS]);
 
@@ -45,6 +46,7 @@ static unsigned poll_key(uint32_t now)
 {
     enum t3p_button_event event = t3p_button_poll(&button, now, key_pressed());
     if (event == T3P_BUTTON_SHORT) { meter_next_page(); return 1; }
+    if (event == T3P_BUTTON_DOUBLE) { meter_double_press(); return 1; }
     if (event == T3P_BUTTON_LONG) { meter_reset_totals(); return 1; }
     return 0;
 }

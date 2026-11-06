@@ -18,9 +18,22 @@ fn main() -> io::Result<()> {
     let voltage = flags.iter().any(|x| x == "--voltage");
     let current = flags.iter().any(|x| x == "--current");
     let extreme = flags.iter().any(|x| x == "--extreme");
+    let long_history = flags.iter().any(|x| x == "--long-history");
     let mut output = BufWriter::new(File::create(path)?);
     let mut meter = Meter::new(0);
-    if measurement {
+    if long_history {
+        for second in 0..=600 {
+            let reading = if (300..310).contains(&second) {
+                None
+            } else {
+                Some(Reading {
+                    mv: 5000,
+                    ma: if second < 300 { 1000 } else { 2000 },
+                })
+            };
+            meter.sample(second * 1000, reading);
+        }
+    } else if measurement {
         for tick in (0..=1_000).step_by(100) {
             meter.sample(
                 tick,
@@ -57,8 +70,17 @@ fn main() -> io::Result<()> {
     } else {
         0
     });
+    view.set_graph_window(if flags.iter().any(|x| x == "--window2") {
+        1
+    } else if flags.iter().any(|x| x == "--window5") {
+        2
+    } else if flags.iter().any(|x| x == "--window10") {
+        3
+    } else {
+        0
+    });
     meter.overview(&mut view);
-    if measurement {
+    if measurement || long_history {
         view.set_uncalibrated();
     }
     if pd {

@@ -6,13 +6,13 @@ ATORCH T3P USB 電力計向けの実験的な Rust ファームウェアです�
 
 ## 現在の状態
 
-標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近60秒の電力・電圧・電流を表示します。USB PD と充電プロトコルの実装はこれからで、取得できない情報は未対応と表示します。
+標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近1・2・5・10分の電力・電圧・電流を表示します。USB PD と充電プロトコルの実装はこれからで、取得できない情報は未対応と表示します。
 
 ENERGY 画面の時間は起動時または積算リセット後の経過時間です。測定値が取得できない間や電流ゼロの間も進みます。旧画面の実機で時間が進み Ah・Wh とともにリセットされることを確認しました。表示は `99:59:59` で止まり（実機未確認）、積算値と時間は再起動後に復元されません。PD 診断版では OVERVIEW の PROTOCOL 欄に生の診断値を表示します。
 
-旧版の最大値表示と従来のボタン操作は実機で確認され、最大値は電源断で消えることも報告されました。左ボタンの短押し・離す操作で、OVERVIEW、ENERGY、電力・電圧・電流の各グラフを順に切り替えます。約1秒の長押しで Ah・Wh・経過時間と最大値をリセットします。電流グラフは絶対値を表示します。グラフ履歴は画面間で共有し、リセットしても消えません。各最大値は異なる時点の値になり得るため、最大電圧と最大電流の積が最大電力と一致するとは限りません。新しい画面構成は実機確認待ちです。
+KWS 風の画面と従来のボタン操作は実機で確認され、最大値は電源断で消えることも報告されました。左ボタンの短押し・離す操作で、OVERVIEW、ENERGY、電力・電圧・電流の各グラフを順に切り替えます。グラフ画面ではダブル押しで1・2・5・10分を切り替え、他の画面ではダブル押しも1ページ進みます。約1秒の長押しで Ah・Wh・経過時間と最大値をリセットします。短押しはダブル押し判定のため約350 ms 後に確定します。電流グラフは絶対値を表示します。グラフ履歴は画面間で共有し、リセットしても消えません。各最大値は異なる時点の値になり得るため、最大電圧と最大電流の積が最大電力と一致するとは限りません。新しい期間切り替えとボタン判定は実機確認待ちです。
 
-目盛り付き折れ線グラフは旧画面で実機確認済みです。1秒ごとの平均値を線で結び、データのない区間は途切れさせます。縦軸はゼロと、単位付きの上限を表示します。上限は表示中60秒の最大値に合わせて 1・2・2.5・5 の段階に切り上げ、最小 1 W／V／A とします。上限が変わると線全体の高さも変わります。正方形向けに拡大した新しい配置は実機確認待ちです。
+正方形向けの目盛り付き折れ線グラフは実機確認済みです。各期間を60点にまとめ、それぞれ1・2・5・10秒の平均を表示します。一部に欠測がある区間は孤立した点、全て欠測の区間は空白にします。縦軸はゼロと、単位付きの上限を表示します。上限は表示範囲の平均値の最大に合わせて 1・2・2.5・5 の段階に切り上げ、最小 1 W／V／A とします。上限が変わると線全体の高さも変わります。長い期間は実機確認待ちです。
 
 2026-11-06 にユーザーからデモを T3P へ書き込んだ報告と写真を受領しました。写真ではデモ画面、2種類の模擬値、積算値とグラフ履歴の変化を確認できます。報告された試験用に準備したデモ画像のローカル SHA-256 は `b557f5fd89697917a11d07538279e0a6b78f83325ad2aa23b85af3db35f4f0ef` です。写真だけではボタン、正確な時間、電源を入れ直した後の起動、実測は確認できていません。
 
@@ -59,9 +59,9 @@ cargo run --offline --bin preview -- build/preview.ppm
 python check_pi32.py --sim PI32V2_ISAのパス
 ```
 
-実測候補は `build.py` に `--measurement` を付けます。PC 比較画像を `cargo run --offline --bin preview -- build/demo-graph.ppm --power`、`cargo run --offline --bin preview -- build/measurement/preview-measurement.ppm --measurement` と、同様に `preview-energy.ppm --measurement --energy`、`preview-power.ppm --measurement --power`、`preview-voltage.ppm --measurement --voltage`、`preview-current.ppm --measurement --current`、`preview-missing.ppm --measurement --missing` で生成し、`python check_pi32.py --build-dir build/measurement --measurement --sim PI32V2_ISAのパス` で照合します。
+実測候補は `build.py` に `--measurement` を付けます。PC 比較画像を `cargo run --offline --bin preview -- build/demo-graph.ppm --power`、`cargo run --offline --bin preview -- build/measurement/preview-measurement.ppm --measurement` と、同様に `preview-energy.ppm --measurement --energy`、`preview-power.ppm --measurement --power`、`preview-voltage.ppm --measurement --voltage`、`preview-current.ppm --measurement --current`、`preview-missing.ppm --measurement --missing`、`preview-long.ppm --measurement --long-history --power --window10` で生成し、`python check_pi32.py --build-dir build/measurement --measurement --sim PI32V2_ISAのパス` で照合します。
 
-PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記6枚の実測比較画像を `build/pd-diagnostic` に生成し、共有の `build/demo-graph.ppm` と、`cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd` で診断表示を生成して、`python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PI32V2_ISAのパス` で照合します。表示される5バイトは順に 0x01、0x02、0x08、0x0B、0x40 レジスターの値です。
+PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記7枚の実測比較画像を `build/pd-diagnostic` に生成し、共有の `build/demo-graph.ppm` と、`cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd` で診断表示を生成して、`python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PI32V2_ISAのパス` で照合します。表示される5バイトは順に 0x01、0x02、0x08、0x0B、0x40 レジスターの値です。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

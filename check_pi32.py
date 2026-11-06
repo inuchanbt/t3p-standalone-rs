@@ -86,10 +86,10 @@ def main():
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-measurement.ppm").read_bytes():
             raise ValueError("Pi32v2 measurement input frame differs from host preview")
-        cpu.call(symbols["meter_next_page"], [])
+        cpu.call(symbols["meter_double_press"], [])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-energy.ppm").read_bytes():
-            raise ValueError("Pi32v2 energy frame differs from host preview")
+            raise ValueError("Pi32v2 energy frame or non-graph double press differs from host preview")
         for name in ("power", "voltage", "current"):
             cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_snapshot"], [])
@@ -107,6 +107,20 @@ def main():
             if render() != (out / "preview-pd.ppm").read_bytes():
                 raise ValueError("Pi32v2 PD diagnostic frame differs from host preview")
             print("Pi32v2 read-only PD diagnostic frame matches")
+        cpu.load_elf((out / "t3p-meter-demo.elf").read_bytes())
+        cpu.sp = symbols["__runtime_stack_end"]
+        for second in range(601):
+            valid = not 300 <= second < 310
+            current = 1000 if second < 300 else 2000
+            cpu.call(symbols["meter_live_sample"], [second * 1000, int(valid), 5000, current])
+        cpu.call(symbols["meter_next_page"], [])
+        cpu.call(symbols["meter_next_page"], [])
+        for _ in range(3):
+            cpu.call(symbols["meter_double_press"], [])
+        cpu.call(symbols["meter_snapshot"], [])
+        if render() != (out / "preview-long.ppm").read_bytes():
+            raise ValueError("Pi32v2 ten-minute history differs from host preview")
+        print("Pi32v2 ten-minute graph, gaps and range switching match")
 
 
 if __name__ == "__main__":
