@@ -4,7 +4,9 @@ use std::{
     fs::File,
     io::{self, BufWriter, Write},
 };
-use t3p_standalone::{Meter, Overview, Reading, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
+use t3p_standalone::{
+    Meter, Overview, Reading, SIDE, STRIP_ROWS, SourceCaps, demo_reading, render_demo_strip,
+};
 
 fn main() -> io::Result<()> {
     let mut args = env::args_os().skip(1);
@@ -13,6 +15,9 @@ fn main() -> io::Result<()> {
     let measurement = flags.iter().any(|x| x == "--measurement");
     let missing = flags.iter().any(|x| x == "--missing");
     let pd = flags.iter().any(|x| x == "--pd");
+    let profiles_ui = flags.iter().any(|x| x == "--profiles-ui");
+    let profiles_page = flags.iter().any(|x| x == "--profiles-page");
+    let profiles_offer = flags.iter().any(|x| x == "--profiles-offer");
     let energy = flags.iter().any(|x| x == "--energy");
     let power = flags.iter().any(|x| x == "--power");
     let voltage = flags.iter().any(|x| x == "--voltage");
@@ -59,7 +64,21 @@ fn main() -> io::Result<()> {
         }
     }
     let mut view = Overview::default();
-    view.set_page(if energy {
+    if profiles_offer {
+        let frame: Vec<u8> = include_str!("../../tests/pd_offer.hex")
+            .split_whitespace()
+            .map(|hex| u8::from_str_radix(hex, 16).unwrap())
+            .collect();
+        let caps = SourceCaps::from_fifo(&frame)
+            .unwrap()
+            .expect("test source offer");
+        view.set_pd_profiles(2, 1, Some(caps));
+    } else if profiles_ui || profiles_page {
+        view.set_pd_profiles(0, 0, None);
+    }
+    view.set_page(if profiles_page || profiles_offer {
+        5
+    } else if energy {
         1
     } else if power {
         2

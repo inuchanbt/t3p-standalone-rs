@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+use crate::pd::{PROFILES_PAGE, Pdo, Profiles};
 use crate::{Overview, SIDE, STRIP_ROWS};
 
 const BG: u16 = 0x0000;
@@ -212,6 +213,7 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         1 => (b"ENERGY", WATTS),
         3 => (b"GRAPH", VOLTS),
         4 => (b"GRAPH", AMPS),
+        PROFILES_PAGE => (b"PD PROFILES", WATTS),
         _ => (b"GRAPH", WATTS),
     };
     p.text(8, 8, title, 2, color);
@@ -222,6 +224,19 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
             6,
             10,
             if view.page as usize == index {
+                color
+            } else {
+                GRID
+            },
+        );
+    }
+    if view.pd_profiles.is_some() {
+        p.rect(
+            170,
+            10,
+            6,
+            10,
+            if view.page == PROFILES_PAGE {
                 color
             } else {
                 GRID
@@ -244,10 +259,10 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
     p.text(
         8,
         226,
-        if view.page >= 2 {
-            b"TAP NEXT 2X RANGE HOLD RESET"
-        } else {
-            b"TAP NEXT  HOLD RESET"
+        match view.page {
+            PROFILES_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
+            2..PROFILES_PAGE => b"TAP NEXT 2X RANGE HOLD RESET",
+            _ => b"TAP NEXT  HOLD RESET",
         },
         1,
         MUTED,
@@ -357,9 +372,120 @@ fn overview(p: &mut Strip<'_>, view: &Overview) {
         } else {
             p.text(29, 196, b"-- -- -- -- --", 1, TEXT);
         }
+    } else if let Some(profiles) = view.pd_profiles {
+        p.text(14, 196, b"PD PROFILES", 1, AMPS);
+        p.text(84, 196, profiles.status(), 1, TEXT);
     } else {
         p.text(14, 196, b"PD NOT AVAILABLE", 1, MUTED);
     }
+}
+
+// PDO fields use coarser units than the meter, so two decimals are sufficient.
+fn pd_number(
+    p: &mut Strip<'_>,
+    x: usize,
+    y: usize,
+    milli_units: u32,
+    suffix: &[u8],
+    scale: usize,
+    color: u16,
+) -> usize {
+    let mut buffer = [0; 11];
+    let number = milli(u64::from(milli_units), false, &mut buffer);
+    let number = &number[..number.len() - 1];
+    p.text(x, y, number, scale, color);
+    p.text(x + number.len() * 5 * scale, y, suffix, scale, color);
+    x + (number.len() + suffix.len()) * 5 * scale
+}
+
+fn profiles(p: &mut Strip<'_>, pd: Profiles) {
+    p.text(8, 36, b"SPR OFFER", 1, WATTS);
+    p.text(94, 36, pd.status(), 1, TEXT);
+    if pd.cc != 0 {
+        p.text(215, 36, if pd.cc == 1 { b"CC1" } else { b"CC2" }, 1, AMPS);
+    }
+    let Some(caps) = pd.caps else {
+        p.outline(8, 54, 224, 142, GRID);
+        p.text(18, 70, b"RX ONLY", 2, WATTS);
+        let (message, hint): (&[u8], &[u8]) = match pd.state {
+            0 => (b"2X TO START ON CC1", b"USE A 5V TEST SETUP"),
+            1 => (
+                b"WAITING FOR SOURCE CAPABILITIES",
+                b"2X TO TRY THE OTHER CC",
+            ),
+            4 | 5 | 9 => (b"CAPTURE UNAVAILABLE", b"POWER CYCLE TO RETRY"),
+            _ => (b"NO OFFER SAVED", b"2X TO TRY THE OTHER CC"),
+        };
+        p.text(18, 108, message, 1, TEXT);
+        p.text(18, 129, hint, 1, MUTED);
+        return;
+    };
+    let mut has_avs = false;
+    for (index, &word) in caps.rows().iter().enumerate() {
+        let top = 54 + index * 21;
+        let pdo = Pdo::decode(word);
+        has_avs |= matches!(
+            pdo,
+            Pdo::SprAvs {
+                ma_above_15v: 1..,
+                ..
+            }
+        );
+        if top >= p.top + STRIP_ROWS || top + 20 <= p.top {
+            continue;
+        }
+        p.rect(8, top, 224, 20, PANEL);
+        let y = top + 3;
+        p.text(13, y + 4, &[b'1' + index as u8], 1, MUTED);
+        match pdo {
+            Pdo::Fixed { mv, ma } => {
+                p.text(26, y + 4, b"FIX", 1, MUTED);
+                pd_number(p, 52, y, mv, b"V", 2, VOLTS);
+                pd_number(p, 124, y, ma, b"A", 2, AMPS);
+                pd_number(p, 192, y + 4, mv * ma / 1000, b"W", 1, WATTS);
+            }
+            Pdo::Pps { min_mv, max_mv, ma } => {
+                p.text(26, y + 4, b"PPS", 1, MUTED);
+                let end = pd_number(p, 52, y + 4, min_mv, b"-", 1, VOLTS);
+                pd_number(p, end, y + 4, max_mv, b"V", 1, VOLTS);
+                pd_number(p, 124, y, ma, b"A", 2, AMPS);
+            }
+            Pdo::SprAvs {
+                ma_to_15v,
+                ma_above_15v,
+            } => {
+                p.text(26, y + 4, b"AVS", 1, MUTED);
+                if ma_above_15v == 0 {
+                    p.text(52, y, b"9-15V", 2, VOLTS);
+                    pd_number(p, 124, y, ma_to_15v, b"A", 2, AMPS);
+                } else {
+                    p.text(52, y, b"9-20V", 2, VOLTS);
+                    let end = pd_number(p, 124, y + 4, ma_to_15v, b"/", 1, AMPS);
+                    pd_number(p, end, y + 4, ma_above_15v, b"A", 1, AMPS);
+                }
+            }
+            Pdo::Raw(word) => {
+                p.text(26, y + 4, b"RAW", 1, MUTED);
+                let digits = b"0123456789ABCDEF";
+                let mut hex = [0; 8];
+                for (i, digit) in hex.iter_mut().enumerate() {
+                    *digit = digits[((word >> (28 - i * 4)) & 15) as usize];
+                }
+                p.text(52, y, &hex, 2, TEXT);
+            }
+        }
+    }
+    p.text(
+        8,
+        204,
+        if has_avs {
+            b"AVS A: 9-15V / 15-20V"
+        } else {
+            b"SOURCE ADVERTISED VALUES"
+        },
+        1,
+        MUTED,
+    );
 }
 
 fn energy(p: &mut Strip<'_>, view: &Overview) {
@@ -473,6 +599,11 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
     match view.page {
         0 => overview(&mut p, view),
         1 => energy(&mut p, view),
+        PROFILES_PAGE => {
+            if let Some(pd) = view.pd_profiles {
+                profiles(&mut p, pd);
+            }
+        }
         _ => graph(&mut p, view),
     }
 }

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+use crate::pd::PROFILES_PAGE;
 use crate::{Meter, Overview, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
+
+const PAGE_COUNT: u32 = PROFILES_PAGE + cfg!(feature = "pd-profiles") as u32;
 
 unsafe extern "C" {
     fn t3p_signal_failure(stage: u32) -> !;
@@ -21,6 +24,12 @@ static mut PD_FIRST: u32 = 0;
 static mut PD_LAST: u8 = 0;
 static mut PAGE: u32 = 0;
 static mut GRAPH_WINDOW: u32 = 0;
+#[cfg(feature = "pd-profiles")]
+static mut PD_STATE: u32 = 0;
+#[cfg(feature = "pd-profiles")]
+static mut PD_CC: u32 = 0;
+#[cfg(feature = "pd-profiles")]
+static mut PD_CAPS: Option<crate::SourceCaps> = None;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_demo_sample(tick: u32) {
@@ -64,17 +73,53 @@ unsafe extern "C" fn meter_reset_totals() {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_next_page() {
-    unsafe { *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % 5 };
+    unsafe { *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % PAGE_COUNT };
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn meter_double_press() {
+unsafe extern "C" fn meter_double_press() -> u32 {
     unsafe {
-        if *(&raw const PAGE) >= 2 {
+        let page = *(&raw const PAGE);
+        if cfg!(feature = "pd-profiles") && page == PROFILES_PAGE {
+            return 1;
+        }
+        if page >= 2 {
             *(&raw mut GRAPH_WINDOW) = (*(&raw const GRAPH_WINDOW) + 1) % 4;
         } else {
-            *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % 5;
+            *(&raw mut PAGE) = (page + 1) % PAGE_COUNT;
         }
+    }
+    0
+}
+
+#[cfg(feature = "pd-profiles")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_pd_status(state: u32, cc: u32) {
+    unsafe {
+        *(&raw mut PD_STATE) = state;
+        *(&raw mut PD_CC) = cc;
+        if state != 2 {
+            *(&raw mut PD_CAPS) = None;
+        }
+    }
+}
+
+#[cfg(feature = "pd-profiles")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_pd_record(frame: *const u8, length: u32) -> i32 {
+    // The board supplies a complete record from its live 35-byte buffer.
+    if !(7..=35).contains(&length) {
+        return -1;
+    }
+    match crate::SourceCaps::from_fifo(unsafe {
+        core::slice::from_raw_parts(frame, length as usize)
+    }) {
+        Ok(Some(caps)) => {
+            unsafe { *(&raw mut PD_CAPS) = Some(caps) };
+            1
+        }
+        Ok(None) => 0,
+        Err(_) => -1,
     }
 }
 
@@ -82,6 +127,12 @@ unsafe extern "C" fn meter_double_press() {
 unsafe extern "C" fn meter_snapshot() {
     unsafe {
         let view = &mut *(&raw mut VIEW);
+        #[cfg(feature = "pd-profiles")]
+        view.set_pd_profiles(
+            *(&raw const PD_STATE),
+            *(&raw const PD_CC),
+            *(&raw const PD_CAPS),
+        );
         view.set_page(*(&raw const PAGE));
         view.set_graph_window(*(&raw const GRAPH_WINDOW));
         (&*(&raw const METER)).overview(view);

@@ -23,12 +23,22 @@ def main():
     parser.add_argument("--build-dir", type=Path, default=ROOT / "build")
     parser.add_argument("--measurement", action="store_true")
     parser.add_argument("--pd-diagnostic", action="store_true")
+    parser.add_argument("--pd-profiles", action="store_true")
     args = parser.parse_args()
     sys.path.insert(0, str(args.sim / "tools/llvm"))
-    from sim import CPU
+    from sim import CPU, Memory
+
+    class T3PFlashMemory(Memory):
+        def read(self, address, count):
+            # The FM-1 instruction model keeps RETS bits 26..1. Let those
+            # modeled return addresses fetch the same linked T3P flash bytes.
+            if 0x04000100 <= address < 0x04165E40:
+                address += 0x08000000
+            return super().read(address, count)
 
     out = args.build_dir
-    expected = (ROOT / "build/preview.ppm").read_bytes()
+    shared = out if args.pd_profiles else ROOT / "build"
+    expected = (shared / "preview.ppm").read_bytes()
     # The pinned simulator refers to an unpublished absolute path for its
     # memory-op IDs. Recover those IDs from its committed hardware fixtures.
     fixtures = ("followup5-m.json", "followup5-m-main.json")
@@ -48,6 +58,7 @@ def main():
 
     with patch("builtins.open", open_model_ids):
         cpu = CPU()
+    cpu.mem = T3PFlashMemory()
     symbols = cpu.load_elf((out / "t3p-meter-demo.elf").read_bytes())
     cpu.sp = symbols["__runtime_stack_end"]
     strip = symbols["strip"]
@@ -76,7 +87,7 @@ def main():
         cpu.call(symbols["meter_next_page"], [])
         cpu.call(symbols["meter_next_page"], [])
         cpu.call(symbols["meter_snapshot"], [])
-        if render() != (ROOT / "build/demo-graph.ppm").read_bytes():
+        if render() != (shared / "demo-graph.ppm").read_bytes():
             raise ValueError("Pi32v2 full-history graph differs from host preview")
         print("Pi32v2 full-history graph frame matches")
         cpu.load_elf((out / "t3p-meter-demo.elf").read_bytes())
@@ -96,6 +107,27 @@ def main():
             if render() != (out / f"preview-{name}.ppm").read_bytes():
                 raise ValueError(f"Pi32v2 {name} graph differs from host preview")
         cpu.call(symbols["meter_next_page"], [])
+        if args.pd_profiles:
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-profiles-ready.ppm").read_bytes():
+                raise ValueError("Pi32v2 initial PD profiles frame differs from host preview")
+            if cpu.call(symbols["meter_double_press"], [])[0] != 1:
+                raise ValueError("Pi32v2 PD profiles double press did not request capture")
+            frame = bytes.fromhex((ROOT / "tests/pd_offer.hex").read_text(encoding="ascii"))
+            cpu.call(symbols["meter_pd_status"], [1, 1])
+            cpu.mem.write(strip, frame[:-1] + bytes([frame[-1] ^ 1]))
+            if cpu.call(symbols["meter_pd_record"], [strip, len(frame)])[0] != 0xffffffff:
+                raise ValueError("Pi32v2 accepted a corrupt PD frame")
+            cpu.mem.write(strip, frame)
+            if cpu.call(symbols["meter_pd_record"], [strip, len(frame)])[0] != 1:
+                raise ValueError("Pi32v2 rejected the test source offer")
+            cpu.call(symbols["meter_pd_status"], [2, 1])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-profiles-offer.ppm").read_bytes():
+                raise ValueError("Pi32v2 captured PD profiles frame differs from host preview")
+            print("Pi32v2 PD profiles and source-offer decoding match")
+            cpu.call(symbols["meter_next_page"], [])
+            cpu.call(symbols["meter_pd_status"], [0, 0])
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():

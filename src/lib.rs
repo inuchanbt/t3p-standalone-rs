@@ -6,6 +6,7 @@
 mod demo;
 #[path = "../vendor/kws-x1/energy.rs"]
 mod energy;
+mod pd;
 #[allow(dead_code)]
 #[path = "../vendor/kws-x1/power_history.rs"]
 mod power_history;
@@ -22,6 +23,8 @@ mod settings {
 }
 
 use energy::{Totals, Tracker};
+pub use pd::SourceCaps;
+use pd::{PROFILES_PAGE, Profiles};
 use power_history::{GraphTrace, GraphWindow, History, Sample};
 use settings::TimerMode;
 
@@ -44,6 +47,7 @@ pub struct Overview {
     reading: Option<Reading>,
     uncalibrated: bool,
     pd_diagnostic: Option<Option<(u32, u8)>>,
+    pd_profiles: Option<Profiles>,
     mah: u64,
     mwh: u64,
     elapsed_seconds: u32,
@@ -68,6 +72,7 @@ impl Overview {
             reading: None,
             uncalibrated: false,
             pd_diagnostic: None,
+            pd_profiles: None,
             mah: 0,
             mwh: 0,
             elapsed_seconds: 0,
@@ -89,8 +94,12 @@ impl Overview {
         self.pd_diagnostic = Some(registers);
     }
 
+    pub fn set_pd_profiles(&mut self, state: u32, cc: u32, caps: Option<SourceCaps>) {
+        self.pd_profiles = Some(Profiles { state, cc, caps });
+    }
+
     pub fn set_page(&mut self, page: u32) {
-        self.page = page % 5;
+        self.page = page % (PROFILES_PAGE + u32::from(self.pd_profiles.is_some()));
     }
 
     pub fn set_graph_window(&mut self, window: u32) {
@@ -182,7 +191,7 @@ impl Meter {
         view.mah = self.tracker.totals.milliamp_hours();
         view.mwh = self.tracker.totals.milliwatt_hours();
         view.elapsed_seconds = (self.tracker.totals.elapsed_ms / 1000).min(359_999) as u32;
-        if view.page >= 2 {
+        if (2..PROFILES_PAGE).contains(&view.page) {
             let trace = match view.page {
                 3 => GraphTrace::Voltage,
                 4 => GraphTrace::Current,

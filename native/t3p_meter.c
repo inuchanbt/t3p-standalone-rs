@@ -3,6 +3,9 @@
 
 #define PB 0xfd3100u
 #define TIMER_COUNT 0xfd0604u
+#ifdef T3P_PD_PROFILES
+#define PD_TIMER 0xfd0614u
+#endif
 #define SCL (1u << 2)
 #define SDA (1u << 1)
 #define LINES (SCL | SDA)
@@ -35,6 +38,31 @@ static int delay(void *ctx)
     }
     return -1;
 }
+#ifdef T3P_PD_PROFILES
+static int pd_delay(void *ctx)
+{
+    struct t3p_bsp *b = ctx;
+    uint16_t start = (uint16_t)b->io.read32(b->io.context, PD_TIMER + 4);
+    for (unsigned i = 0; i < 5000; ++i) {
+        uint16_t now = (uint16_t)b->io.read32(b->io.context, PD_TIMER + 4);
+        if ((uint16_t)(now - start) >= 120) return 0; /* 5 us at 24 MHz */
+    }
+    return -1;
+}
+
+int t3p_meter_fast_bus(struct t3p_bsp *b, struct t3p_meter_bus *bus)
+{
+    /* BR35 TIMER1, with the same 24 MHz source as TIMER0, no divider. */
+    if (b->io.read32(b->io.context, PD_TIMER) & 3u) return -1;
+    b->io.write32(b->io.context, PD_TIMER, 0x4000);
+    b->io.write32(b->io.context, PD_TIMER + 4, 0);
+    b->io.write32(b->io.context, PD_TIMER + 8, 0xffff);
+    b->io.write32(b->io.context, PD_TIMER, (6u << 10) | 1u);
+    if (pd_delay(b)) return -1;
+    bus->delay = pd_delay;
+    return 0;
+}
+#endif
 void t3p_meter_gpio_init(struct t3p_bsp *b, struct t3p_meter_bus *bus)
 {
     static const uint8_t offsets[] = {8, 4, 12, 16, 20, 24, 28, 32, 36, 40};
@@ -104,34 +132,53 @@ static int read_byte(struct t3p_meter_bus *b, uint8_t *out, int acknowledge)
     *out = value;
     return 0;
 }
+static int read_register(struct t3p_meter_bus *b, uint8_t address, uint8_t reg,
+                         uint8_t *data, unsigned count)
+{
+    if (!b || !data || !b->scl || !b->sda || !b->read_scl || !b->read_sda || !b->delay)
+        return -1;
+    int error = start(b) || write_byte(b, address) || write_byte(b, reg) ||
+                start(b) || write_byte(b, address | 1);
+    for (unsigned i = 0; i < count && !error; ++i)
+        error = read_byte(b, &data[i], i + 1 < count);
+    stop(b);
+    return error ? -1 : 0;
+}
 int t3p_meter_read_register(struct t3p_meter_bus *b, uint8_t reg, uint16_t *out)
 {
-    uint8_t high, low;
-    if (!b || !out || !b->scl || !b->sda || !b->read_scl || !b->read_sda || !b->delay)
-        return -1;
-    int error = start(b) || write_byte(b, 0x80) || write_byte(b, reg) ||
-                start(b) || write_byte(b, 0x81) || read_byte(b, &high, 1) ||
-                read_byte(b, &low, 0);
-    stop(b);
-    if (error) return -1;
-    *out = (uint16_t)((uint16_t)high << 8 | low);
+    uint8_t data[2];
+    if (!out || read_register(b, 0x80, reg, data, sizeof(data))) return -1;
+    *out = (uint16_t)((uint16_t)data[0] << 8 | data[1]);
     return 0;
 }
 int t3p_pd_read_register(struct t3p_meter_bus *b, uint8_t reg, uint8_t *out)
 {
-    if (!b || !out || !b->scl || !b->sda || !b->read_scl || !b->read_sda || !b->delay)
-        return -1;
     /* Only device ID, switch, control, power and non-clearing status registers. */
     if (reg != 0x01 && reg != 0x02 && reg != 0x08 && reg != 0x0b && reg != 0x40)
         return -1;
     uint8_t value;
-    int error = start(b) || write_byte(b, 0x44) || write_byte(b, reg) ||
-                start(b) || write_byte(b, 0x45) || read_byte(b, &value, 0);
-    stop(b);
-    if (error) return -1;
+    if (!out || read_register(b, 0x44, reg, &value, 1)) return -1;
     *out = value;
     return 0;
 }
+#ifdef T3P_PD_PROFILES
+int t3p_pd_rx_read(struct t3p_meter_bus *b, uint8_t reg, uint8_t *data, unsigned count)
+{
+    return read_register(b, 0x44, reg, data, count);
+}
+
+int t3p_pd_rx_config(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
+{
+    /* Preserve both Rd bits. Allow only RX routing, power and RX flush. */
+    if (!((reg == 0x02 && (value == 0x03 || value == 0x07 || value == 0x0b)) ||
+          (reg == 0x0b && (value == 0x01 || value == 0x07 || value == 0x09)) ||
+          (reg == 0x07 && value == 0x04)))
+        return -1;
+    int error = start(b) || write_byte(b, 0x44) || write_byte(b, reg) || write_byte(b, value);
+    stop(b);
+    return error ? -1 : 0;
+}
+#endif
 int t3p_meter_identify(struct t3p_meter_bus *b)
 {
     uint16_t id, config;

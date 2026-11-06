@@ -3,6 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "../native/t3p_meter.h"
+#ifdef T3P_PD_PROFILES
+#include "../native/t3p_pd.h"
+#endif
 
 struct fake {
     int reads[128];
@@ -141,5 +144,23 @@ int main(void)
     f = (struct fake){0};
     assert(t3p_pd_read_register(&b, 0x42, &id)); /* interrupt is read-clear */
     assert(f.clocks == 0);
+#ifdef T3P_PD_PROFILES
+    assert(t3p_pd_rx_config(&b, 0x02, 0x04)); /* would drop both Rd */
+    assert(t3p_pd_rx_config(&b, 0x03, 0x04)); /* automatic GoodCRC */
+    assert(t3p_pd_rx_config(&b, 0x43, 0xa1)); /* transmit token */
+    assert(f.clocks == 0);
+    f.reads[f.count++] = 1;
+    f.reads[f.count++] = 0;
+    f.reads[f.count++] = 0;
+    f.reads[f.count++] = 0;
+    assert(!t3p_pd_rx_config(&b, 0x02, 0x0b)); /* both Rd and MEAS_CC2 */
+    assert(f.cursor == f.count && f.sda && f.scl);
+    static const int select_cc2[] = {0,0,0,0,1,0,1,1};
+    for (unsigned i = 0; i < 8; ++i) {
+        assert(f.clock_data[1 + i] == pd_write[i]);
+        assert(f.clock_data[10 + i] == register_two[i]);
+        assert(f.clock_data[19 + i] == select_cc2[i]);
+    }
+#endif
     return 0;
 }

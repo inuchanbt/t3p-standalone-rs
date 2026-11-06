@@ -6,6 +6,9 @@
 #ifdef T3P_MEASURE
 #include "t3p_meter.h"
 #endif
+#ifdef T3P_PD_PROFILES
+#include "t3p_pd.h"
+#endif
 
 #define PA_BASE 0xfd3000u
 #define PA11 (1u << 11)
@@ -15,9 +18,10 @@
 void meter_demo_sample(uint32_t tick);
 void meter_live_sample(uint32_t tick, uint32_t valid, uint32_t mv, int32_t ma);
 void meter_pd_diagnostic(uint32_t valid, uint32_t first_four, uint32_t last);
+void meter_pd_status(uint32_t state, uint32_t cc);
 void meter_reset_totals(void);
 void meter_next_page(void);
-void meter_double_press(void);
+uint32_t meter_double_press(void);
 void meter_snapshot(void);
 void meter_demo_render(uint32_t top, uint16_t pixels[PANEL_SIDE * STRIP_ROWS]);
 
@@ -42,14 +46,27 @@ static unsigned key_pressed(void)
     return !(board.io.read32(board.io.context, PA_BASE) & PA11);
 }
 
+enum redraw_request { REDRAW = 1u, START_CAPTURE = 2u };
+
 static unsigned poll_key(uint32_t now)
 {
     enum t3p_button_event event = t3p_button_poll(&button, now, key_pressed());
-    if (event == T3P_BUTTON_SHORT) { meter_next_page(); return 1; }
-    if (event == T3P_BUTTON_DOUBLE) { meter_double_press(); return 1; }
-    if (event == T3P_BUTTON_LONG) { meter_reset_totals(); return 1; }
+    if (event == T3P_BUTTON_SHORT) { meter_next_page(); return REDRAW; }
+    if (event == T3P_BUTTON_DOUBLE) return meter_double_press() ? START_CAPTURE : REDRAW;
+    if (event == T3P_BUTTON_LONG) { meter_reset_totals(); return REDRAW; }
     return 0;
 }
+
+#ifdef T3P_PD_PROFILES
+static unsigned poll_pd(struct t3p_pd_capture *pd, struct t3p_meter_bus *bus, uint32_t now)
+{
+    enum t3p_pd_state before = pd->state;
+    t3p_pd_poll_capture(pd, bus, now);
+    if (pd->state == before) return 0;
+    meter_pd_status(pd->state, pd->cc);
+    return REDRAW;
+}
+#endif
 
 void t3p_board_start(void)
 {
@@ -70,6 +87,12 @@ void t3p_board_start(void)
     t3p_meter_gpio_init(&board, &meter_bus);
     int identified = 0;
     uint32_t identified_at = start - 1000;
+#ifdef T3P_PD_PROFILES
+    struct t3p_meter_bus fast_bus = meter_bus;
+    struct t3p_pd_capture pd = {0};
+    if (t3p_meter_fast_bus(&board, &fast_bus)) pd.state = T3P_PD_TIMER_ERROR;
+    meter_pd_status(pd.state, 0);
+#endif
 #ifdef T3P_PD_DIAGNOSTIC
     uint32_t pd_at = start - 2000;
 #endif
@@ -79,6 +102,14 @@ void t3p_board_start(void)
     for (;;) {
         uint32_t now = t3p_bsp_millis(&board);
         redraw |= poll_key(now);
+#ifdef T3P_PD_PROFILES
+        if (redraw & START_CAPTURE) {
+            t3p_pd_start_capture(&pd, &fast_bus, now);
+            meter_pd_status(pd.state, pd.cc);
+            redraw = REDRAW;
+        }
+        redraw |= poll_pd(&pd, &fast_bus, now);
+#endif
 #ifdef T3P_PD_DIAGNOSTIC
         if (now - pd_at >= 2000) {
             static const uint8_t registers[] = {0x01, 0x02, 0x08, 0x0b, 0x40};
@@ -100,11 +131,15 @@ void t3p_board_start(void)
 #ifdef T3P_MEASURE
             uint16_t mv = 0;
             int16_t ma = 0;
+            struct t3p_meter_bus *sample_bus = &meter_bus;
+#ifdef T3P_PD_PROFILES
+            if (pd.state == T3P_PD_LISTENING) sample_bus = &fast_bus;
+#endif
             if (!identified && now - identified_at >= 1000) {
-                identified = !t3p_meter_identify(&meter_bus);
+                identified = !t3p_meter_identify(sample_bus);
                 identified_at = now;
             }
-            int valid = identified && !t3p_meter_sample(&meter_bus, &mv, &ma);
+            int valid = identified && !t3p_meter_sample(sample_bus, &mv, &ma);
             if (!valid) identified = 0;
             meter_live_sample(t3p_bsp_millis(&board) - start, valid, mv, ma);
 #else
@@ -121,7 +156,11 @@ void t3p_board_start(void)
                                       strip, PANEL_SIDE * STRIP_ROWS)) {
                     t3p_signal_failure(4);
                 }
-                redraw |= poll_key(t3p_bsp_millis(&board));
+                uint32_t between_strips = t3p_bsp_millis(&board);
+                redraw |= poll_key(between_strips);
+#ifdef T3P_PD_PROFILES
+                redraw |= poll_pd(&pd, &fast_bus, between_strips);
+#endif
             }
             t3p_bsp_backlight(&board, 1);
             rendered = now;

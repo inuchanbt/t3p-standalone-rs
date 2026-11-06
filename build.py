@@ -104,11 +104,20 @@ def main():
     parser.add_argument("--stock-app", type=Path, default=ROOT.parent / "doom_on_t3p/local/unpacked/T3P Firmware Version 3.0.3.bin/files/app.bin")
     parser.add_argument("--jieli-clang", type=Path)
     parser.add_argument("--measurement", action="store_true", help="Build the uncalibrated measurement candidate")
-    parser.add_argument("--pd-diagnostic", action="store_true", help="Add read-only CC-controller diagnostics")
+    pd_mode = parser.add_mutually_exclusive_group()
+    pd_mode.add_argument("--pd-diagnostic", action="store_true", help="Add read-only CC-controller diagnostics")
+    pd_mode.add_argument("--pd-profiles", action="store_true", help="Build the receive-only PD profiles candidate")
     args = parser.parse_args()
-    if args.pd_diagnostic:
+    if args.pd_diagnostic or args.pd_profiles:
         args.measurement = True
-    out = ROOT / "build" / ("pd-diagnostic" if args.pd_diagnostic else "measurement" if args.measurement else "")
+    variant = ""
+    if args.measurement:
+        variant = "measurement"
+    if args.pd_diagnostic:
+        variant = "pd-diagnostic"
+    if args.pd_profiles:
+        variant = "pd-profiles"
+    out = ROOT / "build" / variant
     out.mkdir(parents=True, exist_ok=True)
 
     if run(args.rustc, "--version", capture=True).strip() != f"rustc {RUST_VERSION}":
@@ -123,7 +132,10 @@ def main():
     common = ["--target=pi32v2", "-mcpu=r3"]
 
     rust_ir = out / "meter-thumb.ll"
-    run(args.rustc, "--edition=2024", "--crate-type=staticlib", "--cfg", 'feature="board"',
+    rust_features = ["--cfg", 'feature="board"']
+    if args.pd_profiles:
+        rust_features += ["--cfg", 'feature="pd-profiles"']
+    run(args.rustc, "--edition=2024", "--crate-type=staticlib", *rust_features,
         "--target=thumbv7em-none-eabihf", "-C", "opt-level=s", "-C", "panic=abort",
         "-C", "lto=fat", "--emit=llvm-ir", "-o", rust_ir, ROOT / "src/lib.rs")
     pi32_ir = out / "meter-pi32.ll"
@@ -137,6 +149,8 @@ def main():
                bsp / "board.c", bsp / "memory.c"]
     if args.measurement:
         sources.append(bsp / "t3p_meter.c")
+    if args.pd_profiles:
+        sources.append(bsp / "t3p_pd.c")
     for source in sources:
         obj = out / (source.name + ".o")
         if source.name == "runtime_start.S":
@@ -148,6 +162,8 @@ def main():
             flags = ["-DT3P_MEASURE"] if args.measurement else []
             if args.pd_diagnostic:
                 flags.append("-DT3P_PD_DIAGNOSTIC")
+            if args.pd_profiles:
+                flags.append("-DT3P_PD_PROFILES")
             run(clang, *common, "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
                 "-ffunction-sections", "-fdata-sections", *flags, "-I", bsp, "-c", source, "-o", obj)
         objects.append(obj)
@@ -166,6 +182,8 @@ def main():
                         if args.measurement else "Pi32v2 ELF audited offline; demo input only")
     if args.pd_diagnostic:
         report["status"] += "; read-only PD diagnostic"
+    if args.pd_profiles:
+        report["status"] += "; receive-only PD profiles candidate"
     report["rust"] = RUST_VERSION
     report["llvm"] = LLVM_VERSION
     report["elf_sha256"] = hashlib.sha256(elf.read_bytes()).hexdigest()
