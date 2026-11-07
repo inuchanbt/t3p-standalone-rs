@@ -479,6 +479,8 @@ pub(crate) struct Profiles {
     pub(crate) mode: u32,
     pub(crate) epr_counters: u32,
     pub(crate) sniff: Option<SniffWindow>,
+    // One retained warning bit for each of SPR, EPR and sniff capture.
+    pub(crate) fifo_warnings: u32,
 }
 
 impl Profiles {
@@ -490,19 +492,43 @@ impl Profiles {
                 _ => b"TIMER UNAVAILABLE",
             };
         }
+        let fifo_warning = mode < 3 && self.fifo_warnings & (1u32 << mode) != 0;
         if self.mode != mode {
             if mode == 2 && self.sniff.is_some() {
-                return b"STOPPED";
+                return if fifo_warning {
+                    b"STOP WARN"
+                } else {
+                    b"STOPPED"
+                };
             }
             return if mode == 0 && self.caps.is_some() || mode == 1 && self.epr.is_some() {
                 if mode == 1 && self.epr.is_some_and(|caps| !caps.complete) {
-                    b"PARTIAL"
+                    if fifo_warning {
+                        b"PARTIAL WARN"
+                    } else {
+                        b"PARTIAL"
+                    }
+                } else if fifo_warning {
+                    b"CAPTURE WARN"
                 } else {
                     b"CAPTURED"
                 }
+            } else if fifo_warning {
+                b"WARN"
             } else {
                 b"READY"
             };
+        }
+        if fifo_warning {
+            match self.state {
+                1 => return b"LISTEN WARN",
+                2 => return b"CAPTURE WARN",
+                3 if mode == 2 => return b"DONE WARN",
+                3 if mode == 1 => return b"NO EPR WARN",
+                3 => return b"NO CAP WARN",
+                10 => return b"PARTIAL WARN",
+                _ => {}
+            }
         }
         match self.state {
             0 => b"READY",
@@ -513,7 +539,7 @@ impl Profiles {
             3 => b"NO SOURCE CAPS",
             4 => b"CONFIG MISMATCH",
             5 => b"I2C ERROR",
-            6 => b"FIFO ALERT",
+            6 => b"FIFO FULL",
             7 => b"BAD RX FRAME",
             8 => b"LINK RESET",
             9 => b"TIMER UNAVAILABLE",
@@ -525,6 +551,34 @@ impl Profiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fifo_warning_keeps_the_capture_state_visible() {
+        let mut profiles = Profiles {
+            state: 1,
+            cc: 1,
+            caps: None,
+            epr: None,
+            mode: 2,
+            epr_counters: 0,
+            sniff: None,
+            fifo_warnings: 1 << 2,
+        };
+        assert_eq!(profiles.status(2), b"LISTEN WARN");
+        profiles.state = 3;
+        assert_eq!(profiles.status(2), b"DONE WARN");
+        profiles.state = 6;
+        assert_eq!(profiles.status(2), b"FIFO FULL");
+        profiles.state = 2;
+        profiles.mode = 1;
+        profiles.fifo_warnings |= 1 << 1;
+        assert_eq!(profiles.status(1), b"CAPTURE WARN");
+        profiles.sniff = Some(PdSniff::new().window(0));
+        assert_eq!(profiles.status(2), b"STOP WARN");
+        profiles.fifo_warnings &= !(1 << 1);
+        assert_eq!(profiles.status(1), b"CAPTURED");
+        assert_eq!(profiles.status(2), b"STOP WARN");
+    }
 
     fn fixture<const N: usize>(hex: &str) -> [u8; N] {
         let mut frame = [0; N];

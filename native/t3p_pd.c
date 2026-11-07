@@ -40,6 +40,7 @@ void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *
     if (capture->state == T3P_PD_BUS_ERROR || capture->state == T3P_PD_CONFIG ||
         capture->state == T3P_PD_TIMER_ERROR)
         return;
+    capture->fifo_warning = 0;
     if (mode == capture->mode || capture->cc == 0)
         capture->cc = capture->cc == 1 ? 2 : 1;
     capture->mode = mode;
@@ -112,9 +113,12 @@ static int poll_one(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, u
         stop_capture(capture, bus, T3P_PD_LINK_RESET);
         return 0;
     }
-    /* I_ALERT is read-clear and may record a full FIFO even after RX_FULL
-     * went low. It can also indicate TX_FULL, so report a generic alert. */
-    if ((status[3] & RX_FULL) || (status[4] & I_ALERT)) {
+    /* I_ALERT is a read-clear warning; a transient alert does not prove the
+     * FIFO contents were lost. Continue as before, retaining a visible warning.
+     * Stop if RX_FULL is actually asserted in the STATUS1 snapshot. */
+    if (status[4] & I_ALERT) capture->fifo_warning = 1;
+    if (status[3] & RX_FULL) {
+        capture->fifo_warning = 1;
         stop_capture(capture, bus, T3P_PD_FIFO_FULL);
         return 0;
     }

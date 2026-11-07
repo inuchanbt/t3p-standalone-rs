@@ -137,8 +137,9 @@ fn main() -> io::Result<()> {
         for line in include_str!("../../tests/sniff_epr.hex").lines() {
             sniff.push(&parse(line)).unwrap();
         }
-        view.set_pd_profiles(if sniff_alert { 6 } else { 3 }, 1, None);
+        view.set_pd_profiles(3, 1, None);
         view.set_epr_profiles(2, None);
+        view.set_pd_warnings(if sniff_alert { 1 << 2 } else { 0 });
         view.set_pd_sniff(Some(&sniff), if sniff_old { 8 } else { 0 });
     }
     view.set_page(if sniff_page || sniff_log || sniff_old || sniff_alert {

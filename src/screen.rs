@@ -521,7 +521,7 @@ fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
             1 => (b"WAITING FOR EPR OFFER", b"QUERY FROM A PD SINK"),
             3 => (b"NO EPR OFFER RECEIVED", b"2X TO TRY THE OTHER CC"),
             4 | 5 | 9 => (b"CAPTURE UNAVAILABLE", b"POWER CYCLE TO RETRY"),
-            6 => (b"FIFO ALERT", b"PACKETS MAY BE LOST"),
+            6 => (b"RX FIFO FULL", b"PACKETS MAY BE LOST"),
             7 => (b"BAD RX FRAME", b"2X TO RETRY"),
             8 => (b"LINK RESET", b"2X TO RETRY"),
             _ => (b"2X TO LISTEN FOR EPR OFFER", b"QUERY FROM A PD SINK"),

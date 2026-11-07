@@ -29,6 +29,8 @@ static mut PD_STATE: u32 = 0;
 #[cfg(feature = "pd-profiles")]
 static mut PD_CC: u32 = 0;
 #[cfg(feature = "pd-profiles")]
+static mut PD_WARNINGS: u32 = 0;
+#[cfg(feature = "pd-profiles")]
 static mut PD_CAPS: Option<crate::SourceCaps> = None;
 #[cfg(feature = "pd-profiles")]
 static mut PD_MODE: u32 = 0;
@@ -134,6 +136,23 @@ unsafe extern "C" fn meter_double_press() -> u32 {
 
 #[cfg(feature = "pd-profiles")]
 #[unsafe(no_mangle)]
+unsafe extern "C" fn meter_pd_warning(warning: u32) {
+    unsafe {
+        let mode = *(&raw const PD_MODE);
+        if mode < 3 {
+            let bit = 1u32 << mode;
+            let warnings = &mut *(&raw mut PD_WARNINGS);
+            if warning != 0 {
+                *warnings |= bit;
+            } else {
+                *warnings &= !bit;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "pd-profiles")]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn meter_pd_status(state: u32, cc: u32, mode: u32) {
     unsafe {
         *(&raw mut PD_STATE) = state;
@@ -209,6 +228,8 @@ unsafe extern "C" fn meter_snapshot() {
         );
         #[cfg(feature = "pd-profiles")]
         view.set_epr_profiles(*(&raw const PD_MODE), *(&raw const PD_EPR_CAPS));
+        #[cfg(feature = "pd-profiles")]
+        view.set_pd_warnings(*(&raw const PD_WARNINGS));
         #[cfg(feature = "pd-profiles")]
         view.set_epr_counters((&*(&raw const PD_EPR_CAPTURE)).counters());
         #[cfg(feature = "pd-profiles")]

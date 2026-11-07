@@ -110,33 +110,33 @@ int main(void)
     assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_EPR && pd.cc == 1);
     phy.consumed = 0;
     phy.registers[0x41] = 0x08;
-    phy.registers[0x42] = 0x10;
+    phy.registers[0x42] = 0x18; /* latched FIFO warning and CRC completion */
     record_result = 2; /* only the second EPR chunk was observed */
     t3p_pd_poll_capture(&pd, &bus, 12005);
-    assert(pd.state == T3P_PD_LISTENING && pd.partial);
+    assert(pd.state == T3P_PD_LISTENING && pd.partial && pd.fifo_warning);
     t3p_pd_poll_capture(&pd, &bus, 22000);
     assert(pd.state == T3P_PD_LISTENING);
     t3p_pd_poll_capture(&pd, &bus, 42000);
     assert(pd.state == T3P_PD_PARTIAL);
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
     t3p_pd_start_capture(&pd, &bus, 43000, T3P_PD_EPR);
-    assert(pd.state == T3P_PD_LISTENING && pd.cc == 2);
+    assert(pd.state == T3P_PD_LISTENING && pd.cc == 2 && !pd.fifo_warning);
     phy.consumed = 0;
     phy.registers[0x41] = 0x08;
-    phy.registers[0x42] = 0x10;
+    phy.registers[0x42] = 0x18; /* warning while receiving chunk 0 */
     record_result = 3; /* EPR chunk 0 */
     t3p_pd_poll_capture(&pd, &bus, 43005);
-    assert(pd.state == T3P_PD_LISTENING && !pd.partial);
+    assert(pd.state == T3P_PD_LISTENING && !pd.partial && pd.fifo_warning);
     phy.consumed = 0;
     phy.registers[0x41] = 0x08;
     phy.registers[0x42] = 0x10;
     record_result = 1; /* EPR chunk 1 completed the offer */
     t3p_pd_poll_capture(&pd, &bus, 43010);
-    assert(pd.state == T3P_PD_CAPTURED);
+    assert(pd.state == T3P_PD_CAPTURED && pd.fifo_warning);
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
 
     t3p_pd_start_capture(&pd, &bus, 44000, T3P_PD_SNIFF);
-    assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_SNIFF && pd.cc == 2);
+    assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_SNIFF && pd.cc == 2 && !pd.fifo_warning);
     record_result = 0; /* a logged message must not stop the receiver */
 
     /* An empty sniff receiver is polled at 1 ms, not the 4 ms offer cadence. */
@@ -182,17 +182,21 @@ int main(void)
     assert(pd.state == T3P_PD_TIMEOUT);
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
 
-    /* The read-clear alert may outlive the instantaneous RX_FULL flag. */
+    /* A read-clear alert alone warns but must not discard a queued record. */
     t3p_pd_start_capture(&pd, &bus, 75000, T3P_PD_SNIFF);
-    phy.registers[0x41] = 0x28; /* RX empty, TX idle */
-    phy.registers[0x42] = 0x08; /* latched FIFO alert */
+    phy.consumed = 0;
+    phy.registers[0x41] = 0x08; /* RX nonempty, TX idle, not RX_FULL */
+    phy.registers[0x42] = 0x18; /* latched FIFO alert and CRC completion */
+    before = records;
     t3p_pd_poll_capture(&pd, &bus, 75000);
-    assert(pd.state == T3P_PD_FIFO_FULL);
-    assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
+    assert(pd.state == T3P_PD_LISTENING && pd.fifo_warning && records == before + 1);
 
+    /* An actual RX_FULL snapshot still stops; restarting clears the warning. */
     t3p_pd_start_capture(&pd, &bus, 76000, T3P_PD_SNIFF);
+    assert(pd.state == T3P_PD_LISTENING && !pd.fifo_warning);
     phy.registers[0x41] = 0x18; /* RX full, TX idle */
     t3p_pd_poll_capture(&pd, &bus, 76000);
-    assert(pd.state == T3P_PD_FIFO_FULL);
+    assert(pd.state == T3P_PD_FIFO_FULL && pd.fifo_warning);
+    assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
     return 0;
 }

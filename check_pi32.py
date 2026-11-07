@@ -2,6 +2,7 @@
 
 import argparse
 import builtins
+from functools import lru_cache
 from importlib import import_module
 from io import StringIO
 import json
@@ -27,6 +28,10 @@ def main():
     args = parser.parse_args()
     sys.path.insert(0, str(args.sim / "tools/llvm"))
     from sim import CPU, Memory
+    import check as instruction_check
+    # Model signatures never change during a run; avoid repeated reflection on
+    # every simulated instruction without changing the instruction models.
+    instruction_check.takes_state = lru_cache(maxsize=None)(instruction_check.takes_state)
 
     class T3PFlashMemory(Memory):
         def read(self, address, count):
@@ -146,6 +151,9 @@ def main():
                 cpu.mem.write(strip, chunk)
                 if cpu.call(symbols["meter_pd_record"], [strip, len(chunk), 1, now])[0] != expected_result:
                     raise ValueError("Pi32v2 failed to decode an EPR chunk")
+                if expected_result == 3:
+                    cpu.call(symbols["meter_pd_warning"], [1])
+            cpu.call(symbols["meter_pd_warning"], [0])
             cpu.call(symbols["meter_pd_status"], [2, 1, 1])
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-epr-offer.ppm").read_bytes():
@@ -168,19 +176,22 @@ def main():
             cpu.call(symbols["meter_pd_status"], [1, 1, 2])
             exchange = [frame] + [bytes.fromhex(line) for name in ("sniff_exchange.hex", "sniff_epr.hex")
                                   for line in (ROOT / "tests" / name).read_text(encoding="ascii").splitlines()]
-            for packet in exchange:
+            for index, packet in enumerate(exchange):
+                if index == len(exchange) // 2:
+                    cpu.call(symbols["meter_pd_warning"], [1])
                 cpu.mem.write(strip, packet)
                 if cpu.call(symbols["meter_pd_record"], [strip, len(packet), 2, 0])[0] != 0:
                     raise ValueError("Pi32v2 failed to log a PD sniff packet")
             cpu.call(symbols["meter_pd_status"], [3, 1, 2])
+            cpu.call(symbols["meter_pd_warning"], [0])
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-sniff-log.ppm").read_bytes():
                 raise ValueError("Pi32v2 PD sniff log differs from host preview")
-            cpu.call(symbols["meter_pd_status"], [6, 1, 2])
+            cpu.call(symbols["meter_pd_warning"], [1])
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-sniff-alert.ppm").read_bytes():
-                raise ValueError("Pi32v2 FIFO alert frame differs from host preview")
-            cpu.call(symbols["meter_pd_status"], [3, 1, 2])
+                raise ValueError("Pi32v2 FIFO warning frame differs from host preview")
+            cpu.call(symbols["meter_pd_warning"], [0])
             cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-sniff-old.ppm").read_bytes():

@@ -103,7 +103,14 @@ impl Overview {
             mode: 0,
             epr_counters: 0,
             sniff: None,
+            fifo_warnings: 0,
         });
+    }
+
+    pub fn set_pd_warnings(&mut self, warnings: u32) {
+        if let Some(ref mut profiles) = self.pd_profiles {
+            profiles.fifo_warnings = warnings;
+        }
     }
 
     pub fn set_epr_profiles(&mut self, mode: u32, caps: Option<EprCaps>) {

@@ -19,6 +19,7 @@ void meter_demo_sample(uint32_t tick);
 void meter_live_sample(uint32_t tick, uint32_t valid, uint32_t mv, int32_t ma);
 void meter_pd_diagnostic(uint32_t valid, uint32_t first_four, uint32_t last);
 void meter_pd_status(uint32_t state, uint32_t cc, uint32_t mode);
+void meter_pd_warning(uint32_t warning);
 void meter_long_press(void);
 void meter_next_page(void);
 uint32_t meter_double_press(void);
@@ -67,7 +68,10 @@ static unsigned poll_key(uint32_t now)
 static unsigned poll_pd(struct t3p_pd_capture *pd, struct t3p_meter_bus *bus, uint32_t now)
 {
     enum t3p_pd_state before = pd->state;
+    unsigned before_warning = pd->fifo_warning;
     t3p_pd_poll_capture(pd, bus, now);
+    /* Avoid starting a full redraw in the middle of the PD exchange. */
+    if (pd->fifo_warning != before_warning) meter_pd_warning(pd->fifo_warning);
     if (pd->state == before) return 0;
     meter_pd_status(pd->state, pd->cc, pd->mode);
     return REDRAW;
@@ -114,6 +118,7 @@ void t3p_board_start(void)
                                     (redraw & START_EPR) ? T3P_PD_EPR : T3P_PD_SPR;
             t3p_pd_start_capture(&pd, &fast_bus, now, mode);
             meter_pd_status(pd.state, pd.cc, pd.mode);
+            meter_pd_warning(pd.fifo_warning);
             redraw = REDRAW;
         }
         redraw |= poll_pd(&pd, &fast_bus, now);
