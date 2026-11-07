@@ -19,7 +19,7 @@ void meter_demo_sample(uint32_t tick);
 void meter_live_sample(uint32_t tick, uint32_t valid, uint32_t mv, int32_t ma);
 void meter_pd_diagnostic(uint32_t valid, uint32_t first_four, uint32_t last);
 void meter_pd_status(uint32_t state, uint32_t cc, uint32_t mode);
-void meter_reset_totals(void);
+void meter_long_press(void);
 void meter_next_page(void);
 uint32_t meter_double_press(void);
 void meter_snapshot(void);
@@ -59,7 +59,7 @@ static unsigned poll_key(uint32_t now)
         if (action == 3) return START_SNIFF;
         return REDRAW;
     }
-    if (event == T3P_BUTTON_LONG) { meter_reset_totals(); return REDRAW; }
+    if (event == T3P_BUTTON_LONG) { meter_long_press(); return REDRAW; }
     return 0;
 }
 

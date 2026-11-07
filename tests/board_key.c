@@ -23,7 +23,7 @@ static void write_pin(void *context, uint32_t address, uint32_t value)
     (void)context; (void)address; (void)value;
 }
 
-void meter_reset_totals(void)
+void meter_long_press(void)
 {
     ++resets;
 }

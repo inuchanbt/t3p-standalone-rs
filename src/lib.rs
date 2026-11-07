@@ -119,9 +119,9 @@ impl Overview {
         }
     }
 
-    pub fn set_pd_sniff(&mut self, sniff: Option<PdSniff>) {
+    pub fn set_pd_sniff(&mut self, sniff: Option<&PdSniff>, offset: u8) {
         if let Some(ref mut profiles) = self.pd_profiles {
-            profiles.sniff = sniff;
+            profiles.sniff = sniff.map(|history| history.window(offset));
         }
     }
 

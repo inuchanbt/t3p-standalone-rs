@@ -211,18 +211,30 @@ fn crc32(bytes: &[u8]) -> u32 {
     !crc
 }
 
-const SNIFF_CAPACITY: usize = 8;
+const SNIFF_CAPACITY: usize = 192;
+pub(crate) const SNIFF_ROWS: usize = 8;
 
 #[derive(Clone, Copy)]
 pub(crate) struct SniffEvent {
     lo: u8,
     hi: u8,
     detail: u8,
+    extra: u8,
 }
 
 impl SniffEvent {
     pub(crate) fn source(self) -> bool {
         self.hi & 1 != 0
+    }
+
+    /// EPR Mode has exactly one data object: action in bits 31..24 and
+    /// action-specific data in bits 23..16. Unknown actions remain raw.
+    pub(crate) fn epr_mode(self) -> Option<(u8, u8, u8)> {
+        if self.hi & 0xf0 == 0x10 && self.lo & 31 == 10 {
+            Some((self.detail, self.extra, (self.hi >> 1) & 7))
+        } else {
+            None
+        }
     }
 
     /// The suffix is a letter and an unsigned number: N objects, P PDO,
@@ -255,7 +267,7 @@ impl SniffEvent {
                 6 => (b"ALERT", b'I', id),
                 8 => (b"ENTER_USB", b'I', id),
                 9 => (b"EPR_REQUEST", b'P', self.detail),
-                10 => (b"EPR_MODE", b'I', id),
+                10 => (b"EPR_MODE", b'N', count),
                 15 => (b"VDM", b'I', id),
                 _ => (b"DATA", b'T', kind),
             };
@@ -299,13 +311,8 @@ impl Default for PdSniff {
 
 impl PdSniff {
     pub const fn new() -> Self {
-        const EMPTY: SniffEvent = SniffEvent {
-            lo: 0,
-            hi: 0,
-            detail: 0,
-        };
         Self {
-            events: [EMPTY; SNIFF_CAPACITY],
+            events: [EMPTY_SNIFF_EVENT; SNIFF_CAPACITY],
             start: 0,
             count: 0,
             total: 0,
@@ -320,21 +327,31 @@ impl PdSniff {
             self.good_crc = self.good_crc.saturating_add(1);
             return Ok(());
         }
-        let detail = if hi & 0x80 != 0 {
+        let (detail, extra) = if hi & 0x80 != 0 {
             if payload.len() < 2 {
                 return Err(BadFrame);
             }
             let extended = u16::from_le_bytes([payload[0], payload[1]]);
-            ((extended >> 11) & 15) as u8
-                | if extended & 0x400 != 0 { 0x80 } else { 0 }
-                | if extended & 0x8000 != 0 { 0x40 } else { 0 }
+            (
+                ((extended >> 11) & 15) as u8
+                    | if extended & 0x400 != 0 { 0x80 } else { 0 }
+                    | if extended & 0x8000 != 0 { 0x40 } else { 0 },
+                0,
+            )
         } else if (kind == 2 || kind == 9) && !payload.is_empty() {
-            payload[3] >> 4
+            (payload[3] >> 4, 0)
+        } else if kind == 10 && payload.len() == 4 {
+            (payload[3], payload[2])
         } else {
-            0
+            (0, 0)
         };
         let index = (usize::from(self.start) + usize::from(self.count)) % SNIFF_CAPACITY;
-        self.events[index] = SniffEvent { lo, hi, detail };
+        self.events[index] = SniffEvent {
+            lo,
+            hi,
+            detail,
+            extra,
+        };
         if usize::from(self.count) == SNIFF_CAPACITY {
             self.start = (self.start + 1) % SNIFF_CAPACITY as u8;
         } else {
@@ -344,7 +361,7 @@ impl PdSniff {
         Ok(())
     }
 
-    pub(crate) fn event(self, index: usize) -> Option<SniffEvent> {
+    pub(crate) fn event(&self, index: usize) -> Option<SniffEvent> {
         if index >= usize::from(self.count) {
             None
         } else {
@@ -352,9 +369,55 @@ impl PdSniff {
         }
     }
 
-    pub(crate) fn counts(self) -> (u16, u16) {
+    #[cfg(test)]
+    pub(crate) fn counts(&self) -> (u16, u16) {
         (self.total, self.good_crc)
     }
+
+    /// Offset is measured backwards from the newest retained message.
+    #[cfg_attr(not(any(test, feature = "pd-profiles")), allow(dead_code))]
+    pub(crate) fn older_offset(&self, offset: u8) -> Option<u8> {
+        let next = usize::from(offset) + SNIFF_ROWS;
+        (next < usize::from(self.count)).then_some(next as u8)
+    }
+
+    /// Copy only the visible rows, keeping the screen stable during redraw.
+    pub(crate) fn window(&self, offset: u8) -> SniffWindow {
+        let count = usize::from(self.count);
+        let end = count.saturating_sub(usize::from(offset).min(count));
+        let start = end.saturating_sub(SNIFF_ROWS);
+        let mut rows = [EMPTY_SNIFF_EVENT; SNIFF_ROWS];
+        for (index, row) in rows.iter_mut().take(end - start).enumerate() {
+            if let Some(event) = self.event(start + index) {
+                *row = event;
+            }
+        }
+        SniffWindow {
+            rows,
+            start: start as u8,
+            end: end as u8,
+            retained: self.count,
+            total: self.total,
+            good_crc: self.good_crc,
+        }
+    }
+}
+
+const EMPTY_SNIFF_EVENT: SniffEvent = SniffEvent {
+    lo: 0,
+    hi: 0,
+    detail: 0,
+    extra: 0,
+};
+
+#[derive(Clone, Copy)]
+pub(crate) struct SniffWindow {
+    pub(crate) rows: [SniffEvent; SNIFF_ROWS],
+    pub(crate) start: u8,
+    pub(crate) end: u8,
+    pub(crate) retained: u8,
+    pub(crate) total: u16,
+    pub(crate) good_crc: u16,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -415,7 +478,7 @@ pub(crate) struct Profiles {
     pub(crate) epr: Option<EprCaps>,
     pub(crate) mode: u32,
     pub(crate) epr_counters: u32,
-    pub(crate) sniff: Option<PdSniff>,
+    pub(crate) sniff: Option<SniffWindow>,
 }
 
 impl Profiles {
@@ -507,25 +570,104 @@ mod tests {
     }
 
     #[test]
-    fn sniff_keeps_the_latest_eight_messages_in_wire_order() {
-        let accept = fixture::<7>(
-            include_str!("../tests/sniff_exchange.hex")
-                .lines()
-                .nth(1)
-                .unwrap(),
-        );
+    fn sniff_keeps_and_pages_the_latest_messages_in_wire_order() {
         let mut sniff = PdSniff::new();
-        for index in 0..10 {
-            let mut frame = accept;
-            frame[2] = 1 | ((index & 7) << 1);
-            let crc = crc32(&frame[1..3]).to_le_bytes();
-            frame[3..].copy_from_slice(&crc);
+        for index in 0..SNIFF_CAPACITY + 10 {
+            let mut frame = [0xe0, 0x8a, 0x11, 0, 0, index as u8, 1, 0, 0, 0, 0];
+            let crc = crc32(&frame[1..7]).to_le_bytes();
+            frame[7..].copy_from_slice(&crc);
             sniff.push(&frame).unwrap();
         }
-        assert_eq!(sniff.counts(), (10, 0));
-        assert_eq!(sniff.event(0).unwrap().label(), (&b"ACCEPT"[..], b'I', 2));
-        assert_eq!(sniff.event(7).unwrap().label(), (&b"ACCEPT"[..], b'I', 1));
-        assert!(sniff.event(8).is_none());
+        assert_eq!(sniff.counts(), ((SNIFF_CAPACITY + 10) as u16, 0));
+        assert_eq!(sniff.event(0).unwrap().epr_mode(), Some((1, 10, 0)));
+        assert_eq!(
+            sniff.event(SNIFF_CAPACITY - 1).unwrap().epr_mode(),
+            Some((1, 201, 0))
+        );
+        assert!(sniff.event(SNIFF_CAPACITY).is_none());
+        let mut offset = 0;
+        for page in 0..SNIFF_CAPACITY / SNIFF_ROWS {
+            let window = sniff.window(offset);
+            let end = SNIFF_CAPACITY - page * SNIFF_ROWS;
+            assert_eq!((window.start as usize, window.end as usize), (end - 8, end));
+            assert_eq!(window.retained as usize, SNIFF_CAPACITY);
+            for (row, event) in window.rows.iter().enumerate() {
+                assert_eq!(event.epr_mode(), Some((1, (10 + end - 8 + row) as u8, 0)));
+            }
+            match sniff.older_offset(offset) {
+                Some(next) => offset = next,
+                None => assert_eq!(page, SNIFF_CAPACITY / SNIFF_ROWS - 1),
+            }
+        }
+    }
+
+    #[test]
+    fn sniff_pages_partial_history_without_losing_the_first_rows() {
+        let ready = fixture::<7>(
+            include_str!("../tests/sniff_exchange.hex")
+                .lines()
+                .nth(2)
+                .unwrap(),
+        );
+        for count in [0, 1, 8, 9, 10, 16, 17] {
+            let mut sniff = PdSniff::new();
+            for _ in 0..count {
+                sniff.push(&ready).unwrap();
+            }
+            let mut offset = 0;
+            let mut end = count;
+            loop {
+                let window = sniff.window(offset);
+                assert_eq!(window.end as usize, end);
+                assert_eq!(window.start as usize, end.saturating_sub(8));
+                end = end.saturating_sub(8);
+                match sniff.older_offset(offset) {
+                    Some(next) => offset = next,
+                    None => {
+                        assert_eq!(end, 0);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sniff_decodes_epr_mode_action_and_data_without_guessing_unknown_values() {
+        let mut sniff = PdSniff::new();
+        for (index, (action, data)) in [(1, 240), (2, 0), (3, 0), (4, 1), (5, 0), (0xfe, 0xab)]
+            .into_iter()
+            .enumerate()
+        {
+            // Synthetic, CRC-valid SOP EPR_Mode packet with one data object.
+            let mut frame = [
+                0xe0,
+                0x8a,
+                0x10 | ((index as u8) << 1),
+                0,
+                0,
+                data,
+                action,
+                0,
+                0,
+                0,
+                0,
+            ];
+            let crc = crc32(&frame[1..7]).to_le_bytes();
+            frame[7..].copy_from_slice(&crc);
+            sniff.push(&frame).unwrap();
+            assert_eq!(
+                sniff.event(index).unwrap().epr_mode(),
+                Some((action, data, index as u8))
+            );
+        }
+        // EPR_Mode with two data objects is not a valid EPRMDO and is not decoded.
+        let mut frame = [0xe0, 0x8a, 0x20, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+        let crc = crc32(&frame[1..11]).to_le_bytes();
+        frame[11..].copy_from_slice(&crc);
+        sniff.push(&frame).unwrap();
+        assert_eq!(sniff.event(6).unwrap().epr_mode(), None);
+        assert_eq!(sniff.event(6).unwrap().label(), (&b"EPR_MODE"[..], b'N', 2));
     }
 
     #[test]

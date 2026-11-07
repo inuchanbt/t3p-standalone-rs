@@ -40,6 +40,8 @@ static mut PD_EPR_CAPTURE: crate::EprCapture = crate::EprCapture::new();
 static mut PD_SNIFF: crate::PdSniff = crate::PdSniff::new();
 #[cfg(feature = "pd-profiles")]
 static mut PD_SNIFF_PRESENT: bool = false;
+#[cfg(feature = "pd-profiles")]
+static mut PD_SNIFF_OFFSET: u8 = 0;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_demo_sample(tick: u32) {
@@ -77,13 +79,35 @@ unsafe extern "C" fn meter_pd_diagnostic(valid: u32, first_four: u32, last: u32)
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn meter_reset_totals() {
-    unsafe { (&mut *(&raw mut METER)).reset_totals() };
+unsafe extern "C" fn meter_long_press() {
+    unsafe {
+        #[cfg(feature = "pd-profiles")]
+        if *(&raw const PAGE) == SNIFF_PAGE {
+            *(&raw mut PD_SNIFF_OFFSET) = 0;
+            *(&raw mut PAGE) = 0;
+            return;
+        }
+        (&mut *(&raw mut METER)).reset_totals();
+    }
 }
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_next_page() {
-    unsafe { *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % PAGE_COUNT };
+    unsafe {
+        #[cfg(feature = "pd-profiles")]
+        if *(&raw const PAGE) == SNIFF_PAGE {
+            if *(&raw const PD_SNIFF_PRESENT) {
+                if let Some(older) =
+                    (&*(&raw const PD_SNIFF)).older_offset(*(&raw const PD_SNIFF_OFFSET))
+                {
+                    *(&raw mut PD_SNIFF_OFFSET) = older;
+                    return;
+                }
+            }
+            *(&raw mut PD_SNIFF_OFFSET) = 0;
+        }
+        *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % PAGE_COUNT;
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -124,6 +148,7 @@ unsafe extern "C" fn meter_pd_status(state: u32, cc: u32, mode: u32) {
             } else if mode == 2 {
                 *(&raw mut PD_SNIFF) = crate::PdSniff::new();
                 *(&raw mut PD_SNIFF_PRESENT) = true;
+                *(&raw mut PD_SNIFF_OFFSET) = 0;
             }
         }
     }
@@ -187,11 +212,14 @@ unsafe extern "C" fn meter_snapshot() {
         #[cfg(feature = "pd-profiles")]
         view.set_epr_counters((&*(&raw const PD_EPR_CAPTURE)).counters());
         #[cfg(feature = "pd-profiles")]
-        view.set_pd_sniff(if *(&raw const PD_SNIFF_PRESENT) {
-            Some(*(&raw const PD_SNIFF))
-        } else {
-            None
-        });
+        view.set_pd_sniff(
+            if *(&raw const PD_SNIFF_PRESENT) {
+                Some(&*(&raw const PD_SNIFF))
+            } else {
+                None
+            },
+            *(&raw const PD_SNIFF_OFFSET),
+        );
         view.set_page(*(&raw const PAGE));
         view.set_graph_window(*(&raw const GRAPH_WINDOW));
         (&*(&raw const METER)).overview(view);

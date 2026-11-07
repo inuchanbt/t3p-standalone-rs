@@ -166,8 +166,8 @@ def main():
             if cpu.call(symbols["meter_double_press"], [])[0] != 3:
                 raise ValueError("Pi32v2 PD sniff double press did not request capture")
             cpu.call(symbols["meter_pd_status"], [1, 1, 2])
-            exchange = [frame] + [bytes.fromhex(line) for line in
-                                  (ROOT / "tests/sniff_exchange.hex").read_text(encoding="ascii").splitlines()]
+            exchange = [frame] + [bytes.fromhex(line) for name in ("sniff_exchange.hex", "sniff_epr.hex")
+                                  for line in (ROOT / "tests" / name).read_text(encoding="ascii").splitlines()]
             for packet in exchange:
                 cpu.mem.write(strip, packet)
                 if cpu.call(symbols["meter_pd_record"], [strip, len(packet), 2, 0])[0] != 0:
@@ -176,8 +176,36 @@ def main():
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-sniff-log.ppm").read_bytes():
                 raise ValueError("Pi32v2 PD sniff log differs from host preview")
-            print("Pi32v2 PD sniff exchange and GoodCRC filtering match")
             cpu.call(symbols["meter_next_page"], [])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-sniff-old.ppm").read_bytes():
+                raise ValueError("Pi32v2 older PD sniff history differs from host preview")
+            cpu.call(symbols["meter_pd_status"], [0, 0, 0])
+            cpu.call(symbols["meter_next_page"], [])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-measurement.ppm").read_bytes():
+                raise ValueError("Pi32v2 did not advance after the oldest sniff page")
+            for _ in range(7):
+                cpu.call(symbols["meter_next_page"], [])
+            cpu.call(symbols["meter_next_page"], [])
+            if cpu.call(symbols["meter_double_press"], [])[0] != 3:
+                raise ValueError("Pi32v2 sniff recapture was not available while browsing")
+            cpu.call(symbols["meter_pd_status"], [1, 1, 2])
+            cpu.mem.write(strip, exchange[1])
+            cpu.call(symbols["meter_pd_record"], [strip, len(exchange[1]), 2, 0])
+            cpu.call(symbols["meter_pd_status"], [3, 1, 2])
+            cpu.call(symbols["meter_next_page"], [])
+            cpu.call(symbols["meter_pd_status"], [0, 0, 0])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-measurement.ppm").read_bytes():
+                raise ValueError("Pi32v2 sniff recapture did not reset the history cursor")
+            for _ in range(7):
+                cpu.call(symbols["meter_next_page"], [])
+            cpu.call(symbols["meter_long_press"], [])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-measurement.ppm").read_bytes():
+                raise ValueError("Pi32v2 PD sniff long press did not exit without resetting readings")
+            print("Pi32v2 PD sniff EPR actions, older history and long-press exit match")
             cpu.call(symbols["meter_pd_status"], [0, 0, 0])
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])

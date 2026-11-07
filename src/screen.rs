@@ -251,7 +251,16 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         8,
         226,
         match view.page {
-            PROFILES_PAGE | EPR_PAGE | SNIFF_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
+            SNIFF_PAGE
+                if view
+                    .pd_profiles
+                    .and_then(|pd| pd.sniff)
+                    .is_some_and(|sniff| sniff.start > 0) =>
+            {
+                b"TAP OLDER 2X CAP HOLD EXIT"
+            }
+            SNIFF_PAGE => b"TAP NEXT 2X CAP HOLD EXIT",
+            PROFILES_PAGE | EPR_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
             2..PROFILES_PAGE => b"TAP NEXT 2X RANGE HOLD RESET",
             _ => b"TAP NEXT  HOLD RESET",
         },
@@ -597,15 +606,18 @@ fn sniff_count(p: &mut Strip<'_>, x: usize, label: &[u8], value: u16) {
 }
 
 fn pd_sniff(p: &mut Strip<'_>, pd: Profiles) {
-    p.text(8, 35, b"LAST 8", 1, AMPS);
+    p.text(8, 35, b"PD LOG", 1, AMPS);
     p.text(69, 35, pd.status(2), 1, TEXT);
     if pd.mode == 2 && pd.cc != 0 {
         p.text(215, 35, if pd.cc == 1 { b"CC1" } else { b"CC2" }, 1, AMPS);
     }
-    let (total, good_crc) = pd.sniff.map(|sniff| sniff.counts()).unwrap_or((0, 0));
+    let (total, good_crc) = pd
+        .sniff
+        .map(|sniff| (sniff.total, sniff.good_crc))
+        .unwrap_or((0, 0));
     sniff_count(p, 8, b"MSG:", total);
     sniff_count(p, 83, b"GCRC:", good_crc);
-    if pd.sniff.and_then(|sniff| sniff.event(0)).is_none() {
+    if pd.sniff.is_none_or(|sniff| sniff.end == 0) {
         p.outline(8, 60, 224, 141, GRID);
         p.text(18, 75, b"RX ONLY RD ON", 2, AMPS);
         p.text(
@@ -634,10 +646,39 @@ fn pd_sniff(p: &mut Strip<'_>, pd: Profiles) {
         return;
     }
     let sniff = pd.sniff.unwrap();
-    for index in 0..8 {
-        let Some(event) = sniff.event(index) else {
-            break;
-        };
+    let decimal = |value: u8| {
+        [
+            b'0' + value / 100,
+            b'0' + value / 10 % 10,
+            b'0' + value % 10,
+        ]
+    };
+    let first = decimal(sniff.start + 1);
+    let last = decimal(sniff.end);
+    let retained = decimal(sniff.retained);
+    let range = [
+        b'R',
+        b':',
+        first[0],
+        first[1],
+        first[2],
+        b'-',
+        last[0],
+        last[1],
+        last[2],
+        b'/',
+        retained[0],
+        retained[1],
+        retained[2],
+    ];
+    p.text(164, 46, &range, 1, MUTED);
+    for (index, event) in sniff
+        .rows
+        .iter()
+        .copied()
+        .take(usize::from(sniff.end - sniff.start))
+        .enumerate()
+    {
         let y = 59 + index * 18;
         p.rect(8, y, 224, 16, PANEL);
         p.text(
@@ -647,10 +688,26 @@ fn pd_sniff(p: &mut Strip<'_>, pd: Profiles) {
             2,
             if event.source() { VOLTS } else { AMPS },
         );
-        let (label, suffix, value) = event.label();
-        p.text(52, y + 1, label, 2, TEXT);
-        let detail = [suffix, b'0' + value / 10, b'0' + value % 10];
-        p.text(199, y + 1, &detail, 2, MUTED);
+        if let Some((action, data, id)) = event.epr_mode() {
+            let hex = |value: u8| b"0123456789ABCDEF"[usize::from(value & 15)];
+            let raw_action = [b'E', b'P', b'R', b'_', b'A', hex(action >> 4), hex(action)];
+            let label: &[u8] = match action {
+                1 => b"EPR_ENTER",
+                2 => b"EPR_ACK",
+                3 => b"EPR_OK",
+                4 => b"EPR_FAIL",
+                5 => b"EPR_EXIT",
+                _ => &raw_action,
+            };
+            p.text(52, y + 1, label, 2, TEXT);
+            p.text(159, y + 1, &[b'I', b'0', b'0' + id], 2, MUTED);
+            p.text(199, y + 1, &[b'D', hex(data >> 4), hex(data)], 2, MUTED);
+        } else {
+            let (label, suffix, value) = event.label();
+            p.text(52, y + 1, label, 2, TEXT);
+            let detail = [suffix, b'0' + value / 10, b'0' + value % 10];
+            p.text(199, y + 1, &detail, 2, MUTED);
+        }
     }
 }
 
