@@ -101,6 +101,7 @@ impl Overview {
             caps,
             epr: None,
             mode: 0,
+            epr_counters: 0,
         });
     }
 
@@ -108,6 +109,12 @@ impl Overview {
         if let Some(ref mut profiles) = self.pd_profiles {
             profiles.mode = mode;
             profiles.epr = caps;
+        }
+    }
+
+    pub fn set_epr_counters(&mut self, counters: u32) {
+        if let Some(ref mut profiles) = self.pd_profiles {
+            profiles.epr_counters = counters;
         }
     }
 

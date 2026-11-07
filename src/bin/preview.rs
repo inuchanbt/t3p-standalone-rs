@@ -22,6 +22,7 @@ fn main() -> io::Result<()> {
     let epr_page = flags.iter().any(|x| x == "--epr-page");
     let epr_offer = flags.iter().any(|x| x == "--epr-offer");
     let epr_partial = flags.iter().any(|x| x == "--epr-partial");
+    let epr_diag = flags.iter().any(|x| x == "--epr-diag");
     let energy = flags.iter().any(|x| x == "--energy");
     let power = flags.iter().any(|x| x == "--power");
     let voltage = flags.iter().any(|x| x == "--voltage");
@@ -77,7 +78,7 @@ fn main() -> io::Result<()> {
             .unwrap()
             .expect("test source offer");
         view.set_pd_profiles(2, 1, Some(caps));
-    } else if profiles_ui || profiles_page || epr_page || epr_offer || epr_partial {
+    } else if profiles_ui || profiles_page || epr_page || epr_offer || epr_partial || epr_diag {
         view.set_pd_profiles(0, 0, None);
     }
     if epr_offer || epr_partial {
@@ -99,8 +100,14 @@ fn main() -> io::Result<()> {
         };
         view.set_pd_profiles(if epr_offer { 2 } else { 10 }, 1, None);
         view.set_epr_profiles(1, Some(caps));
+        view.set_epr_counters(capture.counters());
     }
-    view.set_page(if epr_page || epr_offer || epr_partial {
+    if epr_diag {
+        view.set_pd_profiles(1, 1, None);
+        view.set_epr_profiles(1, None);
+        view.set_epr_counters(u32::from_le_bytes([1, 1, 0, 0]));
+    }
+    view.set_page(if epr_page || epr_offer || epr_partial || epr_diag {
         6
     } else if profiles_page || profiles_offer {
         5

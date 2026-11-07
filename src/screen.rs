@@ -395,7 +395,7 @@ fn profiles(p: &mut Strip<'_>, pd: Profiles) {
     }
     let Some(caps) = pd.caps else {
         p.outline(8, 54, 224, 142, GRID);
-        p.text(18, 70, b"RX ONLY", 2, WATTS);
+        p.text(18, 70, b"RX ONLY RD ON", 2, WATTS);
         let state = if pd.mode == 0 || matches!(pd.state, 4 | 5 | 9) {
             pd.state
         } else {
@@ -482,6 +482,16 @@ fn profiles(p: &mut Strip<'_>, pd: Profiles) {
     );
 }
 
+fn pd_count(p: &mut Strip<'_>, x: usize, y: usize, label: &[u8], value: u8, scale: usize) {
+    let digits = [
+        b'0' + value / 100,
+        b'0' + value / 10 % 10,
+        b'0' + value % 10,
+    ];
+    p.text(x, y, label, scale, MUTED);
+    p.text(x + label.len() * 5 * scale, y, &digits, scale, TEXT);
+}
+
 fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
     p.text(8, 36, b"EPR PDO 8-11", 1, PURPLE);
     p.text(94, 36, pd.status(1), 1, TEXT);
@@ -490,7 +500,7 @@ fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
     }
     let Some(caps) = pd.epr else {
         p.outline(8, 54, 224, 142, GRID);
-        p.text(18, 70, b"RX ONLY", 2, PURPLE);
+        p.text(18, 70, b"RX ONLY RD ON", 2, PURPLE);
         let state = if pd.mode == 1 || matches!(pd.state, 4 | 5 | 9) {
             pd.state
         } else {
@@ -500,10 +510,18 @@ fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
             1 => (b"WAITING FOR EPR OFFER", b"QUERY FROM A PD SINK"),
             3 => (b"NO EPR OFFER RECEIVED", b"2X TO TRY THE OTHER CC"),
             4 | 5 | 9 => (b"CAPTURE UNAVAILABLE", b"POWER CYCLE TO RETRY"),
+            6 => (b"RX FIFO FULL", b"SOME PACKETS WERE LOST"),
+            7 => (b"BAD RX FRAME", b"2X TO RETRY"),
+            8 => (b"LINK RESET", b"2X TO RETRY"),
             _ => (b"2X TO LISTEN FOR EPR OFFER", b"QUERY FROM A PD SINK"),
         };
         p.text(18, 108, message, 1, TEXT);
         p.text(18, 129, hint, 1, MUTED);
+        let [rx, spr, chunk0, chunk1] = pd.epr_counters.to_le_bytes();
+        pd_count(p, 18, 149, b"RX:", rx, 2);
+        pd_count(p, 130, 149, b"SPR:", spr, 2);
+        pd_count(p, 18, 171, b"E0:", chunk0, 2);
+        pd_count(p, 130, 171, b"E1:", chunk1, 2);
         return;
     };
     if caps.rows().is_empty() {
@@ -547,6 +565,11 @@ fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
             }
         }
     }
+    let [rx, spr, chunk0, chunk1] = pd.epr_counters.to_le_bytes();
+    pd_count(p, 8, 183, b"RX:", rx, 1);
+    pd_count(p, 65, 183, b"SPR:", spr, 1);
+    pd_count(p, 110, 183, b"E0:", chunk0, 1);
+    pd_count(p, 170, 183, b"E1:", chunk1, 1);
     p.text(
         8,
         204,

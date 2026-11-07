@@ -6,7 +6,7 @@ ATORCH T3P USB 電力計向けの実験的な Rust ファームウェアです�
 
 ## 現在の状態
 
-標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近1・2・5・10分の電力・電圧・電流を表示します。別ビルドでは電源が提示した SPR と EPR の PDO を受信・表示できます。
+標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近1・2・5・10分の電力・電圧・電流を表示します。別ビルドでは SPR と EPR の PDO の受信を試せます。実機ではシンク未接続時の SPR 受信を確認しており、EPR 受信は未確認です。
 
 ENERGY 画面の時間は起動時または積算リセット後の経過時間です。測定値が取得できない間や電流ゼロの間も進みます。旧画面の実機で時間が進み Ah・Wh とともにリセットされることを確認しました。表示は `99:59:59` で止まり（実機未確認）、積算値と時間は再起動後に復元されません。PD 診断版では OVERVIEW の PROTOCOL 欄に生の診断値を表示します。
 
@@ -18,11 +18,13 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 
 `--pd-profiles` でビルドすると、電流グラフの次に **PD PROFILES** が出ます。左ボタンのダブル押しで CC1 の受信を10秒間待ち、5 V の試験構成で電源をつなぎ直します。HID から別給電すると、測定側の電源をつなぐ前に受信を開始できます。同じ画面でダブル押しするたびに受信対象の CC を切り替えます。最初に CRC が一致した SPR の Source_Capabilities を表示し、再取得または電源断まで RAM に保持します。SPR の5件の PDO は T3P 実機で受信・表示できました。
 
-次の **EPR OFFER** ではダブル押しで30秒間受信を待ちます。5 V から始め、接続した ASD-PD31 などの PD シンクから EPR 情報を問い合わせるか EPR モードに入ります。画面を切り替えた直後の取得では直前に選択した CC を使い、同じ画面で再度ダブル押しすると CC が切り替わります。EPR_Source_Capabilities は通常2つのチャンクに分かれます。両方の CRC が一致し順に受信できたら `CAPTURED`、チャンク1だけを受信したときはその EPR PDO を `PARTIAL` と表示します。`NO EPR CAPS` は待機時間中に完全な情報を捕捉できなかったことを示します。
+次の **EPR OFFER** ではダブル押しで30秒間受信を待ちます。5 V から始め、接続した ASD-PD31 などの PD シンクから EPR 情報を問い合わせるか EPR モードに入ります。画面を切り替えた直後の取得では直前に選択した CC を使い、同じ画面で再度ダブル押しすると CC が切り替わります。EPR_Source_Capabilities は通常2つのチャンクに分かれます。両方の CRC が一致し順に受信できたら `CAPTURED`、チャンク1だけを受信したときはその EPR PDO を `PARTIAL` と表示します。`NO EPR CAPS` は待機時間中に完全な情報を捕捉できなかったことを示します。画面には CRC が一致した SOP パケット数 `RX`、そのうち SPR Source_Capabilities の数 `SPR`、認識した EPR チャンクの数 `E0`・`E1` も各最大255件まで表示します。受信できた種類の切り分けに使うもので、0 件でも配線上の通信がなかったとは断定できません。
 
-固定 PDO は電圧・最大電流・計算した電力、PPS は電圧範囲と電流上限を表示します。SPR AVS は 9～15 V と 15～20 V の電流上限、EPR AVS は電圧範囲と PDP を表示します。それ以外の PDO は生の16進数で表示します。一覧の値は電源が提示した値です。起動時の CC 終端を保ち、PD 送信と自動 GoodCRC を無効のまま受信します。EPR 情報の取得には別のシンクからの問い合わせが必要で、EPR の受信とタイミングは実機確認待ちです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
+固定 PDO は電圧・最大電流・計算した電力、PPS は電圧範囲と電流上限を表示します。SPR AVS は 9～15 V と 15～20 V の電流上限、EPR AVS は電圧範囲と PDP を表示します。それ以外の PDO は生の16進数で表示します。一覧の値は電源が提示した値です。起動時の CC 設定を保ち、PD 送信と自動 GoodCRC を無効のまま受信します。FUSB302B 互換であれば内部の両 CC プルダウンは有効で、**高インピーダンスのパッシブスニファーではなく、別のシンクとの接続に影響する可能性があります。** EPR 情報の取得には別のシンクからの問い合わせが必要で、EPR 受信はまだ実機で確認できていません。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
 
 ## 実機での検証
+
+2026-11-07、ユーザーは下流に負荷を接続しない場合に電源ケーブルの片向きで SPR を受信でき、シンク接続時は SPR を受信できなかったと報告しました。EPR の受信もできていません。T3P に給電した状態で電源側メスポートを抵抗モードで測ると CC1 が約 5.1 kΩ、CC2 が数 MΩ だったとのことです。通電中の抵抗測定だけで内部配線や原因は断定できません。
 
 2026-11-06 にユーザーからデモを T3P へ書き込んだ報告と写真を受領しました。写真ではデモ画面、2種類の模擬値、積算値とグラフ履歴の変化を確認できます。報告された試験用に準備したデモ画像のローカル SHA-256 は `b557f5fd89697917a11d07538279e0a6b78f83325ad2aa23b85af3db35f4f0ef` です。写真だけではボタン、正確な時間、電源を入れ直した後の起動、実測は確認できていません。
 
@@ -73,7 +75,7 @@ python check_pi32.py --sim PI32V2_ISAのパス
 
 PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記7枚の実測比較画像を `build/pd-diagnostic` に生成し、共有の `build/demo-graph.ppm` と、`cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd` で診断表示を生成して、`python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PI32V2_ISAのパス` で照合します。表示される5バイトは順に 0x01、0x02、0x08、0x0B、0x40 レジスターの値です。
 
-PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm` は `--measurement --profiles-page`、`preview-profiles-offer.ppm` は `--measurement --profiles-offer` で生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-offer`、`--epr-partial` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
+PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm` は `--measurement --profiles-page`、`preview-profiles-offer.ppm` は `--measurement --profiles-offer` で生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
 
 `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_EPR_3.0.3.bin` でローカルの更新ファイルを作ります。
 

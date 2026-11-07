@@ -135,6 +135,13 @@ def main():
             chunks = [bytes.fromhex((ROOT / "tests" / f"epr_chunk{i}.hex").read_text(encoding="ascii"))
                       for i in range(2)]
             cpu.call(symbols["meter_pd_status"], [1, 1, 1])
+            cpu.mem.write(strip, frame)
+            if cpu.call(symbols["meter_pd_record"], [strip, len(frame), 1, 90])[0] != 0:
+                raise ValueError("Pi32v2 EPR listener did not ignore the SPR source offer")
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-epr-diag.ppm").read_bytes():
+                raise ValueError("Pi32v2 EPR diagnostic counters differ from host preview")
+            cpu.call(symbols["meter_pd_status"], [1, 1, 1])
             for chunk, now, expected_result in zip(chunks, (100, 120), (3, 1)):
                 cpu.mem.write(strip, chunk)
                 if cpu.call(symbols["meter_pd_record"], [strip, len(chunk), 1, now])[0] != expected_result:

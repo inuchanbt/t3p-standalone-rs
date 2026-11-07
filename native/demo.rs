@@ -167,6 +167,8 @@ unsafe extern "C" fn meter_snapshot() {
         );
         #[cfg(feature = "pd-profiles")]
         view.set_epr_profiles(*(&raw const PD_MODE), *(&raw const PD_EPR_CAPS));
+        #[cfg(feature = "pd-profiles")]
+        view.set_epr_counters((&*(&raw const PD_EPR_CAPTURE)).counters());
         view.set_page(*(&raw const PAGE));
         view.set_graph_window(*(&raw const GRAPH_WINDOW));
         (&*(&raw const METER)).overview(view);

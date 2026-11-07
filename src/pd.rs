@@ -84,6 +84,10 @@ pub struct EprCapture {
     first_id: u8,
     first_sender: u8,
     first_at: u32,
+    rx_count: u8,
+    spr_count: u8,
+    chunk0_count: u8,
+    chunk1_count: u8,
 }
 
 impl Default for EprCapture {
@@ -99,12 +103,30 @@ impl EprCapture {
             first_id: 0,
             first_sender: 0,
             first_at: 0,
+            rx_count: 0,
+            spr_count: 0,
+            chunk0_count: 0,
+            chunk1_count: 0,
         }
+    }
+
+    /// CRC-valid SOP records, SPR source offers, and decoded EPR chunks.
+    pub fn counters(&self) -> u32 {
+        u32::from_le_bytes([
+            self.rx_count,
+            self.spr_count,
+            self.chunk0_count,
+            self.chunk1_count,
+        ])
     }
 
     /// Accept two independently CRC-checked EPR_Source_Capabilities chunks.
     pub fn push(&mut self, frame: &[u8], now: u32) -> Result<EprEvent, BadFrame> {
         let (lo, hi, payload) = checked_fifo(frame)?;
+        self.rx_count = self.rx_count.saturating_add(1);
+        if hi & 0x81 == 0x01 && lo & 0x1f == 1 && !payload.is_empty() {
+            self.spr_count = self.spr_count.saturating_add(1);
+        }
         if hi & 0x81 != 0x81 || lo & 0x1f != 17 {
             let soft_reset = hi & 0x80 == 0 && payload.is_empty() && lo & 0x1f == 13;
             let source_message =
@@ -139,6 +161,7 @@ impl EprCapture {
             self.first_id = id;
             self.first_sender = lo & 0xe0;
             self.first_at = now;
+            self.chunk0_count = self.chunk0_count.saturating_add(1);
             return Ok(EprEvent::Started);
         }
         if chunk != 1 {
@@ -148,6 +171,7 @@ impl EprCapture {
         if payload.len() != ((2 + data_len + 3) & !3) {
             return Err(BadFrame);
         }
+        self.chunk1_count = self.chunk1_count.saturating_add(1);
         let complete = usize::from(self.first_size) == size
             && id == ((self.first_id + 1) & 7)
             && self.first_sender == (lo & 0xe0)
@@ -243,6 +267,7 @@ pub(crate) struct Profiles {
     pub(crate) caps: Option<SourceCaps>,
     pub(crate) epr: Option<EprCaps>,
     pub(crate) mode: u32,
+    pub(crate) epr_counters: u32,
 }
 
 impl Profiles {
@@ -341,6 +366,29 @@ mod tests {
                 pdp_w: 240
             }
         );
+    }
+
+    #[test]
+    fn counts_crc_valid_records_and_recognized_epr_chunks() {
+        let (first, second) = epr_frames();
+        let spr = fixture::<35>(include_str!("../tests/pd_offer.hex"));
+        let mut capture = EprCapture::new();
+        assert_eq!(capture.counters().to_le_bytes(), [0, 0, 0, 0]);
+        assert!(matches!(capture.push(&spr, 0), Ok(EprEvent::Ignored)));
+        assert!(matches!(capture.push(&first, 1), Ok(EprEvent::Started)));
+        let mut bad_crc = second;
+        bad_crc[10] ^= 1;
+        assert!(capture.push(&bad_crc, 2).is_err());
+        assert_eq!(capture.counters().to_le_bytes(), [2, 1, 1, 0]);
+        assert!(matches!(
+            capture.push(&second, 3),
+            Ok(EprEvent::Complete(_))
+        ));
+        assert_eq!(capture.counters().to_le_bytes(), [3, 1, 1, 1]);
+        for _ in 0..260 {
+            assert!(matches!(capture.push(&spr, 4), Ok(EprEvent::Ignored)));
+        }
+        assert_eq!(capture.counters().to_le_bytes(), [255, 255, 1, 1]);
     }
 
     #[test]
