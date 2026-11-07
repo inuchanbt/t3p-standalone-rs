@@ -26,6 +26,7 @@ fn main() -> io::Result<()> {
     let sniff_page = flags.iter().any(|x| x == "--sniff-page");
     let sniff_log = flags.iter().any(|x| x == "--sniff-log");
     let sniff_old = flags.iter().any(|x| x == "--sniff-old");
+    let sniff_alert = flags.iter().any(|x| x == "--sniff-alert");
     let energy = flags.iter().any(|x| x == "--energy");
     let power = flags.iter().any(|x| x == "--power");
     let voltage = flags.iter().any(|x| x == "--voltage");
@@ -90,6 +91,7 @@ fn main() -> io::Result<()> {
         || sniff_page
         || sniff_log
         || sniff_old
+        || sniff_alert
     {
         view.set_pd_profiles(0, 0, None);
     }
@@ -119,7 +121,7 @@ fn main() -> io::Result<()> {
         view.set_epr_profiles(1, None);
         view.set_epr_counters(u32::from_le_bytes([1, 1, 0, 0]));
     }
-    if sniff_log || sniff_old {
+    if sniff_log || sniff_old || sniff_alert {
         let parse = |text: &str| -> Vec<u8> {
             text.split_whitespace()
                 .map(|hex| u8::from_str_radix(hex, 16).unwrap())
@@ -135,11 +137,11 @@ fn main() -> io::Result<()> {
         for line in include_str!("../../tests/sniff_epr.hex").lines() {
             sniff.push(&parse(line)).unwrap();
         }
-        view.set_pd_profiles(3, 1, None);
+        view.set_pd_profiles(if sniff_alert { 6 } else { 3 }, 1, None);
         view.set_epr_profiles(2, None);
         view.set_pd_sniff(Some(&sniff), if sniff_old { 8 } else { 0 });
     }
-    view.set_page(if sniff_page || sniff_log || sniff_old {
+    view.set_page(if sniff_page || sniff_log || sniff_old || sniff_alert {
         7
     } else if epr_page || epr_offer || epr_partial || epr_diag {
         6

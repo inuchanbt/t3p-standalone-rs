@@ -176,6 +176,11 @@ def main():
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-sniff-log.ppm").read_bytes():
                 raise ValueError("Pi32v2 PD sniff log differs from host preview")
+            cpu.call(symbols["meter_pd_status"], [6, 1, 2])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-sniff-alert.ppm").read_bytes():
+                raise ValueError("Pi32v2 FIFO alert frame differs from host preview")
+            cpu.call(symbols["meter_pd_status"], [3, 1, 2])
             cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-sniff-old.ppm").read_bytes():

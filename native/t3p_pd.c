@@ -9,8 +9,10 @@
 #define FIFO 0x43
 #define RX_EMPTY 0x20
 #define RX_FULL 0x10
+#define I_ALERT 0x08
 #define TX_IDLE_MASK 0x0f
 #define TX_IDLE 0x08
+#define SNIFF_BURST_LIMIT 4u
 
 /* 1: complete, 2: partial EPR, 3: first EPR chunk, 0: ignored, -1: bad frame. */
 int32_t meter_pd_record(const uint8_t *, uint32_t, uint32_t, uint32_t);
@@ -82,14 +84,16 @@ void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *
     capture->state = T3P_PD_LISTENING;
 }
 
-void t3p_pd_poll_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, uint32_t now)
+/* Return one only after consuming a complete FIFO record. */
+static int poll_one(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, uint32_t now)
 {
-    if (capture->state != T3P_PD_LISTENING || now - capture->polled < 4) return;
+    uint32_t interval = capture->mode == T3P_PD_SNIFF ? 1u : 4u;
+    if (capture->state != T3P_PD_LISTENING || now - capture->polled < interval) return 0;
     capture->polled = now;
     uint32_t timeout = capture->mode == T3P_PD_SPR ? 10000 : 30000;
     if (now - capture->started >= timeout) {
         stop_capture(capture, bus, capture->partial ? T3P_PD_PARTIAL : T3P_PD_TIMEOUT);
-        return;
+        return 0;
     }
 
     /* INTERRUPTA/B, STATUS0/1 and INTERRUPT are consecutive. The CRC interrupt
@@ -97,49 +101,62 @@ void t3p_pd_poll_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *b
     uint8_t status[5];
     if (t3p_pd_rx_read(bus, INTERRUPTA, status, sizeof(status))) {
         capture->state = T3P_PD_BUS_ERROR;
-        return;
+        return 0;
     }
     if ((status[3] & TX_IDLE_MASK) != TX_IDLE || (status[0] & 0xfc) ||
         (status[1] & 1) || (status[4] & 2)) {
         capture->state = T3P_PD_CONFIG;
-        return;
+        return 0;
     }
     if (status[0] & 1) {
         stop_capture(capture, bus, T3P_PD_LINK_RESET);
-        return;
+        return 0;
     }
-    if (status[3] & RX_FULL) {
+    /* I_ALERT is read-clear and may record a full FIFO even after RX_FULL
+     * went low. It can also indicate TX_FULL, so report a generic alert. */
+    if ((status[3] & RX_FULL) || (status[4] & I_ALERT)) {
         stop_capture(capture, bus, T3P_PD_FIFO_FULL);
-        return;
+        return 0;
     }
     if (status[3] & RX_EMPTY) {
         /* INTERRUPT is sampled after STATUS1. Keep a completion that arrived
          * between those reads for the next poll. */
         capture->draining = status[4] & 0x10;
-        return;
+        return 0;
     }
     capture->draining |= status[4] & 0x10;
-    if (!capture->draining || (status[2] & 0x40)) return; /* CC still active */
+    if (!capture->draining || (status[2] & 0x40)) return 0; /* CC still active */
 
     uint8_t frame[35];
     if (t3p_pd_rx_read(bus, FIFO, frame, 3)) {
         capture->state = T3P_PD_BUS_ERROR;
-        return;
+        return 0;
     }
     unsigned body = 4u + 4u * ((frame[2] >> 4) & 7u);
     if ((frame[0] >> 5) != 7) {
         stop_capture(capture, bus, T3P_PD_BAD_FRAME);
-        return;
+        return 0;
     }
     if (t3p_pd_rx_read(bus, FIFO, frame + 3, body)) {
         capture->state = T3P_PD_BUS_ERROR;
-        return;
+        return 0;
     }
-    /* Drain a queued follow-up on the next pass without another poll delay. */
-    capture->polled = now - 4;
+    /* A queued follow-up need not wait for the normal poll interval. */
+    capture->polled = now - interval;
     int32_t result = meter_pd_record(frame, 3 + body, capture->mode, now);
     if (result == 2) capture->partial = 1;
     if (result == 3) capture->partial = 0;
     if (result == 1 || result < 0)
         stop_capture(capture, bus, result > 0 ? T3P_PD_CAPTURED : T3P_PD_BAD_FRAME);
+    return 1;
+}
+
+void t3p_pd_poll_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, uint32_t now)
+{
+    /* Catch up on queued sniff traffic without a display strip or sleep between
+     * records. The bound lets button, meter and display work run regularly. */
+    for (unsigned i = 0; i < SNIFF_BURST_LIMIT; ++i) {
+        if (!poll_one(capture, bus, now) || capture->mode != T3P_PD_SNIFF)
+            break;
+    }
 }

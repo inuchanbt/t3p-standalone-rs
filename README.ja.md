@@ -28,11 +28,11 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 
 データオブジェクトが1つの EPR_Mode は `EPR_ENTER`、`EPR_ACK`、`EPR_OK`、`EPR_FAIL`、`EPR_EXIT` に分けます。未知のアクションは `EPR_Axx`、`Ixx` はメッセージ ID、`Dxx` はアクションに付随するデータの生値を16進数で表示します。Enter のデータはシンクの Operational PDP、Enter Failed では `D00` が原因不明、`D01` がケーブルの EPR 非対応、`D02` が VCONN 失敗、`D03` が RDO の EPR 対応ビットなし、`D04` が電源側の一時的な失敗、`D05` が PDO の EPR 対応ビットなしを表します。その他の値は生値のままです。個々のメッセージを解読するもので、やり取り全体や実際の電圧を確定するものではありません。Enter・Ack・OK・Exit は実機表示と CY4500 の記録が一致しました。Fail と未知のアクションは実機未確認です。 [EPRMDO 定義](https://chromium.googlesource.com/chromiumos/platform/ec/+/6e6e567deac5b5ab8fbe0d706cd82ebeb21e35b4/include/usb_pd.h)
 
-行末の `N` はデータオブジェクト数、`P` は要求した PDO の位置、`C` は拡張メッセージのチャンク、`Q` はチャンク要求、`I` はメッセージ ID です。`MSG` は記録した件数、`GCRC` は一覧から除外した GoodCRC の件数で、表示は各999までです。`DONE` は待機時間の終了を表し、全パケットの受信や契約成立を保証しません。受信 FIFO の満杯、不正なフレーム、リンクリセットでは停止して状態を表示します。特に短い間隔の通信は取りこぼす可能性があり、契約電圧や電流の推定は行いません。CC プルダウンの設定は上記と同じで、他の接続条件や受信の網羅性は引き続き確認が必要です。
+行末の `N` はデータオブジェクト数、`P` は要求した PDO の位置、`C` は拡張メッセージのチャンク、`Q` はチャンク要求、`I` はメッセージ ID です。`MSG` は記録した件数、`GCRC` は一覧から除外した GoodCRC の件数で、表示は各999までです。`DONE` は待機時間の終了を表し、全パケットの受信や契約成立を保証しません。更新した SNIFF 受信処理は通常最短1 ms間隔で確認し、溜まった記録は1回の処理で最大4件まで続けて読み出します。実際の間隔は I²C や画面描画にも左右されます。RX 満杯または読み出しで消える FIFO アラートを検出すると `FIFO ALERT` で停止します。FUSB302B 互換ならこのアラートは RX または TX の満杯を示し、必ずパケットが失われたことまでは示しません。不正なフレームやリンクリセットでも停止して状態を表示します。特に短い間隔の通信は取りこぼす可能性があり、契約電圧や電流の推定は行いません。CC プルダウンの設定は上記と同じで、更新した受信処理と受信の網羅性は引き続き実機確認が必要です。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
 ## 実機での検証
 
-その後 CY4500-EPR を直列に入れて2回比較しました。CY4500 の各記録には、GoodCRC を除く CRC 一致の SOP メッセージが18件、SOP の GoodCRC が18件ありました。SOP′ のケーブル通信と接続イベントはこの件数に含めていません。1回目の T3P 写真はメッセージ12件・GoodCRC 10件で、通信の途中で6件を取りこぼしています。2回目は18件・18件で、表示されたメッセージの順番と読み取れる内容が CY4500 と一致しました。GoodCRC は件数が一致しますが、T3P の表示から個々のパケットを識別することはできません。両回の記録では EPR Request が固定 PDO 1 の 5 V・3 A を要求し、CY4500 の VBUS 記録は約5 Vでした。これは EPR 電圧での契約や実際の負荷電流を確認したものではありません。他の通信での受信漏れや、1回目の取りこぼしの原因は引き続き未確認です。
+その後、従来の受信処理を使い CY4500-EPR を直列に入れて2回比較しました。CY4500 の各記録には、GoodCRC を除く CRC 一致の SOP メッセージが18件、SOP の GoodCRC が18件ありました。SOP′ のケーブル通信と接続イベントはこの件数に含めていません。1回目の T3P 写真はメッセージ12件・GoodCRC 10件で、通信の途中で6件を取りこぼしています。2回目は18件・18件で、表示されたメッセージの順番と読み取れる内容が CY4500 と一致しました。GoodCRC は件数が一致しますが、T3P の表示から個々のパケットを識別することはできません。両回の記録では EPR Request が固定 PDO 1 の 5 V・3 A を要求し、CY4500 の VBUS 記録は約5 Vでした。これは EPR 電圧での契約や実際の負荷電流を確認したものではありません。他の通信での受信漏れや、1回目の取りこぼしの原因は引き続き未確認です。
 
 それ以前の PD SNIFF 試験では、T3P の写真に `DONE`、`CC1`、`MSG:010`、`GCRC:011` が表示されました。保持された8行には `ACCEPT`、`PS_RDY`、`EPR_MODE` があり、送信元のロール表示には `SRC` と `SNK` の両方が含まれていました。1つの接続条件で解析した履歴を表示できたことを示していますが、通信全体の受信、EPR_MODE の内容、契約成立や実際の VBUS 電圧はこの写真からは確認できません。
 
@@ -89,9 +89,9 @@ python check_pi32.py --sim PI32V2_ISAのパス
 
 PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記7枚の実測比較画像を `build/pd-diagnostic` に生成し、共有の `build/demo-graph.ppm` と、`cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd` で診断表示を生成して、`python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PI32V2_ISAのパス` で照合します。表示される5バイトは順に 0x01、0x02、0x08、0x0B、0x40 レジスターの値です。
 
-PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm` は `--measurement --profiles-page`、`preview-profiles-offer.ppm` は `--measurement --profiles-offer` で生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`preview-sniff-ready.ppm`、`preview-sniff-log.ppm`、`preview-sniff-old.ppm` は `--measurement` にそれぞれ `--sniff-page`、`--sniff-log`、`--sniff-old` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
+PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm` は `--measurement --profiles-page`、`preview-profiles-offer.ppm` は `--measurement --profiles-offer` で生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`preview-sniff-ready.ppm`、`preview-sniff-log.ppm`、`preview-sniff-old.ppm`、`preview-sniff-alert.ppm` は `--measurement` にそれぞれ `--sniff-page`、`--sniff-log`、`--sniff-old`、`--sniff-alert` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
 
-`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_SNIFF_HISTORY_3.0.3.bin` でローカルの更新ファイルを作ります。
+`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_SNIFF_FAST_3.0.3.bin` でローカルの更新ファイルを作ります。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

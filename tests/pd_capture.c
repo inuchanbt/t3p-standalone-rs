@@ -5,7 +5,7 @@
 
 struct fake_phy {
     uint8_t registers[0x43];
-    unsigned writes, consumed;
+    unsigned writes, consumed, queued, status_reads;
 };
 
 static struct fake_phy reset_phy(void)
@@ -25,11 +25,22 @@ int t3p_pd_rx_read(struct t3p_meter_bus *bus, uint8_t reg, uint8_t *out, unsigne
         assert(phy->consumed + count <= sizeof(offer));
         memcpy(out, offer + phy->consumed, count);
         phy->consumed += count;
-        if (phy->consumed == sizeof(offer)) phy->registers[0x41] = 0x28;
+        if (phy->consumed == sizeof(offer)) {
+            if (phy->queued > 1) {
+                --phy->queued;
+                phy->consumed = 0;
+            } else {
+                phy->queued = 0;
+                phy->registers[0x41] = 0x28;
+            }
+        }
     } else {
         assert(reg + count <= sizeof(phy->registers));
         memcpy(out, phy->registers + reg, count);
-        if (reg == 0x3e) phy->registers[0x42] = 0; /* completion is read-clear */
+        if (reg == 0x3e) {
+            ++phy->status_reads;
+            phy->registers[0x42] = 0; /* interrupts are read-clear */
+        }
     }
     return 0;
 }
@@ -72,6 +83,12 @@ int main(void)
     t3p_pd_start_capture(&pd, &bus, 0, T3P_PD_SPR);
     assert(pd.state == T3P_PD_LISTENING && pd.cc == 1);
     assert(phy.registers[0x02] == 7 && phy.registers[0x0b] == 7);
+    unsigned reads = phy.status_reads;
+    t3p_pd_poll_capture(&pd, &bus, 0);
+    t3p_pd_poll_capture(&pd, &bus, 1);
+    assert(phy.status_reads == reads + 1); /* offers retain a 4 ms interval */
+    t3p_pd_poll_capture(&pd, &bus, 4);
+    assert(phy.status_reads == reads + 2);
     t3p_pd_start_capture(&pd, &bus, 500, T3P_PD_SPR);
     assert(pd.state == T3P_PD_LISTENING && pd.cc == 2);
     assert(phy.registers[0x02] == 0x0b && phy.registers[0x0b] == 7);
@@ -121,6 +138,39 @@ int main(void)
     t3p_pd_start_capture(&pd, &bus, 44000, T3P_PD_SNIFF);
     assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_SNIFF && pd.cc == 2);
     record_result = 0; /* a logged message must not stop the receiver */
+
+    /* An empty sniff receiver is polled at 1 ms, not the 4 ms offer cadence. */
+    reads = phy.status_reads;
+    t3p_pd_poll_capture(&pd, &bus, 44000);
+    assert(phy.status_reads == reads + 1);
+    t3p_pd_poll_capture(&pd, &bus, 44000);
+    assert(phy.status_reads == reads + 1);
+    t3p_pd_poll_capture(&pd, &bus, 44001);
+    assert(phy.status_reads == reads + 2);
+
+    /* A single interrupt can cover several completed FIFO records. Drain up
+     * to four immediately, then yield so the rest of the UI can run. */
+    unsigned before = records;
+    phy.consumed = 0;
+    phy.queued = 5;
+    phy.registers[0x41] = 0x08;
+    phy.registers[0x42] = 0x10;
+    t3p_pd_poll_capture(&pd, &bus, 44002);
+    assert(records == before + 4 && phy.queued == 1 && pd.state == T3P_PD_LISTENING);
+    t3p_pd_poll_capture(&pd, &bus, 44002);
+    assert(records == before + 5 && phy.queued == 0 && pd.state == T3P_PD_LISTENING);
+
+    /* A CRC completion seen while CC is still active is retained until idle. */
+    phy.consumed = 0;
+    phy.registers[0x40] = 0x40;
+    phy.registers[0x41] = 0x08;
+    phy.registers[0x42] = 0x10;
+    t3p_pd_poll_capture(&pd, &bus, 44003);
+    assert(records == before + 5 && phy.consumed == 0);
+    phy.registers[0x40] = 0;
+    t3p_pd_poll_capture(&pd, &bus, 44004);
+    assert(records == before + 6);
+
     for (unsigned n = 0; n < 3; ++n) {
         phy.consumed = 0;
         phy.registers[0x41] = 0x08;
@@ -131,5 +181,18 @@ int main(void)
     t3p_pd_poll_capture(&pd, &bus, 74000);
     assert(pd.state == T3P_PD_TIMEOUT);
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
+
+    /* The read-clear alert may outlive the instantaneous RX_FULL flag. */
+    t3p_pd_start_capture(&pd, &bus, 75000, T3P_PD_SNIFF);
+    phy.registers[0x41] = 0x28; /* RX empty, TX idle */
+    phy.registers[0x42] = 0x08; /* latched FIFO alert */
+    t3p_pd_poll_capture(&pd, &bus, 75000);
+    assert(pd.state == T3P_PD_FIFO_FULL);
+    assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
+
+    t3p_pd_start_capture(&pd, &bus, 76000, T3P_PD_SNIFF);
+    phy.registers[0x41] = 0x18; /* RX full, TX idle */
+    t3p_pd_poll_capture(&pd, &bus, 76000);
+    assert(pd.state == T3P_PD_FIFO_FULL);
     return 0;
 }

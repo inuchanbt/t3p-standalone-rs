@@ -513,7 +513,7 @@ impl Profiles {
             3 => b"NO SOURCE CAPS",
             4 => b"CONFIG MISMATCH",
             5 => b"I2C ERROR",
-            6 => b"RX FIFO FULL",
+            6 => b"FIFO ALERT",
             7 => b"BAD RX FRAME",
             8 => b"LINK RESET",
             9 => b"TIMER UNAVAILABLE",
