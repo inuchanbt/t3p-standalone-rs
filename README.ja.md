@@ -6,7 +6,7 @@ ATORCH T3P USB 電力計向けの実験的な Rust ファームウェアです�
 
 ## 現在の状態
 
-標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近1・2・5・10分の電力・電圧・電流を表示します。別ビルドでは SPR と EPR の PDO を受信でき、下記の条件で両方の実機受信を確認しました。PD SNIFF を直列接続の CY4500-EPR と2回比較し、1回は一致、もう1回は取りこぼしを確認しました。
+標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近1・2・5・10分の電力・電圧・電流を表示します。別ビルドでは SPR と EPR の PDO を受信でき、下記の条件で両方の実機受信を確認しました。PD SNIFF を直列接続の CY4500-EPR と比較し、一致した記録と取りこぼした記録の両方を確認しました。
 
 ENERGY 画面の時間は起動時または積算リセット後の経過時間です。測定値が取得できない間や電流ゼロの間も進みます。旧画面の実機で時間が進み Ah・Wh とともにリセットされることを確認しました。表示は `99:59:59` で止まり（実機未確認）、積算値と時間は再起動後に復元されません。PD 診断版では OVERVIEW の PROTOCOL 欄に生の診断値を表示します。
 
@@ -28,13 +28,17 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 
 データオブジェクトが1つの EPR_Mode は `EPR_ENTER`、`EPR_ACK`、`EPR_OK`、`EPR_FAIL`、`EPR_EXIT` に分けます。未知のアクションは `EPR_Axx`、`Ixx` はメッセージ ID、`Dxx` はアクションに付随するデータの生値を16進数で表示します。Enter のデータはシンクの Operational PDP、Enter Failed では `D00` が原因不明、`D01` がケーブルの EPR 非対応、`D02` が VCONN 失敗、`D03` が RDO の EPR 対応ビットなし、`D04` が電源側の一時的な失敗、`D05` が PDO の EPR 対応ビットなしを表します。その他の値は生値のままです。個々のメッセージを解読するもので、やり取り全体や実際の電圧を確定するものではありません。Enter・Ack・OK・Exit は実機表示と CY4500 の記録が一致しました。Fail と未知のアクションは実機未確認です。 [EPRMDO 定義](https://chromium.googlesource.com/chromiumos/platform/ec/+/6e6e567deac5b5ab8fbe0d706cd82ebeb21e35b4/include/usb_pd.h)
 
-行末の `N` はデータオブジェクト数、`P` は要求した PDO の位置、`C` は拡張メッセージのチャンク、`Q` はチャンク要求、`I` はメッセージ ID です。`MSG` は記録した件数、`GCRC` は一覧から除外した GoodCRC の件数で、表示は各999までです。`DONE` は待機時間の終了を表し、全パケットの受信や契約成立を保証しません。EPR と SNIFF の受信処理は通常最短1 ms間隔で確認し、溜まった記録は1回の処理で最大4件まで続けて読み出します。4件を読み切った場合は通常の待機を省いて次の処理に進みます。実際の間隔は I²C や画面描画にも左右されます。これらの処理間隔の変更は実機未確認です。読み出しで消える FIFO アラートは受信を継続しつつ `WARN` として保持します。FUSB302B 互換ならこのアラートは RX または TX の満杯を示しますが、それだけで必ずパケットが失われたとは断定できません。RX 満杯の状態を実際に読み取った場合は `FIFO FULL` で停止します。不正なフレームやリンクリセットでも停止して状態を表示します。特に短い間隔の通信は取りこぼす可能性があり、契約電圧や電流の推定は行いません。CC プルダウンの設定は上記と同じです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+行末の `N` はデータオブジェクト数、`P` は要求した PDO の位置、`C` は拡張メッセージのチャンク、`Q` はチャンク要求、`I` はメッセージ ID です。`MSG` は記録した件数、`GCRC` は一覧から除外した GoodCRC の件数で、表示は各999までです。`DONE` は待機時間の終了を表し、全パケットの受信や契約成立を保証しません。EPR と SNIFF の受信処理は通常最短1 ms間隔で確認し、溜まった記録は1回の処理で最大4件まで続けて読み出します。4件を読み切った場合は通常の待機を省いて次の処理に進みます。実際の間隔は I²C や画面描画にも左右されます。高速化版の実機試験では下記のように成功と取りこぼしの両方がありました。読み出しで消える FIFO アラートは受信を継続しつつ `WARN` として保持します。FUSB302B 互換ならこのアラートは RX または TX の満杯を示しますが、それだけで必ずパケットが失われたとは断定できません。RX 満杯の状態を実際に読み取った場合は `FIFO FULL` で停止します。不正なフレームやリンクリセットでも停止して状態を表示します。特に短い間隔の通信は取りこぼす可能性があり、契約電圧や電流の推定は行いません。CC プルダウンの設定は上記と同じです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
 警告は SPR・EPR・SNIFF の結果ごとに RAM 内で保持し、同じ種類の新しい取得を始めるか電源を切ると消えます。
 
+現行の受信優先試験版では、EPR OFFER または PD SNIFF の取得中、受信以外の処理を減らすため画面の定期更新を止めます。途中で別画面に移った場合も、取得終了まで表示はその時点のままです。ボタン操作時と取得終了時は再描画し、電圧・電流のサンプリングと積算は継続します。比較試験では `LISTENING` 画面が落ち着いてから接続し、取得終了までボタンを押さずに待ってください。SPR の取得中は従来どおり定期更新します。この変更は PC 上で動作を確認しましたが、実機では未確認です。通信の取りこぼしがなくなる保証はありません。
+
 ## 実機での検証
 
-その後の `PD_FIFO_WARN` 版では、EPR OFFER は `NO EPR WARN`、`RX:025`、`SPR:001`、`E0:000`、`E1:000` で終了しましたが、対応する CY4500 の記録には EPR 能力情報の両チャンクがありました。PD SNIFF の2回分はどちらも `DONE WARN` で、T3P は各16件・GoodCRC 17件、対応する CY4500 は各21件・GoodCRC 21件でした。両回とも T3P の一覧には EPR 能力情報の両チャンクがありません。CY4500 の SOP 記録から CRC が一致するパケットを再構成してホスト側のデコーダーへ入力すると、3回とも EPR 能力情報を組み立てられました。受信や処理間隔の調査に役立ちますが、取りこぼしの物理的な原因はまだ確定しません。新しい CC1 固定と EPR の高速化は実機未確認です。
+`PD_CC1_EPR_FAST` 版の EPR OFFER は、1回目が `NO EPR WARN`、`E0:001 E1:000` で終了し、別の1回は 28 V / 5 A、36 V / 5 A、48 V / 5 A、15～48 V AVS / 240 W を表示しました。対応する CY4500 の記録にはいずれも EPR 能力情報の両チャンクがあります。PD SNIFF の2回はそれぞれ11件で `FIFO FULL`、17件で `DONE WARN` でした。CY4500 の各記録には GoodCRC を除く SOP メッセージ18件と GoodCRC 18件があり、どちらの T3P 履歴にも電源が送った EPR 能力情報の後半チャンクがありません。1回目は通信途中で停止し、2回目は残りのメッセージが順に表示され、GoodCRC は18件でした。CY4500 が記録した VBUS は約5 Vで、提示された 48 V が実際に出力されたことを意味しません。後半チャンクを取りこぼした物理的な原因は未確定です。
+
+それ以前の `PD_FIFO_WARN` 版では、EPR OFFER は `NO EPR WARN`、`RX:025`、`SPR:001`、`E0:000`、`E1:000` で終了しましたが、対応する CY4500 の記録には EPR 能力情報の両チャンクがありました。PD SNIFF の2回分はどちらも `DONE WARN` で、T3P は各16件・GoodCRC 17件、対応する CY4500 は各21件・GoodCRC 21件でした。両回とも T3P の一覧には EPR 能力情報の両チャンクがありません。CY4500 の SOP 記録から CRC が一致するパケットを再構成してホスト側のデコーダーへ入力すると、3回とも EPR 能力情報を組み立てられました。受信や処理間隔の調査に役立ちますが、取りこぼしの物理的な原因はまだ確定しません。
 
 その後の `PD_SNIFF_FAST` 版では、2回の PD SNIFF がともに `FIFO ALERT` で停止し、各7件・GoodCRC 7件でした。表示された7件はそれぞれ CY4500 記録の冒頭と一致します。別の EPR OFFER 試験も `FIFO ALERT` で停止し、`RX:002`、`SPR:001`、EPR チャンクは0件でした。CY4500 の3つの記録にはいずれも CRC 一致の SOP メッセージ18件と SOP GoodCRC 18件があり、EPR の両チャンクも含まれます。ファームは保持されたアラートと RX 満杯の状態を区別せず停止していたため、写真だけではどちらが原因か、実際にデータが失われたかは判断できません。後続のファームでは保持アラートだけでは停止せず警告を残し、上記の新しい試験でその動作を確認しました。
 
@@ -97,7 +101,7 @@ PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記
 
 PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm`、`preview-profiles-listening.ppm`、`preview-profiles-offer.ppm` は `--measurement` にそれぞれ `--profiles-page`、`--profiles-listening`、`--profiles-offer` を加えて生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-timeout.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-timeout`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`preview-sniff-ready.ppm`、`preview-sniff-log.ppm`、`preview-sniff-old.ppm`、`preview-sniff-alert.ppm` は `--measurement` にそれぞれ `--sniff-page`、`--sniff-log`、`--sniff-old`、`--sniff-alert` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
 
-`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CC1_EPR_FAST_3.0.3.bin` でローカルの更新ファイルを作ります。
+`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_RX_PRIORITY_3.0.3.bin` でローカルの更新ファイルを作ります。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

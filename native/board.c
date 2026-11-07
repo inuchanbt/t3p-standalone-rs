@@ -160,7 +160,17 @@ void t3p_board_start(void)
 #endif
             sampled = now;
         }
-        if (redraw || now - rendered >= 1000) {
+        unsigned refresh_due = redraw || now - rendered >= 1000;
+#ifdef T3P_PD_PROFILES
+        /* EPR exchanges can fill the receive FIFO while a full screen is
+           being repainted. Freeze only the automatic repaint while an EPR
+           offer or sniff capture is active; key presses and completion still
+           redraw, and measurement sampling continues above. This is a trial to reduce
+           blocking time, not a guarantee against dropped packets. */
+        if (!redraw && pd.state == T3P_PD_LISTENING && pd.mode != T3P_PD_SPR)
+            refresh_due = 0;
+#endif
+        if (refresh_due) {
             meter_snapshot();
             redraw = 0;
             for (uint32_t top = 0; top < PANEL_SIDE; top += STRIP_ROWS) {
