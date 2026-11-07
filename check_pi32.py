@@ -120,6 +120,9 @@ def main():
                 raise ValueError("Pi32v2 PD profiles double press did not request capture")
             frame = bytes.fromhex((ROOT / "tests/pd_offer.hex").read_text(encoding="ascii"))
             cpu.call(symbols["meter_pd_status"], [1, 1, 0])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-profiles-listening.ppm").read_bytes():
+                raise ValueError("Pi32v2 PD profiles listening hint differs from host preview")
             cpu.mem.write(strip, frame[:-1] + bytes([frame[-1] ^ 1]))
             if cpu.call(symbols["meter_pd_record"], [strip, len(frame), 0, 0])[0] != 0xffffffff:
                 raise ValueError("Pi32v2 accepted a corrupt PD frame")
@@ -139,6 +142,11 @@ def main():
                 raise ValueError("Pi32v2 EPR double press did not request EPR capture")
             chunks = [bytes.fromhex((ROOT / "tests" / f"epr_chunk{i}.hex").read_text(encoding="ascii"))
                       for i in range(2)]
+            cpu.call(symbols["meter_pd_status"], [1, 1, 1])
+            cpu.call(symbols["meter_pd_status"], [3, 1, 1])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-epr-timeout.ppm").read_bytes():
+                raise ValueError("Pi32v2 EPR timeout hint differs from host preview")
             cpu.call(symbols["meter_pd_status"], [1, 1, 1])
             cpu.mem.write(strip, frame)
             if cpu.call(symbols["meter_pd_record"], [strip, len(frame), 1, 90])[0] != 0:

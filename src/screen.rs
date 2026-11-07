@@ -402,7 +402,7 @@ fn profiles(p: &mut Strip<'_>, pd: Profiles) {
     p.text(8, 36, b"SPR OFFER", 1, WATTS);
     p.text(94, 36, pd.status(0), 1, TEXT);
     if pd.mode == 0 && pd.cc != 0 {
-        p.text(215, 36, if pd.cc == 1 { b"CC1" } else { b"CC2" }, 1, AMPS);
+        p.text(215, 36, b"CC1", 1, AMPS);
     }
     let Some(caps) = pd.caps else {
         p.outline(8, 54, 224, 142, GRID);
@@ -414,12 +414,9 @@ fn profiles(p: &mut Strip<'_>, pd: Profiles) {
         };
         let (message, hint): (&[u8], &[u8]) = match state {
             0 => (b"2X TO START ON CC1", b"USE A 5V TEST SETUP"),
-            1 => (
-                b"WAITING FOR SOURCE CAPABILITIES",
-                b"2X TO TRY THE OTHER CC",
-            ),
+            1 => (b"WAITING FOR SOURCE CAPABILITIES", b"2X TO RESTART CAPTURE"),
             4 | 5 | 9 => (b"CAPTURE UNAVAILABLE", b"POWER CYCLE TO RETRY"),
-            _ => (b"NO OFFER SAVED", b"2X TO TRY THE OTHER CC"),
+            _ => (b"NO OFFER SAVED", b"2X TO RETRY ON CC1"),
         };
         p.text(18, 108, message, 1, TEXT);
         p.text(18, 129, hint, 1, MUTED);
@@ -507,7 +504,7 @@ fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
     p.text(8, 36, b"EPR PDO 8-11", 1, PURPLE);
     p.text(94, 36, pd.status(1), 1, TEXT);
     if pd.mode == 1 && pd.cc != 0 {
-        p.text(215, 36, if pd.cc == 1 { b"CC1" } else { b"CC2" }, 1, AMPS);
+        p.text(215, 36, b"CC1", 1, AMPS);
     }
     let Some(caps) = pd.epr else {
         p.outline(8, 54, 224, 142, GRID);
@@ -519,7 +516,7 @@ fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
         };
         let (message, hint): (&[u8], &[u8]) = match state {
             1 => (b"WAITING FOR EPR OFFER", b"QUERY FROM A PD SINK"),
-            3 => (b"NO EPR OFFER RECEIVED", b"2X TO TRY THE OTHER CC"),
+            3 => (b"NO EPR OFFER RECEIVED", b"2X TO RETRY ON CC1"),
             4 | 5 | 9 => (b"CAPTURE UNAVAILABLE", b"POWER CYCLE TO RETRY"),
             6 => (b"RX FIFO FULL", b"PACKETS MAY BE LOST"),
             7 => (b"BAD RX FRAME", b"2X TO RETRY"),
@@ -609,7 +606,7 @@ fn pd_sniff(p: &mut Strip<'_>, pd: Profiles) {
     p.text(8, 35, b"PD LOG", 1, AMPS);
     p.text(69, 35, pd.status(2), 1, TEXT);
     if pd.mode == 2 && pd.cc != 0 {
-        p.text(215, 35, if pd.cc == 1 { b"CC1" } else { b"CC2" }, 1, AMPS);
+        p.text(215, 35, b"CC1", 1, AMPS);
     }
     let (total, good_crc) = pd
         .sniff

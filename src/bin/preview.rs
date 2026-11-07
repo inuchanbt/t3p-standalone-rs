@@ -18,8 +18,10 @@ fn main() -> io::Result<()> {
     let pd = flags.iter().any(|x| x == "--pd");
     let profiles_ui = flags.iter().any(|x| x == "--profiles-ui");
     let profiles_page = flags.iter().any(|x| x == "--profiles-page");
+    let profiles_listening = flags.iter().any(|x| x == "--profiles-listening");
     let profiles_offer = flags.iter().any(|x| x == "--profiles-offer");
     let epr_page = flags.iter().any(|x| x == "--epr-page");
+    let epr_timeout = flags.iter().any(|x| x == "--epr-timeout");
     let epr_offer = flags.iter().any(|x| x == "--epr-offer");
     let epr_partial = flags.iter().any(|x| x == "--epr-partial");
     let epr_diag = flags.iter().any(|x| x == "--epr-diag");
@@ -84,7 +86,9 @@ fn main() -> io::Result<()> {
         view.set_pd_profiles(2, 1, Some(caps));
     } else if profiles_ui
         || profiles_page
+        || profiles_listening
         || epr_page
+        || epr_timeout
         || epr_offer
         || epr_partial
         || epr_diag
@@ -94,6 +98,13 @@ fn main() -> io::Result<()> {
         || sniff_alert
     {
         view.set_pd_profiles(0, 0, None);
+    }
+    if profiles_listening {
+        view.set_pd_profiles(1, 1, None);
+    }
+    if epr_timeout {
+        view.set_pd_profiles(3, 1, None);
+        view.set_epr_profiles(1, None);
     }
     if epr_offer || epr_partial {
         let parse = |text: &str| -> Vec<u8> {
@@ -144,9 +155,9 @@ fn main() -> io::Result<()> {
     }
     view.set_page(if sniff_page || sniff_log || sniff_old || sniff_alert {
         7
-    } else if epr_page || epr_offer || epr_partial || epr_diag {
+    } else if epr_page || epr_timeout || epr_offer || epr_partial || epr_diag {
         6
-    } else if profiles_page || profiles_offer {
+    } else if profiles_page || profiles_listening || profiles_offer {
         5
     } else if energy {
         1

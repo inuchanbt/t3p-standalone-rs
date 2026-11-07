@@ -146,6 +146,7 @@ int main(void)
     assert(f.clocks == 0);
 #ifdef T3P_PD_PROFILES
     assert(t3p_pd_rx_config(&b, 0x02, 0x04)); /* would drop both Rd */
+    assert(t3p_pd_rx_config(&b, 0x02, 0x0b)); /* unsupported CC2 receive */
     assert(t3p_pd_rx_config(&b, 0x03, 0x04)); /* automatic GoodCRC */
     assert(t3p_pd_rx_config(&b, 0x43, 0xa1)); /* transmit token */
     assert(f.clocks == 0);
@@ -153,13 +154,13 @@ int main(void)
     f.reads[f.count++] = 0;
     f.reads[f.count++] = 0;
     f.reads[f.count++] = 0;
-    assert(!t3p_pd_rx_config(&b, 0x02, 0x0b)); /* both Rd and MEAS_CC2 */
+    assert(!t3p_pd_rx_config(&b, 0x02, 0x07)); /* both Rd and MEAS_CC1 */
     assert(f.cursor == f.count && f.sda && f.scl);
-    static const int select_cc2[] = {0,0,0,0,1,0,1,1};
+    static const int select_cc1[] = {0,0,0,0,0,1,1,1};
     for (unsigned i = 0; i < 8; ++i) {
         assert(f.clock_data[1 + i] == pd_write[i]);
         assert(f.clock_data[10 + i] == register_two[i]);
-        assert(f.clock_data[19 + i] == select_cc2[i]);
+        assert(f.clock_data[19 + i] == select_cc1[i]);
     }
 #endif
     return 0;

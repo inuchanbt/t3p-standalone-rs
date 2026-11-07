@@ -180,8 +180,8 @@ void t3p_board_start(void)
         }
         uint32_t pause_ms = 5;
 #ifdef T3P_PD_PROFILES
-        if (pd.state == T3P_PD_LISTENING) pause_ms = 1;
+        if (pd.state == T3P_PD_LISTENING) pause_ms = pd.catch_up ? 0 : 1;
 #endif
-        if (t3p_bsp_delay(&board, pause_ms)) t3p_signal_failure(5);
+        if (pause_ms && t3p_bsp_delay(&board, pause_ms)) t3p_signal_failure(5);
     }
 }

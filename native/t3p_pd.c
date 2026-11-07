@@ -12,7 +12,7 @@
 #define I_ALERT 0x08
 #define TX_IDLE_MASK 0x0f
 #define TX_IDLE 0x08
-#define SNIFF_BURST_LIMIT 4u
+#define RX_BURST_LIMIT 4u
 
 /* 1: complete, 2: partial EPR, 3: first EPR chunk, 0: ignored, -1: bad frame. */
 int32_t meter_pd_record(const uint8_t *, uint32_t, uint32_t, uint32_t);
@@ -41,8 +41,8 @@ void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *
         capture->state == T3P_PD_TIMER_ERROR)
         return;
     capture->fifo_warning = 0;
-    if (mode == capture->mode || capture->cc == 0)
-        capture->cc = capture->cc == 1 ? 2 : 1;
+    /* Only CC1 reception has been observed on the tested T3P. */
+    capture->cc = 1;
     capture->mode = mode;
 
     uint8_t registers[9], power, status[5];
@@ -74,7 +74,7 @@ void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *
         stop_capture(capture, bus, T3P_PD_FIFO_FULL);
         return;
     }
-    if (!configured(bus, SWITCHES0, capture->cc == 1 ? 0x07 : 0x0b) ||
+    if (!configured(bus, SWITCHES0, 0x07) ||
         !configured(bus, POWER, 0x07))
         return;
 
@@ -82,13 +82,14 @@ void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *
     capture->polled = now - 4;
     capture->draining = 0;
     capture->partial = 0;
+    capture->catch_up = 0;
     capture->state = T3P_PD_LISTENING;
 }
 
 /* Return one only after consuming a complete FIFO record. */
 static int poll_one(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, uint32_t now)
 {
-    uint32_t interval = capture->mode == T3P_PD_SNIFF ? 1u : 4u;
+    uint32_t interval = capture->mode == T3P_PD_SPR ? 4u : 1u;
     if (capture->state != T3P_PD_LISTENING || now - capture->polled < interval) return 0;
     capture->polled = now;
     uint32_t timeout = capture->mode == T3P_PD_SPR ? 10000 : 30000;
@@ -157,10 +158,13 @@ static int poll_one(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, u
 
 void t3p_pd_poll_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, uint32_t now)
 {
-    /* Catch up on queued sniff traffic without a display strip or sleep between
-     * records. The bound lets button, meter and display work run regularly. */
-    for (unsigned i = 0; i < SNIFF_BURST_LIMIT; ++i) {
-        if (!poll_one(capture, bus, now) || capture->mode != T3P_PD_SNIFF)
+    /* Catch up on queued EPR or sniff traffic without a display strip or sleep
+     * between records. Bound work so other tasks still run regularly. */
+    capture->catch_up = 0;
+    for (unsigned i = 0; i < RX_BURST_LIMIT; ++i) {
+        if (!poll_one(capture, bus, now) || capture->mode == T3P_PD_SPR)
             break;
+        if (i + 1 == RX_BURST_LIMIT && capture->state == T3P_PD_LISTENING)
+            capture->catch_up = 1;
     }
 }

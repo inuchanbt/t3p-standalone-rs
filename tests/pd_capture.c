@@ -54,7 +54,7 @@ int t3p_pd_rx_config(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
         phy->registers[0x41] = 0x28;
         return 0;
     }
-    assert(reg == 0x0b || (reg == 0x02 && (value & 0xf3) == 3));
+    assert(reg == 0x0b || (reg == 0x02 && (value == 3 || value == 7)));
     phy->registers[reg] = value;
     return 0;
 }
@@ -90,8 +90,8 @@ int main(void)
     t3p_pd_poll_capture(&pd, &bus, 4);
     assert(phy.status_reads == reads + 2);
     t3p_pd_start_capture(&pd, &bus, 500, T3P_PD_SPR);
-    assert(pd.state == T3P_PD_LISTENING && pd.cc == 2);
-    assert(phy.registers[0x02] == 0x0b && phy.registers[0x0b] == 7);
+    assert(pd.state == T3P_PD_LISTENING && pd.cc == 1);
+    assert(phy.registers[0x02] == 7 && phy.registers[0x0b] == 7);
 
     phy.registers[0x42] = 0x10; /* completion arrived just after STATUS1 */
     t3p_pd_poll_capture(&pd, &bus, 505);
@@ -108,6 +108,25 @@ int main(void)
 
     t3p_pd_start_capture(&pd, &bus, 12000, T3P_PD_EPR);
     assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_EPR && pd.cc == 1);
+
+    /* EPR receives bursts too: poll at 1 ms and drain four queued packets. */
+    reads = phy.status_reads;
+    t3p_pd_poll_capture(&pd, &bus, 12000);
+    t3p_pd_poll_capture(&pd, &bus, 12000);
+    assert(phy.status_reads == reads + 1);
+    t3p_pd_poll_capture(&pd, &bus, 12001);
+    assert(phy.status_reads == reads + 2);
+    unsigned epr_before = records;
+    record_result = 0;
+    phy.consumed = 0;
+    phy.queued = 5;
+    phy.registers[0x41] = 0x08;
+    phy.registers[0x42] = 0x10;
+    t3p_pd_poll_capture(&pd, &bus, 12002);
+    assert(records == epr_before + 4 && phy.queued == 1 && pd.state == T3P_PD_LISTENING && pd.catch_up);
+    t3p_pd_poll_capture(&pd, &bus, 12002);
+    assert(records == epr_before + 5 && phy.queued == 0 && pd.state == T3P_PD_LISTENING && !pd.catch_up);
+
     phy.consumed = 0;
     phy.registers[0x41] = 0x08;
     phy.registers[0x42] = 0x18; /* latched FIFO warning and CRC completion */
@@ -120,7 +139,7 @@ int main(void)
     assert(pd.state == T3P_PD_PARTIAL);
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
     t3p_pd_start_capture(&pd, &bus, 43000, T3P_PD_EPR);
-    assert(pd.state == T3P_PD_LISTENING && pd.cc == 2 && !pd.fifo_warning);
+    assert(pd.state == T3P_PD_LISTENING && pd.cc == 1 && !pd.fifo_warning);
     phy.consumed = 0;
     phy.registers[0x41] = 0x08;
     phy.registers[0x42] = 0x18; /* warning while receiving chunk 0 */
@@ -136,7 +155,7 @@ int main(void)
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
 
     t3p_pd_start_capture(&pd, &bus, 44000, T3P_PD_SNIFF);
-    assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_SNIFF && pd.cc == 2 && !pd.fifo_warning);
+    assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_SNIFF && pd.cc == 1 && !pd.fifo_warning);
     record_result = 0; /* a logged message must not stop the receiver */
 
     /* An empty sniff receiver is polled at 1 ms, not the 4 ms offer cadence. */
@@ -156,9 +175,9 @@ int main(void)
     phy.registers[0x41] = 0x08;
     phy.registers[0x42] = 0x10;
     t3p_pd_poll_capture(&pd, &bus, 44002);
-    assert(records == before + 4 && phy.queued == 1 && pd.state == T3P_PD_LISTENING);
+    assert(records == before + 4 && phy.queued == 1 && pd.state == T3P_PD_LISTENING && pd.catch_up);
     t3p_pd_poll_capture(&pd, &bus, 44002);
-    assert(records == before + 5 && phy.queued == 0 && pd.state == T3P_PD_LISTENING);
+    assert(records == before + 5 && phy.queued == 0 && pd.state == T3P_PD_LISTENING && !pd.catch_up);
 
     /* A CRC completion seen while CC is still active is retained until idle. */
     phy.consumed = 0;

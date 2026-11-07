@@ -169,8 +169,8 @@ int t3p_pd_rx_read(struct t3p_meter_bus *b, uint8_t reg, uint8_t *data, unsigned
 
 int t3p_pd_rx_config(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
 {
-    /* Preserve both Rd bits. Allow only RX routing, power and RX flush. */
-    if (!((reg == 0x02 && (value == 0x03 || value == 0x07 || value == 0x0b)) ||
+    /* Preserve both Rd bits. Allow only CC1 RX routing, power and RX flush. */
+    if (!((reg == 0x02 && (value == 0x03 || value == 0x07)) ||
           (reg == 0x0b && (value == 0x01 || value == 0x07 || value == 0x09)) ||
           (reg == 0x07 && value == 0x04)))
         return -1;
