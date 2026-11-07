@@ -5,8 +5,8 @@ use std::{
     io::{self, BufWriter, Write},
 };
 use t3p_standalone::{
-    EprCapture, EprEvent, Meter, Overview, Reading, SIDE, STRIP_ROWS, SourceCaps, demo_reading,
-    render_demo_strip,
+    EprCapture, EprEvent, Meter, Overview, PdSniff, Reading, SIDE, STRIP_ROWS, SourceCaps,
+    demo_reading, render_demo_strip,
 };
 
 fn main() -> io::Result<()> {
@@ -23,6 +23,8 @@ fn main() -> io::Result<()> {
     let epr_offer = flags.iter().any(|x| x == "--epr-offer");
     let epr_partial = flags.iter().any(|x| x == "--epr-partial");
     let epr_diag = flags.iter().any(|x| x == "--epr-diag");
+    let sniff_page = flags.iter().any(|x| x == "--sniff-page");
+    let sniff_log = flags.iter().any(|x| x == "--sniff-log");
     let energy = flags.iter().any(|x| x == "--energy");
     let power = flags.iter().any(|x| x == "--power");
     let voltage = flags.iter().any(|x| x == "--voltage");
@@ -78,7 +80,15 @@ fn main() -> io::Result<()> {
             .unwrap()
             .expect("test source offer");
         view.set_pd_profiles(2, 1, Some(caps));
-    } else if profiles_ui || profiles_page || epr_page || epr_offer || epr_partial || epr_diag {
+    } else if profiles_ui
+        || profiles_page
+        || epr_page
+        || epr_offer
+        || epr_partial
+        || epr_diag
+        || sniff_page
+        || sniff_log
+    {
         view.set_pd_profiles(0, 0, None);
     }
     if epr_offer || epr_partial {
@@ -107,7 +117,26 @@ fn main() -> io::Result<()> {
         view.set_epr_profiles(1, None);
         view.set_epr_counters(u32::from_le_bytes([1, 1, 0, 0]));
     }
-    view.set_page(if epr_page || epr_offer || epr_partial || epr_diag {
+    if sniff_log {
+        let parse = |text: &str| -> Vec<u8> {
+            text.split_whitespace()
+                .map(|hex| u8::from_str_radix(hex, 16).unwrap())
+                .collect()
+        };
+        let mut sniff = PdSniff::new();
+        sniff
+            .push(&parse(include_str!("../../tests/pd_offer.hex")))
+            .unwrap();
+        for line in include_str!("../../tests/sniff_exchange.hex").lines() {
+            sniff.push(&parse(line)).unwrap();
+        }
+        view.set_pd_profiles(3, 1, None);
+        view.set_epr_profiles(2, None);
+        view.set_pd_sniff(Some(sniff));
+    }
+    view.set_page(if sniff_page || sniff_log {
+        7
+    } else if epr_page || epr_offer || epr_partial || epr_diag {
         6
     } else if profiles_page || profiles_offer {
         5

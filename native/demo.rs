@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-use crate::pd::{EPR_PAGE, PROFILES_PAGE};
+use crate::pd::{EPR_PAGE, PROFILES_PAGE, SNIFF_PAGE};
 use crate::{Meter, Overview, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
 
-const PAGE_COUNT: u32 = PROFILES_PAGE + 2 * cfg!(feature = "pd-profiles") as u32;
+const PAGE_COUNT: u32 = PROFILES_PAGE + 3 * cfg!(feature = "pd-profiles") as u32;
 
 unsafe extern "C" {
     fn t3p_signal_failure(stage: u32) -> !;
@@ -36,6 +36,10 @@ static mut PD_MODE: u32 = 0;
 static mut PD_EPR_CAPS: Option<crate::EprCaps> = None;
 #[cfg(feature = "pd-profiles")]
 static mut PD_EPR_CAPTURE: crate::EprCapture = crate::EprCapture::new();
+#[cfg(feature = "pd-profiles")]
+static mut PD_SNIFF: crate::PdSniff = crate::PdSniff::new();
+#[cfg(feature = "pd-profiles")]
+static mut PD_SNIFF_PRESENT: bool = false;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_demo_sample(tick: u32) {
@@ -92,6 +96,9 @@ unsafe extern "C" fn meter_double_press() -> u32 {
         if cfg!(feature = "pd-profiles") && page == EPR_PAGE {
             return 2;
         }
+        if cfg!(feature = "pd-profiles") && page == SNIFF_PAGE {
+            return 3;
+        }
         if page >= 2 {
             *(&raw mut GRAPH_WINDOW) = (*(&raw const GRAPH_WINDOW) + 1) % 4;
         } else {
@@ -111,9 +118,12 @@ unsafe extern "C" fn meter_pd_status(state: u32, cc: u32, mode: u32) {
         if state == 1 {
             if mode == 0 {
                 *(&raw mut PD_CAPS) = None;
-            } else {
+            } else if mode == 1 {
                 *(&raw mut PD_EPR_CAPS) = None;
                 *(&raw mut PD_EPR_CAPTURE) = crate::EprCapture::new();
+            } else if mode == 2 {
+                *(&raw mut PD_SNIFF) = crate::PdSniff::new();
+                *(&raw mut PD_SNIFF_PRESENT) = true;
             }
         }
     }
@@ -127,6 +137,13 @@ unsafe extern "C" fn meter_pd_record(frame: *const u8, length: u32, mode: u32, n
         return -1;
     }
     let bytes = unsafe { core::slice::from_raw_parts(frame, length as usize) };
+    if mode == 2 {
+        return if unsafe { (&mut *(&raw mut PD_SNIFF)).push(bytes) }.is_ok() {
+            0
+        } else {
+            -1
+        };
+    }
     if mode == 1 {
         return match unsafe { (&mut *(&raw mut PD_EPR_CAPTURE)).push(bytes, now) } {
             Ok(crate::EprEvent::Started) => {
@@ -169,6 +186,12 @@ unsafe extern "C" fn meter_snapshot() {
         view.set_epr_profiles(*(&raw const PD_MODE), *(&raw const PD_EPR_CAPS));
         #[cfg(feature = "pd-profiles")]
         view.set_epr_counters((&*(&raw const PD_EPR_CAPTURE)).counters());
+        #[cfg(feature = "pd-profiles")]
+        view.set_pd_sniff(if *(&raw const PD_SNIFF_PRESENT) {
+            Some(*(&raw const PD_SNIFF))
+        } else {
+            None
+        });
         view.set_page(*(&raw const PAGE));
         view.set_graph_window(*(&raw const GRAPH_WINDOW));
         (&*(&raw const METER)).overview(view);

@@ -23,7 +23,7 @@ mod settings {
 }
 
 use energy::{Totals, Tracker};
-pub use pd::{EprCaps, EprCapture, EprEvent, SourceCaps};
+pub use pd::{EprCaps, EprCapture, EprEvent, PdSniff, SourceCaps};
 use pd::{PROFILES_PAGE, Profiles};
 use power_history::{GraphTrace, GraphWindow, History, Sample};
 use settings::TimerMode;
@@ -102,6 +102,7 @@ impl Overview {
             epr: None,
             mode: 0,
             epr_counters: 0,
+            sniff: None,
         });
     }
 
@@ -118,8 +119,14 @@ impl Overview {
         }
     }
 
+    pub fn set_pd_sniff(&mut self, sniff: Option<PdSniff>) {
+        if let Some(ref mut profiles) = self.pd_profiles {
+            profiles.sniff = sniff;
+        }
+    }
+
     pub fn set_page(&mut self, page: u32) {
-        self.page = page % (PROFILES_PAGE + 2 * u32::from(self.pd_profiles.is_some()));
+        self.page = page % (PROFILES_PAGE + 3 * u32::from(self.pd_profiles.is_some()));
     }
 
     pub fn set_graph_window(&mut self, window: u32) {

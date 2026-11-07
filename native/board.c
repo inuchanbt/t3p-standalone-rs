@@ -46,7 +46,7 @@ static unsigned key_pressed(void)
     return !(board.io.read32(board.io.context, PA_BASE) & PA11);
 }
 
-enum redraw_request { REDRAW = 1u, START_CAPTURE = 2u, START_EPR = 4u };
+enum redraw_request { REDRAW = 1u, START_CAPTURE = 2u, START_EPR = 4u, START_SNIFF = 8u };
 
 static unsigned poll_key(uint32_t now)
 {
@@ -54,7 +54,10 @@ static unsigned poll_key(uint32_t now)
     if (event == T3P_BUTTON_SHORT) { meter_next_page(); return REDRAW; }
     if (event == T3P_BUTTON_DOUBLE) {
         uint32_t action = meter_double_press();
-        return action ? action << 1 : REDRAW;
+        if (action == 1) return START_CAPTURE;
+        if (action == 2) return START_EPR;
+        if (action == 3) return START_SNIFF;
+        return REDRAW;
     }
     if (event == T3P_BUTTON_LONG) { meter_reset_totals(); return REDRAW; }
     return 0;
@@ -106,8 +109,9 @@ void t3p_board_start(void)
         uint32_t now = t3p_bsp_millis(&board);
         redraw |= poll_key(now);
 #ifdef T3P_PD_PROFILES
-        if (redraw & (START_CAPTURE | START_EPR)) {
-            enum t3p_pd_mode mode = (redraw & START_EPR) ? T3P_PD_EPR : T3P_PD_SPR;
+        if (redraw & (START_CAPTURE | START_EPR | START_SNIFF)) {
+            enum t3p_pd_mode mode = (redraw & START_SNIFF) ? T3P_PD_SNIFF :
+                                    (redraw & START_EPR) ? T3P_PD_EPR : T3P_PD_SPR;
             t3p_pd_start_capture(&pd, &fast_bus, now, mode);
             meter_pd_status(pd.state, pd.cc, pd.mode);
             redraw = REDRAW;

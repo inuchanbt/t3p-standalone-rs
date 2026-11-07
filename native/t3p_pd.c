@@ -86,7 +86,7 @@ void t3p_pd_poll_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *b
 {
     if (capture->state != T3P_PD_LISTENING || now - capture->polled < 4) return;
     capture->polled = now;
-    uint32_t timeout = capture->mode == T3P_PD_EPR ? 30000 : 10000;
+    uint32_t timeout = capture->mode == T3P_PD_SPR ? 10000 : 30000;
     if (now - capture->started >= timeout) {
         stop_capture(capture, bus, capture->partial ? T3P_PD_PARTIAL : T3P_PD_TIMEOUT);
         return;

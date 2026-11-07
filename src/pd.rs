@@ -2,6 +2,7 @@
 
 pub(crate) const PROFILES_PAGE: u32 = 5;
 pub(crate) const EPR_PAGE: u32 = 6;
+pub(crate) const SNIFF_PAGE: u32 = 7;
 
 #[derive(Clone, Copy)]
 pub struct SourceCaps {
@@ -210,6 +211,152 @@ fn crc32(bytes: &[u8]) -> u32 {
     !crc
 }
 
+const SNIFF_CAPACITY: usize = 8;
+
+#[derive(Clone, Copy)]
+pub(crate) struct SniffEvent {
+    lo: u8,
+    hi: u8,
+    detail: u8,
+}
+
+impl SniffEvent {
+    pub(crate) fn source(self) -> bool {
+        self.hi & 1 != 0
+    }
+
+    /// The suffix is a letter and an unsigned number: N objects, P PDO,
+    /// C chunk, Q chunk request, I message ID or T unknown message type.
+    pub(crate) fn label(self) -> (&'static [u8], u8, u8) {
+        let kind = self.lo & 31;
+        let id = (self.hi >> 1) & 7;
+        let count = (self.hi >> 4) & 7;
+        if self.hi & 0x80 != 0 {
+            let (suffix, number) = if self.detail & 0x40 != 0 {
+                (
+                    if self.detail & 0x80 != 0 { b'Q' } else { b'C' },
+                    self.detail & 15,
+                )
+            } else {
+                (b'I', id)
+            };
+            return match kind {
+                1 => (b"SRC_CAP_EXT", suffix, number),
+                2 => (b"STATUS", suffix, number),
+                17 => (b"EPR_SRC_CAP", suffix, number),
+                _ => (b"EXT", b'T', kind),
+            };
+        }
+        if count != 0 {
+            return match kind {
+                1 => (b"SRC_CAP", b'N', count),
+                2 => (b"REQUEST", b'P', self.detail),
+                4 => (b"SNK_CAP", b'N', count),
+                6 => (b"ALERT", b'I', id),
+                8 => (b"ENTER_USB", b'I', id),
+                9 => (b"EPR_REQUEST", b'P', self.detail),
+                10 => (b"EPR_MODE", b'I', id),
+                15 => (b"VDM", b'I', id),
+                _ => (b"DATA", b'T', kind),
+            };
+        }
+        match kind {
+            2 => (b"GOTO_MIN", b'I', id),
+            3 => (b"ACCEPT", b'I', id),
+            4 => (b"REJECT", b'I', id),
+            5 => (b"PING", b'I', id),
+            6 => (b"PS_RDY", b'I', id),
+            7 => (b"GET_SRC_CAP", b'I', id),
+            8 => (b"GET_SNK_CAP", b'I', id),
+            9 => (b"DR_SWAP", b'I', id),
+            10 => (b"PR_SWAP", b'I', id),
+            11 => (b"VCONN_SWAP", b'I', id),
+            12 => (b"WAIT", b'I', id),
+            13 => (b"SOFT_RESET", b'I', id),
+            16 => (b"NOT_SUPPORTED", b'I', id),
+            17 => (b"GET_SRC_EXT", b'I', id),
+            18 => (b"GET_STATUS", b'I', id),
+            _ => (b"CTRL", b'T', kind),
+        }
+    }
+}
+
+/// Bounded CRC-checked SOP message history. GoodCRC is counted separately.
+#[derive(Clone, Copy)]
+pub struct PdSniff {
+    events: [SniffEvent; SNIFF_CAPACITY],
+    start: u8,
+    count: u8,
+    total: u16,
+    good_crc: u16,
+}
+
+impl Default for PdSniff {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PdSniff {
+    pub const fn new() -> Self {
+        const EMPTY: SniffEvent = SniffEvent {
+            lo: 0,
+            hi: 0,
+            detail: 0,
+        };
+        Self {
+            events: [EMPTY; SNIFF_CAPACITY],
+            start: 0,
+            count: 0,
+            total: 0,
+            good_crc: 0,
+        }
+    }
+
+    pub fn push(&mut self, frame: &[u8]) -> Result<(), BadFrame> {
+        let (lo, hi, payload) = checked_fifo(frame)?;
+        let kind = lo & 31;
+        if hi & 0x80 == 0 && payload.is_empty() && kind == 1 {
+            self.good_crc = self.good_crc.saturating_add(1);
+            return Ok(());
+        }
+        let detail = if hi & 0x80 != 0 {
+            if payload.len() < 2 {
+                return Err(BadFrame);
+            }
+            let extended = u16::from_le_bytes([payload[0], payload[1]]);
+            ((extended >> 11) & 15) as u8
+                | if extended & 0x400 != 0 { 0x80 } else { 0 }
+                | if extended & 0x8000 != 0 { 0x40 } else { 0 }
+        } else if (kind == 2 || kind == 9) && !payload.is_empty() {
+            payload[3] >> 4
+        } else {
+            0
+        };
+        let index = (usize::from(self.start) + usize::from(self.count)) % SNIFF_CAPACITY;
+        self.events[index] = SniffEvent { lo, hi, detail };
+        if usize::from(self.count) == SNIFF_CAPACITY {
+            self.start = (self.start + 1) % SNIFF_CAPACITY as u8;
+        } else {
+            self.count += 1;
+        }
+        self.total = self.total.saturating_add(1);
+        Ok(())
+    }
+
+    pub(crate) fn event(self, index: usize) -> Option<SniffEvent> {
+        if index >= usize::from(self.count) {
+            None
+        } else {
+            Some(self.events[(usize::from(self.start) + index) % SNIFF_CAPACITY])
+        }
+    }
+
+    pub(crate) fn counts(self) -> (u16, u16) {
+        (self.total, self.good_crc)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Pdo {
     Fixed {
@@ -268,6 +415,7 @@ pub(crate) struct Profiles {
     pub(crate) epr: Option<EprCaps>,
     pub(crate) mode: u32,
     pub(crate) epr_counters: u32,
+    pub(crate) sniff: Option<PdSniff>,
 }
 
 impl Profiles {
@@ -280,6 +428,9 @@ impl Profiles {
             };
         }
         if self.mode != mode {
+            if mode == 2 && self.sniff.is_some() {
+                return b"STOPPED";
+            }
             return if mode == 0 && self.caps.is_some() || mode == 1 && self.epr.is_some() {
                 if mode == 1 && self.epr.is_some_and(|caps| !caps.complete) {
                     b"PARTIAL"
@@ -295,6 +446,7 @@ impl Profiles {
             1 => b"LISTENING",
             2 => b"CAPTURED",
             3 if mode == 1 => b"NO EPR CAPS",
+            3 if mode == 2 => b"DONE",
             3 => b"NO SOURCE CAPS",
             4 => b"CONFIG MISMATCH",
             5 => b"I2C ERROR",
@@ -326,6 +478,90 @@ mod tests {
             fixture(include_str!("../tests/epr_chunk0.hex")),
             fixture(include_str!("../tests/epr_chunk1.hex")),
         )
+    }
+
+    #[test]
+    fn sniff_decodes_a_crc_checked_exchange_and_filters_goodcrc() {
+        let mut lines = include_str!("../tests/sniff_exchange.hex").lines();
+        let request = fixture::<11>(lines.next().unwrap());
+        let accept = fixture::<7>(lines.next().unwrap());
+        let ready = fixture::<7>(lines.next().unwrap());
+        let good_crc = fixture::<7>(lines.next().unwrap());
+        let source = fixture::<35>(include_str!("../tests/pd_offer.hex"));
+        let mut sniff = PdSniff::new();
+        for frame in [&source[..], &request, &accept, &ready, &good_crc] {
+            sniff.push(frame).unwrap();
+        }
+        assert_eq!(sniff.counts(), (4, 1));
+        assert!(sniff.event(0).unwrap().source());
+        assert_eq!(sniff.event(0).unwrap().label(), (&b"SRC_CAP"[..], b'N', 7));
+        assert!(!sniff.event(1).unwrap().source());
+        assert_eq!(sniff.event(1).unwrap().label(), (&b"REQUEST"[..], b'P', 1));
+        assert_eq!(sniff.event(2).unwrap().label(), (&b"ACCEPT"[..], b'I', 0));
+        assert_eq!(sniff.event(3).unwrap().label(), (&b"PS_RDY"[..], b'I', 1));
+        assert!(sniff.event(4).is_none());
+        let mut bad = ready;
+        bad[3] ^= 1;
+        assert!(sniff.push(&bad).is_err());
+        assert_eq!(sniff.counts(), (4, 1));
+    }
+
+    #[test]
+    fn sniff_keeps_the_latest_eight_messages_in_wire_order() {
+        let accept = fixture::<7>(
+            include_str!("../tests/sniff_exchange.hex")
+                .lines()
+                .nth(1)
+                .unwrap(),
+        );
+        let mut sniff = PdSniff::new();
+        for index in 0..10 {
+            let mut frame = accept;
+            frame[2] = 1 | ((index & 7) << 1);
+            let crc = crc32(&frame[1..3]).to_le_bytes();
+            frame[3..].copy_from_slice(&crc);
+            sniff.push(&frame).unwrap();
+        }
+        assert_eq!(sniff.counts(), (10, 0));
+        assert_eq!(sniff.event(0).unwrap().label(), (&b"ACCEPT"[..], b'I', 2));
+        assert_eq!(sniff.event(7).unwrap().label(), (&b"ACCEPT"[..], b'I', 1));
+        assert!(sniff.event(8).is_none());
+    }
+
+    #[test]
+    fn sniff_identifies_epr_chunks_without_claiming_a_contract() {
+        let (first, second) = epr_frames();
+        let mut sniff = PdSniff::new();
+        sniff.push(&first).unwrap();
+        sniff.push(&second).unwrap();
+        assert_eq!(
+            sniff.event(0).unwrap().label(),
+            (&b"EPR_SRC_CAP"[..], b'C', 0)
+        );
+        assert_eq!(
+            sniff.event(1).unwrap().label(),
+            (&b"EPR_SRC_CAP"[..], b'C', 1)
+        );
+
+        let mut chunk_request = first;
+        chunk_request[2] &= !1; // Message header claims sink power role.
+        chunk_request[4] |= 4; // Extended header requests a chunk.
+        let crc = crc32(&chunk_request[1..31]).to_le_bytes();
+        chunk_request[31..].copy_from_slice(&crc);
+        sniff.push(&chunk_request).unwrap();
+        assert!(!sniff.event(2).unwrap().source());
+        assert_eq!(
+            sniff.event(2).unwrap().label(),
+            (&b"EPR_SRC_CAP"[..], b'Q', 0)
+        );
+
+        let mut unchunked = first;
+        unchunked[4] &= !0x80;
+        let crc = crc32(&unchunked[1..31]).to_le_bytes();
+        unchunked[31..].copy_from_slice(&crc);
+        sniff.push(&unchunked).unwrap();
+        let (label, suffix, _) = sniff.event(3).unwrap().label();
+        assert_eq!((label, suffix), (&b"EPR_SRC_CAP"[..], b'I'));
     }
 
     #[test]

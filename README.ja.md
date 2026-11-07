@@ -6,7 +6,7 @@ ATORCH T3P USB 電力計向けの実験的な Rust ファームウェアです�
 
 ## 現在の状態
 
-標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近1・2・5・10分の電力・電圧・電流を表示します。別ビルドでは SPR と EPR の PDO を受信でき、下記の条件で両方の実機受信を確認しました。
+標準ビルドは、**模擬データを使った起動・表示デモ**です。別途、個体校正なしの実測ビルドもあります。正方形の画面を使い、KWS-X1 に寄せた **OVERVIEW** に電圧・符号付き電流・電力と最大値、**ENERGY** に Ah・Wh・経過時間、**GRAPH** に直近1・2・5・10分の電力・電圧・電流を表示します。別ビルドでは SPR と EPR の PDO を受信でき、下記の条件で両方の実機受信を確認しました。追加した PD SNIFF の実機確認はこれからです。
 
 ENERGY 画面の時間は起動時または積算リセット後の経過時間です。測定値が取得できない間や電流ゼロの間も進みます。旧画面の実機で時間が進み Ah・Wh とともにリセットされることを確認しました。表示は `99:59:59` で止まり（実機未確認）、積算値と時間は再起動後に復元されません。PD 診断版では OVERVIEW の PROTOCOL 欄に生の診断値を表示します。
 
@@ -21,6 +21,12 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 次の **EPR OFFER** ではダブル押しで30秒間受信を待ちます。5 V から始め、接続した ASD-PD31 などの PD シンクから EPR 情報を問い合わせるか EPR モードに入ります。画面を切り替えた直後の取得では直前に選択した CC を使い、同じ画面で再度ダブル押しすると CC が切り替わります。EPR_Source_Capabilities は通常2つのチャンクに分かれます。両方の CRC が一致し順に受信できたら `CAPTURED`、チャンク1だけを受信したときはその EPR PDO を `PARTIAL` と表示します。`NO EPR CAPS` は待機時間中に完全な情報を捕捉できなかったことを示します。画面には CRC が一致した SOP パケット数 `RX`、そのうち SPR Source_Capabilities の数 `SPR`、認識した EPR チャンクの数 `E0`・`E1` も各最大255件まで表示します。受信できた種類の切り分けに使うもので、0 件でも配線上の通信がなかったとは断定できません。
 
 固定 PDO は電圧・最大電流・計算した電力、PPS は電圧範囲と電流上限を表示します。SPR AVS は 9～15 V と 15～20 V の電流上限、EPR AVS は電圧範囲と PDP を表示します。それ以外の PDO は生の16進数で表示します。一覧の値は電源が提示した値です。起動時の CC 設定を保ち、PD 送信と自動 GoodCRC を無効のまま受信します。FUSB302B 互換であれば内部の両 CC プルダウンは有効で、**高インピーダンスのパッシブスニファーではなく、別のシンクとの接続に影響する可能性があります。** EPR 情報は別のシンクが促した通信から取得します。シンク接続時の完全な EPR 受信を1例確認しており、他の接続条件や向きは引き続き検証が必要です。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
+
+## PD SNIFF 試験版
+
+次の **PD SNIFF** 画面では、同じ受信回路と CC 選択を使い、ダブル押しから30秒間、CRC が一致した SOP メッセージを記録します。同じ画面で再度ダブル押しすると別の CC で新しい記録を始めます。履歴は RAM のみで、直近8件を古い順に表示します。`SRC` / `SNK` は各メッセージの電源ロールビットに基づく表示であり、物理的な送信元を独立に確認したものではありません。Source Capabilities、Request、Accept、PS_RDY、EPR などの主な種類を名前で示し、未対応の種類は `CTRL`・`DATA`・`EXT` と種類番号 `T` で表示します。
+
+行末の `N` はデータオブジェクト数、`P` は要求した PDO の位置、`C` は拡張メッセージのチャンク、`Q` はチャンク要求、`I` はメッセージ ID です。`MSG` は記録した件数、`GCRC` は一覧から除外した GoodCRC の件数で、表示は各999までです。`DONE` は待機時間の終了を表し、全パケットの受信や契約成立を保証しません。受信 FIFO の満杯、不正なフレーム、リンクリセットでは停止して状態を表示します。特に短い間隔の通信は取りこぼす可能性があり、契約電圧や電流の推定は行いません。CC プルダウンの設定は上記と同じで、履歴の実機確認はこれからです。
 
 ## 実機での検証
 
@@ -77,9 +83,9 @@ python check_pi32.py --sim PI32V2_ISAのパス
 
 PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記7枚の実測比較画像を `build/pd-diagnostic` に生成し、共有の `build/demo-graph.ppm` と、`cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd` で診断表示を生成して、`python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PI32V2_ISAのパス` で照合します。表示される5バイトは順に 0x01、0x02、0x08、0x0B、0x40 レジスターの値です。
 
-PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm` は `--measurement --profiles-page`、`preview-profiles-offer.ppm` は `--measurement --profiles-offer` で生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
+PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm` は `--measurement --profiles-page`、`preview-profiles-offer.ppm` は `--measurement --profiles-offer` で生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`preview-sniff-ready.ppm` と `preview-sniff-log.ppm` はそれぞれ `--measurement --sniff-page` と `--measurement --sniff-log` で生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
 
-`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_EPR_3.0.3.bin` でローカルの更新ファイルを作ります。
+`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_SNIFF_3.0.3.bin` でローカルの更新ファイルを作ります。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

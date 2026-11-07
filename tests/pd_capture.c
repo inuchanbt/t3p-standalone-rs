@@ -117,5 +117,19 @@ int main(void)
     t3p_pd_poll_capture(&pd, &bus, 43010);
     assert(pd.state == T3P_PD_CAPTURED);
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
+
+    t3p_pd_start_capture(&pd, &bus, 44000, T3P_PD_SNIFF);
+    assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_SNIFF && pd.cc == 2);
+    record_result = 0; /* a logged message must not stop the receiver */
+    for (unsigned n = 0; n < 3; ++n) {
+        phy.consumed = 0;
+        phy.registers[0x41] = 0x08;
+        phy.registers[0x42] = 0x10;
+        t3p_pd_poll_capture(&pd, &bus, 44005 + n * 5);
+        assert(pd.state == T3P_PD_LISTENING);
+    }
+    t3p_pd_poll_capture(&pd, &bus, 74000);
+    assert(pd.state == T3P_PD_TIMEOUT);
+    assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
     return 0;
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-use crate::pd::{EPR_PAGE, PROFILES_PAGE, Pdo, Profiles};
+use crate::pd::{EPR_PAGE, PROFILES_PAGE, Pdo, Profiles, SNIFF_PAGE};
 use crate::{Overview, SIDE, STRIP_ROWS};
 
 const BG: u16 = 0x0000;
@@ -114,6 +114,7 @@ fn glyph(ch: u8) -> u32 {
         b':' => rows([0, 6, 6, 0, 6, 6, 0]),
         b'/' => rows([1, 1, 2, 2, 4, 8, 8]),
         b'+' => rows([0, 2, 2, 15, 2, 2, 0]),
+        b'_' => rows([0, 0, 0, 0, 0, 0, 15]),
         _ => 0,
     }
 }
@@ -215,15 +216,16 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         4 => (b"GRAPH", AMPS),
         PROFILES_PAGE => (b"PD PROFILES", WATTS),
         EPR_PAGE => (b"EPR OFFER", PURPLE),
+        SNIFF_PAGE => (b"PD SNIFF", AMPS),
         _ => (b"GRAPH", WATTS),
     };
     p.text(8, 8, title, 2, color);
-    let tabs = if view.pd_profiles.is_some() { 7 } else { 5 };
+    let tabs = if view.pd_profiles.is_some() { 8 } else { 5 };
     for index in 0..tabs {
         p.rect(
-            120 + index * if tabs == 7 { 8 } else { 10 },
+            120 + index * if tabs == 8 { 7 } else { 10 },
             10,
-            if tabs == 7 { 5 } else { 6 },
+            if tabs == 8 { 5 } else { 6 },
             10,
             if view.page as usize == index {
                 color
@@ -249,7 +251,7 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         8,
         226,
         match view.page {
-            PROFILES_PAGE | EPR_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
+            PROFILES_PAGE | EPR_PAGE | SNIFF_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
             2..PROFILES_PAGE => b"TAP NEXT 2X RANGE HOLD RESET",
             _ => b"TAP NEXT  HOLD RESET",
         },
@@ -583,6 +585,75 @@ fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
     );
 }
 
+fn sniff_count(p: &mut Strip<'_>, x: usize, label: &[u8], value: u16) {
+    let value = value.min(999);
+    let digits = [
+        b'0' + (value / 100) as u8,
+        b'0' + (value / 10 % 10) as u8,
+        b'0' + (value % 10) as u8,
+    ];
+    p.text(x, 46, label, 1, MUTED);
+    p.text(x + label.len() * 5, 46, &digits, 1, TEXT);
+}
+
+fn pd_sniff(p: &mut Strip<'_>, pd: Profiles) {
+    p.text(8, 35, b"LAST 8", 1, AMPS);
+    p.text(69, 35, pd.status(2), 1, TEXT);
+    if pd.mode == 2 && pd.cc != 0 {
+        p.text(215, 35, if pd.cc == 1 { b"CC1" } else { b"CC2" }, 1, AMPS);
+    }
+    let (total, good_crc) = pd.sniff.map(|sniff| sniff.counts()).unwrap_or((0, 0));
+    sniff_count(p, 8, b"MSG:", total);
+    sniff_count(p, 83, b"GCRC:", good_crc);
+    if pd.sniff.and_then(|sniff| sniff.event(0)).is_none() {
+        p.outline(8, 60, 224, 141, GRID);
+        p.text(18, 75, b"RX ONLY RD ON", 2, AMPS);
+        p.text(
+            18,
+            112,
+            if pd.mode == 2 && pd.state == 1 {
+                b"WAITING FOR PD TRAFFIC"
+            } else {
+                b"NO LOGGED MESSAGES"
+            },
+            1,
+            TEXT,
+        );
+        p.text(18, 133, b"GOODCRC COUNTED SEPARATELY", 1, MUTED);
+        p.text(
+            18,
+            154,
+            if pd.mode == 2 && pd.state == 1 {
+                b"LISTENING FOR 30S"
+            } else {
+                b"2X TO CAPTURE FOR 30S"
+            },
+            1,
+            MUTED,
+        );
+        return;
+    }
+    let sniff = pd.sniff.unwrap();
+    for index in 0..8 {
+        let Some(event) = sniff.event(index) else {
+            break;
+        };
+        let y = 59 + index * 18;
+        p.rect(8, y, 224, 16, PANEL);
+        p.text(
+            12,
+            y + 1,
+            if event.source() { b"SRC" } else { b"SNK" },
+            2,
+            if event.source() { VOLTS } else { AMPS },
+        );
+        let (label, suffix, value) = event.label();
+        p.text(52, y + 1, label, 2, TEXT);
+        let detail = [suffix, b'0' + value / 10, b'0' + value % 10];
+        p.text(199, y + 1, &detail, 2, MUTED);
+    }
+}
+
 fn energy(p: &mut Strip<'_>, view: &Overview) {
     card(p, 8, 35, 224, 55, b"CHARGE", AMPS);
     card(p, 8, 96, 224, 55, b"ENERGY", WATTS);
@@ -702,6 +773,11 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
         EPR_PAGE => {
             if let Some(pd) = view.pd_profiles {
                 epr_profiles(&mut p, pd);
+            }
+        }
+        SNIFF_PAGE => {
+            if let Some(pd) = view.pd_profiles {
+                pd_sniff(&mut p, pd);
             }
         }
         _ => graph(&mut p, view),

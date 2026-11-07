@@ -7,6 +7,7 @@
 static uint32_t level = PA11;
 static unsigned resets, advances, doubles;
 static unsigned rectangles, snapshots;
+static uint32_t double_action = 1;
 static uint32_t clock_ms;
 static jmp_buf done;
 struct t3p_boot_snapshot t3p_boot_snapshot = { .valid = T3P_BOOT_MAGIC };
@@ -28,7 +29,7 @@ void meter_reset_totals(void)
 }
 
 void meter_next_page(void) { ++advances; }
-uint32_t meter_double_press(void) { ++doubles; return 1; }
+uint32_t meter_double_press(void) { ++doubles; return double_action; }
 void meter_demo_sample(uint32_t tick) { (void)tick; }
 void meter_snapshot(void)
 {
@@ -69,6 +70,24 @@ int main(void)
     assert(!poll_key(260));
     assert(poll_key(290) == START_CAPTURE);
     assert(doubles == 1 && advances == 0 && resets == 0);
+
+    for (unsigned action = 2; action <= 3; ++action) {
+        level = PA11;
+        double_action = action;
+        t3p_button_init(&button, 0, key_pressed());
+        level = 0;
+        assert(!poll_key(100));
+        assert(!poll_key(130));
+        level = PA11;
+        assert(!poll_key(150));
+        assert(!poll_key(180));
+        level = 0;
+        assert(!poll_key(210));
+        assert(!poll_key(240));
+        level = PA11;
+        assert(!poll_key(260));
+        assert(poll_key(290) == (action == 2 ? START_EPR : START_SNIFF));
+    }
 
     /* A long press during strip transfers resets the totals and requests a new
        snapshot even though it ends before the first frame has finished. */

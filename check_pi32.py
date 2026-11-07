@@ -160,6 +160,24 @@ def main():
                 raise ValueError("Pi32v2 partial EPR frame differs from host preview")
             print("Pi32v2 complete and partial EPR offers match")
             cpu.call(symbols["meter_next_page"], [])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-sniff-ready.ppm").read_bytes():
+                raise ValueError("Pi32v2 initial PD sniff frame differs from host preview")
+            if cpu.call(symbols["meter_double_press"], [])[0] != 3:
+                raise ValueError("Pi32v2 PD sniff double press did not request capture")
+            cpu.call(symbols["meter_pd_status"], [1, 1, 2])
+            exchange = [frame] + [bytes.fromhex(line) for line in
+                                  (ROOT / "tests/sniff_exchange.hex").read_text(encoding="ascii").splitlines()]
+            for packet in exchange:
+                cpu.mem.write(strip, packet)
+                if cpu.call(symbols["meter_pd_record"], [strip, len(packet), 2, 0])[0] != 0:
+                    raise ValueError("Pi32v2 failed to log a PD sniff packet")
+            cpu.call(symbols["meter_pd_status"], [3, 1, 2])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-sniff-log.ppm").read_bytes():
+                raise ValueError("Pi32v2 PD sniff log differs from host preview")
+            print("Pi32v2 PD sniff exchange and GoodCRC filtering match")
+            cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_pd_status"], [0, 0, 0])
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
