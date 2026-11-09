@@ -254,6 +254,12 @@ unsafe extern "C" fn meter_pd_status(state: u32, cc: u32, mode: u32) {
     }
 }
 
+#[cfg(feature = "pd-cable-read")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_pd_cable_cc(cc1: u32, cc2: u32) {
+    unsafe { (&mut *(&raw mut PD_CABLE)).set_cc_probe(cc1, cc2) };
+}
+
 #[cfg(feature = "pd-profiles")]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_pd_record(frame: *const u8, length: u32, mode: u32, now: u32) -> i32 {

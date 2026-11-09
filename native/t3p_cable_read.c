@@ -23,7 +23,7 @@
 #define RP_CC2 0x80
 #define VCONN_CC2 0x20
 #define SOURCE_CC1_AUTO_CRC 0xb5 /* Source/DFP for SOP, Rev 2.0 GoodCRC, TX on CC1 */
-#define HOST_CUR_DEFAULT_MASKED 0x24
+#define HOST_CUR_330UA_MASKED 0x2c
 #define ENSOP1 0x01
 #define TX_FLUSH 0x40
 #define RX_FLUSH 0x04
@@ -49,6 +49,11 @@
 #define I_CRC_CHK 0x10
 #define I_COLLISION 0x02
 
+#define EXTERNAL_RP_MDAC 0x03 /* 168 mV with Rd on */
+#define OPEN_CC_MDAC 0x3d    /* 2.604 V with 330 uA Rp */
+#define RA_MIN_CODE 4u       /* Above 168 mV, excluding a short */
+#define RA_MAX_CODE 13u      /* Below 588 mV, excluding Rd */
+#define CC_PROBE_SETTLE_MS 2u
 #define VBUS_PRESENT_MV 4000u /* Allow the observed HID-only reading of about 3 V. */
 #define VCONN_SETTLE_MS 55u
 #define VCONN_OFF_MS 230u
@@ -58,6 +63,7 @@
 enum { IRQ_A, IRQ_B, LIVE0, LIVE1, IRQ, STATUS_COUNT };
 
 int32_t meter_pd_record(const uint8_t *, uint32_t, uint32_t, uint32_t);
+void meter_pd_cable_cc(uint32_t cc1, uint32_t cc2);
 
 static int configure(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
 {
@@ -81,32 +87,64 @@ static enum t3p_pd_state check_vbus(struct t3p_meter_bus *bus)
     return mv >= VBUS_PRESENT_MV ? T3P_PD_CABLE_VBUS : T3P_PD_READY;
 }
 
-static enum t3p_pd_state probe_cc(struct t3p_bsp *board, struct t3p_meter_bus *bus,
-                                  uint8_t switches, uint8_t mdac, int want_high,
-                                  enum t3p_pd_state mismatch)
+static enum t3p_pd_state compare_cc(struct t3p_bsp *board, struct t3p_meter_bus *bus,
+                                    uint8_t mdac, uint8_t *status)
+{
+    if (configure(bus, MEASURE, mdac)) return T3P_PD_BUS_ERROR;
+    if (t3p_bsp_delay(board, CC_PROBE_SETTLE_MS)) return T3P_PD_TIMER_ERROR;
+    if (t3p_pd_rx_read(bus, STATUS0, status, 1)) return T3P_PD_BUS_ERROR;
+    if (*status & VBUSOK) return T3P_PD_CABLE_VBUS;
+    if (*status & ACTIVITY) return T3P_PD_CABLE_CC_BUSY;
+    return T3P_PD_READY;
+}
+
+static enum t3p_pd_state check_external_rp(struct t3p_bsp *board, struct t3p_meter_bus *bus,
+                                           uint8_t cc)
 {
     uint8_t status;
-    if (configure(bus, MEASURE, mdac) || configure(bus, SWITCHES0, switches))
-        return T3P_PD_BUS_ERROR;
-    if (t3p_bsp_delay(board, 2)) return T3P_PD_TIMER_ERROR;
-    if (t3p_pd_rx_read(bus, STATUS0, &status, 1)) return T3P_PD_BUS_ERROR;
-    if (status & VBUSOK) return T3P_PD_CABLE_VBUS;
-    if (status & ACTIVITY) return T3P_PD_CABLE_CC_BUSY;
-    return !!(status & COMP) == want_high ? T3P_PD_READY : mismatch;
+    if (configure(bus, SWITCHES0, RD_BOTH | cc)) return T3P_PD_BUS_ERROR;
+    enum t3p_pd_state state = compare_cc(board, bus, EXTERNAL_RP_MDAC, &status);
+    if (state != T3P_PD_READY) return state;
+    return status & COMP ? T3P_PD_CABLE_CC_BUSY : T3P_PD_READY;
+}
+
+static enum t3p_pd_state measure_cc(struct t3p_bsp *board, struct t3p_meter_bus *bus,
+                                    uint8_t cc, unsigned *code)
+{
+    if (configure(bus, SWITCHES0, RP_CC1 | RP_CC2 | cc)) return T3P_PD_BUS_ERROR;
+    /* Find the first DAC threshold above the pin voltage. Code 64 means
+     * the pin was above the highest threshold (nominally 2.688 V). */
+    unsigned low = 0, high = 64;
+    while (low < high) {
+        unsigned mid = (low + high) / 2;
+        uint8_t status;
+        enum t3p_pd_state state = compare_cc(board, bus, mid, &status);
+        if (state != T3P_PD_READY) return state;
+        if (status & COMP) low = mid + 1;
+        else high = mid;
+    }
+    *code = low;
+    return T3P_PD_READY;
 }
 
 static enum t3p_pd_state check_lines(struct t3p_bsp *board, struct t3p_meter_bus *bus)
 {
-    /* Check for an external Rp on either line with Rd still on, then use the
-     * default Rp current to look for Ra on CC2 and an open CC1 at the far end. */
-    enum t3p_pd_state state = probe_cc(board, bus, RD_BOTH | MEAS_CC1, 0x03, 0,
-                                       T3P_PD_CABLE_CC_BUSY); /* 168 mV */
+    enum t3p_pd_state state = check_external_rp(board, bus, MEAS_CC1);
     if (state != T3P_PD_READY) return state;
-    state = probe_cc(board, bus, RD_BOTH | MEAS_CC2, 0x03, 0, T3P_PD_CABLE_CC_BUSY);
+    state = check_external_rp(board, bus, MEAS_CC2);
     if (state != T3P_PD_READY) return state;
-    state = probe_cc(board, bus, RP_CC2 | MEAS_CC2, 0x04, 0, T3P_PD_CABLE_NO_RA); /* 210 mV */
+
+    /* Match the stock cable probe bias (Rp on both pins at 330 uA).
+     * Leave the transmitter and VCONN off while checking both pins. */
+    unsigned cc1, cc2;
+    state = measure_cc(board, bus, MEAS_CC1, &cc1);
     if (state != T3P_PD_READY) return state;
-    return probe_cc(board, bus, RP_CC1 | MEAS_CC1, 0x26, 1, T3P_PD_CABLE_CC_BUSY); /* 1.638 V */
+    state = measure_cc(board, bus, MEAS_CC2, &cc2);
+    if (state != T3P_PD_READY) return state;
+    meter_pd_cable_cc(cc1, cc2);
+    if (cc2 < RA_MIN_CODE || cc2 > RA_MAX_CODE) return T3P_PD_CABLE_NO_RA;
+    if (cc1 <= OPEN_CC_MDAC) return T3P_PD_CABLE_CC_BUSY;
+    return T3P_PD_READY;
 }
 
 static enum t3p_pd_state read_status(struct t3p_meter_bus *bus, uint8_t status[STATUS_COUNT])
@@ -123,14 +161,14 @@ static enum t3p_pd_state read_status(struct t3p_meter_bus *bus, uint8_t status[S
 static enum t3p_pd_state exchange(struct t3p_bsp *board, struct t3p_meter_bus *bus,
                                   unsigned *vconn_attempted)
 {
-    if (configure(bus, POWER, PD_POWER) || configure(bus, CONTROL0, HOST_CUR_DEFAULT_MASKED))
+    if (configure(bus, POWER, PD_POWER) || configure(bus, CONTROL0, HOST_CUR_330UA_MASKED))
         return T3P_PD_BUS_ERROR;
     enum t3p_pd_state state = check_lines(board, bus);
     if (state != T3P_PD_READY) return state;
 
     uint8_t status[STATUS_COUNT];
     if (t3p_pd_cable_write(bus, RESET, PD_RESET) ||
-        configure(bus, CONTROL0, HOST_CUR_DEFAULT_MASKED | TX_FLUSH) ||
+        configure(bus, CONTROL0, HOST_CUR_330UA_MASKED | TX_FLUSH) ||
         configure(bus, CONTROL1, ENSOP1 | RX_FLUSH) ||
         configure(bus, CONTROL3, RETRY_TWICE) ||
         configure(bus, OCPREG, CABLE_OCP_300MA) ||
@@ -140,6 +178,7 @@ static enum t3p_pd_state exchange(struct t3p_bsp *board, struct t3p_meter_bus *b
     state = check_vbus(bus);
     if (state != T3P_PD_READY) return state;
 
+    if (configure(bus, MEASURE, OPEN_CC_MDAC)) return T3P_PD_BUS_ERROR;
     *vconn_attempted = 1;
     if (configure(bus, SWITCHES0, RP_CC1 | MEAS_CC1 | VCONN_CC2))
         return T3P_PD_BUS_ERROR;

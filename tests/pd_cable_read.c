@@ -3,8 +3,8 @@
 #include <string.h>
 #include "../native/t3p_pd.h"
 
-enum scenario { REPLY, SILENT, ACK_ONLY, NO_RA, FAR_SINK, SRC_ON_CC2, LATE_VBUS, OVERCURRENT,
-                TX_ERROR, RESTORE_ERROR };
+enum scenario { REPLY, SILENT, ACK_ONLY, NO_RA, REVERSED, SHORT_CC2, RD_ON_CC2, FAR_SINK,
+                SRC_ON_CC2, VBUS_DURING_PROBE, LATE_VBUS, OVERCURRENT, TX_ERROR, RESTORE_ERROR };
 
 struct fixture {
     struct t3p_bsp board;
@@ -22,6 +22,14 @@ static const uint8_t baseline[0x44] = {
     [0x01] = 0x91, [0x02] = 0x03, [0x03] = 0x20, [0x04] = 0x31, [0x06] = 0x04,
     [0x08] = 0x02, [0x09] = 0x06, [0x0b] = 0x01, [0x0d] = 0x0f, [0x41] = 0x28,
 };
+static unsigned cc_probe[2];
+
+void meter_pd_cable_cc(uint32_t cc1, uint32_t cc2)
+{
+    assert(cc1 <= 64 && cc2 <= 64);
+    cc_probe[0] = cc1;
+    cc_probe[1] = cc2;
+}
 
 uint32_t t3p_bsp_millis(struct t3p_bsp *board) { return board->milliseconds; }
 int t3p_bsp_delay(struct t3p_bsp *board, uint32_t ms) { board->milliseconds += ms; return 0; }
@@ -43,8 +51,9 @@ int t3p_pd_cable_write(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
         f->polls = f->fifo_pos = 0;
         return 0;
     }
-    if (reg == 0x02 && value == 0x64) {
-        assert(f->regs[0x03] == baseline[0x03] && f->regs[0x0d] == 0x0a);
+    if (reg == 0x02 && (value & 0x30)) {
+        assert(value == 0x64 && f->regs[0x03] == baseline[0x03] && f->regs[0x0d] == 0x0a);
+        assert(f->regs[0x04] == 0x3d && f->regs[0x06] == 0x2c);
         ++f->powered;
         f->vconn_at = f->board.milliseconds;
     }
@@ -80,9 +89,25 @@ int t3p_pd_rx_read(struct t3p_meter_bus *bus, uint8_t reg, uint8_t *out, unsigne
     if (reg == 0x40) {
         assert(count == 1);
         uint8_t sw = f->regs[0x02];
-        out[0] = ((sw == 0x0b && f->scenario == SRC_ON_CC2) ||
-                  (sw == 0x88 && f->scenario == NO_RA) ||
-                  (sw == 0x44 && f->scenario != FAR_SINK)) ? 0x20 : 0;
+        unsigned mv = 0;
+        if (sw & 0xc0) {
+            assert((sw == 0xc4 || sw == 0xc8) && f->regs[0x06] == 0x2c);
+            if (sw == 0xc4) {
+                if (f->scenario == REVERSED) mv = 330;
+                else if (f->scenario == FAR_SINK) mv = 1980;
+                else mv = 3300;
+            } else if (f->scenario == REVERSED || f->scenario == NO_RA) {
+                mv = 3300;
+            } else if (f->scenario == RD_ON_CC2) {
+                mv = 1690;
+            } else if (f->scenario != SHORT_CC2) {
+                mv = 330;
+            }
+        } else if (sw == 0x0b && f->scenario == SRC_ON_CC2) {
+            mv = 450;
+        }
+        out[0] = mv > (f->regs[0x04] + 1u) * 42u ? 0x20 : 0;
+        if (sw == 0xc8 && f->scenario == VBUS_DURING_PROBE) out[0] |= 0x80;
     }
     if (reg == 0x3e && f->regs[0x02] == 0x64) {
         assert(count == 5);
@@ -127,25 +152,32 @@ int main(void)
         uint16_t mv;
         enum t3p_pd_state expected;
         unsigned power, send;
+        unsigned cc1, cc2;
     } cases[] = {
-        { REPLY, 5000, T3P_PD_CABLE_VBUS, 0, 0 },
-        { SRC_ON_CC2, 3010, T3P_PD_CABLE_CC_BUSY, 0, 0 },
-        { FAR_SINK, 3010, T3P_PD_CABLE_CC_BUSY, 0, 0 },
-        { NO_RA, 3010, T3P_PD_CABLE_NO_RA, 0, 0 },
-        { LATE_VBUS, 3010, T3P_PD_CABLE_VBUS, 1, 0 },
-        { OVERCURRENT, 3010, T3P_PD_CABLE_VCONN_FAULT, 1, 0 },
-        { REPLY, 3010, T3P_PD_CAPTURED, 1, 1 },
-        { REPLY, 3010, T3P_PD_CAPTURED, 1, 1 },
-        { SILENT, 3010, T3P_PD_TIMEOUT, 1, 1 },
-        { ACK_ONLY, 3010, T3P_PD_CABLE_NO_ID, 1, 1 },
-        { TX_ERROR, 3010, T3P_PD_BUS_ERROR, 1, 1 },
+        { REPLY, 5000, T3P_PD_CABLE_VBUS, 0, 0, 255, 255 },
+        { SRC_ON_CC2, 3010, T3P_PD_CABLE_CC_BUSY, 0, 0, 255, 255 },
+        { FAR_SINK, 3010, T3P_PD_CABLE_CC_BUSY, 0, 0, 47, 7 },
+        { NO_RA, 3010, T3P_PD_CABLE_NO_RA, 0, 0, 64, 64 },
+        { REVERSED, 3010, T3P_PD_CABLE_NO_RA, 0, 0, 7, 64 },
+        { SHORT_CC2, 3010, T3P_PD_CABLE_NO_RA, 0, 0, 64, 0 },
+        { RD_ON_CC2, 3010, T3P_PD_CABLE_NO_RA, 0, 0, 64, 40 },
+        { VBUS_DURING_PROBE, 3010, T3P_PD_CABLE_VBUS, 0, 0, 255, 255 },
+        { LATE_VBUS, 3010, T3P_PD_CABLE_VBUS, 1, 0, 64, 7 },
+        { OVERCURRENT, 3010, T3P_PD_CABLE_VCONN_FAULT, 1, 0, 64, 7 },
+        { REPLY, 3010, T3P_PD_CAPTURED, 1, 1, 64, 7 },
+        { REPLY, 3010, T3P_PD_CAPTURED, 1, 1, 64, 7 },
+        { SILENT, 3010, T3P_PD_TIMEOUT, 1, 1, 64, 7 },
+        { ACK_ONLY, 3010, T3P_PD_CABLE_NO_ID, 1, 1, 64, 7 },
+        { TX_ERROR, 3010, T3P_PD_BUS_ERROR, 1, 1, 64, 7 },
     };
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
         f.scenario = cases[i].scenario;
         f.mv = cases[i].mv;
         f.powered = f.sent = 0;
+        cc_probe[0] = cc_probe[1] = 255;
         assert(t3p_cable_read(&f.board, &bus) == cases[i].expected);
         assert(f.powered == cases[i].power && f.sent == cases[i].send);
+        assert(cc_probe[0] == cases[i].cc1 && cc_probe[1] == cases[i].cc2);
         assert(!memcmp(f.regs, baseline, sizeof(baseline)));
     }
 

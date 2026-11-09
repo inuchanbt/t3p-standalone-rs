@@ -7,6 +7,8 @@ use super::{BadFrame, SOP_TOKEN, SOP1_TOKEN, checked_fifo};
 pub struct CableCapture {
     pub(crate) identity: Option<CableIdentity>,
     pub(crate) sop_prime: u8,
+    #[cfg(feature = "pd-cable-read")]
+    pub(crate) cc_probe: Option<[u8; 2]>,
 }
 
 impl CableCapture {
@@ -14,7 +16,15 @@ impl CableCapture {
         Self {
             identity: None,
             sop_prime: 0,
+            #[cfg(feature = "pd-cable-read")]
+            cc_probe: None,
         }
+    }
+
+    /// First DAC threshold above each CC pin. Code 64 means above range.
+    #[cfg(feature = "pd-cable-read")]
+    pub fn set_cc_probe(&mut self, cc1: u32, cc2: u32) {
+        self.cc_probe = (cc1 <= 64 && cc2 <= 64).then_some([cc1 as u8, cc2 as u8]);
     }
 
     pub fn captured(&self) -> bool {

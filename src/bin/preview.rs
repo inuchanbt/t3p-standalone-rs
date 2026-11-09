@@ -38,6 +38,7 @@ fn main() -> io::Result<()> {
             "--cable-flags" => (2, 2),
             "--cable-timeout" => (3, 0),
             "--cable-vbus" => (11, 0),
+            "--cable-no-ra" => (13, 0),
             _ => return None,
         })
     });
@@ -170,6 +171,10 @@ fn main() -> io::Result<()> {
     }
     if let Some((state, section)) = cable_view {
         let mut cable = CableCapture::new();
+        #[cfg(feature = "pd-cable-read")]
+        if state == 13 {
+            cable.set_cc_probe(7, 64);
+        }
         if state == 2 {
             for line in include_str!("../../tests/cable_identity.hex").lines() {
                 let frame: Vec<_> = line

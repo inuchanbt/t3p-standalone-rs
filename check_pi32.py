@@ -299,6 +299,11 @@ def main():
             if args.pd_cable_read:
                 cpu.call(symbols["meter_pd_status"], [11, 1, 3])
                 check_cable("vbus")
+                cpu.call(symbols["meter_pd_cable_cc"], [7, 64])
+                cpu.call(symbols["meter_pd_status"], [13, 1, 3])
+                check_cable("no-ra")
+                cpu.call(symbols["meter_pd_status"], [1, 1, 3])
+                check_cable("listening")
             cpu.call(symbols["meter_long_press"], [])
             # Compare the overview with the same protocol status as its host reference.
             cpu.call(symbols["meter_pd_status"], [0, 0, 0])

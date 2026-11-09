@@ -48,9 +48,11 @@ The CC1 hardware trial showed the same identity on the T3P. The photographed PD 
 
 ### Active cable read trial
 
-In the `--pd-cable-read` build, **CABLE** can read a cable on its own. Power the T3P from its side HID port. Plug a known e-marked cable into the T3P measurement receptacle and leave the far end and the T3P measurement plug open. Double press the left button on **CABLE**. If `NO RA ON CC2` appears, flip the plug at the T3P and retry. `CAPTURED` opens the same SUMMARY, RAW and FLAGS views.
+The `--pd-cable-read` build adds an experimental standalone read to **CABLE**. Power the T3P from its side HID port. Plug a known e-marked cable into the T3P measurement receptacle and leave the far end and the T3P measurement plug open. Double press the left button on **CABLE**. `CAPTURED` opens the same SUMMARY, RAW and FLAGS views.
 
-The firmware checks for VBUS and port termination before temporarily supplying VCONN on CC2 and sending a SOP′ Discover Identity request on CC1. It restores the PHY settings after each attempt. `NO REPLY` means no response was detected. `ACK WITHOUT ID` means the PHY saw GoodCRC but no decodable Identity arrived. This trial covers Discover Identity. The cable exchange has been tested offline and awaits a T3P hardware run. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf) · [USB Power Delivery specification](https://www.usb.org/document-library/usb-power-delivery)
+The first hardware trial stopped at `NO RA ON CC2` in both plug orientations. The revised trial probes both CC pins with 330 µA pull-ups and shows their approximate voltages if the read fails after the probe. `HIGH` indicates a reading above the probe's roughly 2.69 V range, and `LOW` indicates a reading below about 0.04 V. A reading around 0.3 V on CC1 with `HIGH` on CC2 suggests that the cable termination is on CC1.
+
+After checking for VBUS and confirming that CC2 is in the Ra range and CC1 is open, the firmware temporarily switches VCONN onto CC2 and sends a SOP′ Discover Identity request on CC1. It restores the PHY settings after each attempt. `NO REPLY` means no response was detected. `ACK WITHOUT ID` means the PHY saw GoodCRC but no decodable Identity arrived. Standalone Identity acquisition still needs hardware verification. [FUSB302B data sheet](https://www.onsemi.com/download/data-sheet/pdf/fusb302b-d.pdf) · [USB Power Delivery specification](https://www.usb.org/document-library/usb-power-delivery)
 
 ## CC1 Rd attach test
 
@@ -147,7 +149,7 @@ Build the PD profiles trial with `python build.py --pd-profiles`. In `build/pd-p
 
 Package the PD and CABLE trial locally with `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin`.
 
-For the active cable reader, build with `python build.py --pd-cable-read`. Generate the same references under `build/pd-cable-read` using `cargo run --offline --features pd-cable-read --bin preview`. Add `preview-cable-vbus.ppm` with `--measurement --profiles-ui --cable-vbus`. Package with `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_3.0.3.bin`.
+For the active cable reader, build with `python build.py --pd-cable-read`. Generate the same references under `build/pd-cable-read` using `cargo run --offline --features pd-cable-read --bin preview`. Add `preview-cable-vbus.ppm` and `preview-cable-no-ra.ppm` with `--measurement --profiles-ui` and `--cable-vbus` or `--cable-no-ra` respectively. Package with `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_V2_3.0.3.bin`.
 
 For **RD TEST**, generate the seven measurement references under `build/pd-rd-test`. Generate `preview-rd-off.ppm` and `preview-rd-5v.ppm` with `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` or `--rd-5v` for the respective reference. Package with `python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin`.
 

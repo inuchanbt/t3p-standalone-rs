@@ -26,7 +26,7 @@ pub(super) fn render(p: &mut Strip<'_>, pd: Profiles) {
                 (_, 4 | 5 | 9 | 16) => b"POWER CYCLE T3P",
                 (CABLE_MODE, 1) => b"READING SOP1",
                 (CABLE_MODE, 11 | 12) => b"DISCONNECT SOURCE AND SINK",
-                (CABLE_MODE, 13) => b"FLIP PLUG AND RETRY",
+                (CABLE_MODE, 13) => b"RA REQUIRED ON CC2",
                 (CABLE_MODE, 14) => b"UNPLUG AND CHECK CABLE",
                 _ => b"2X TO READ ON CC1",
             };
@@ -34,6 +34,13 @@ pub(super) fn render(p: &mut Strip<'_>, pd: Profiles) {
             p.text(18, 109, b"HID POWER. CABLE ONLY.", 1, TEXT);
             p.text(18, 132, b"LEAVE FAR END OPEN", 1, MUTED);
             p.text(18, 155, hint, 1, MUTED);
+            #[cfg(feature = "pd-cable-read")]
+            if let Some([cc1, cc2]) = pd.cable.cc_probe {
+                p.text(18, 176, b"CC1", 1, AMPS);
+                p.text(39, 172, &cc_voltage(cc1), 2, TEXT);
+                p.text(126, 176, b"CC2", 1, AMPS);
+                p.text(147, 172, &cc_voltage(cc2), 2, TEXT);
+            }
         } else {
             p.text(18, 73, b"E-MARKER RX", 2, AMPS);
             p.text(18, 109, b"WAIT FOR SOURCE TO QUERY CABLE", 1, TEXT);
@@ -57,6 +64,26 @@ pub(super) fn render(p: &mut Strip<'_>, pd: Profiles) {
         1 => raw(p, identity),
         2 => flags(p, identity),
         _ => summary(p, identity),
+    }
+}
+
+#[cfg(feature = "pd-cable-read")]
+fn cc_voltage(code: u8) -> [u8; 6] {
+    match code {
+        0 => *b" LOW  ",
+        64 => *b" HIGH ",
+        _ => {
+            // Display the midpoint between two nominal 42 mV thresholds.
+            let centivolts = (u16::from(code) * 42 + 26) / 10;
+            [
+                b' ',
+                b'0' + (centivolts / 100) as u8,
+                b'.',
+                b'0' + (centivolts / 10 % 10) as u8,
+                b'0' + (centivolts % 10) as u8,
+                b'V',
+            ]
+        }
     }
 }
 
