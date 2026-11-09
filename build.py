@@ -107,19 +107,21 @@ def main():
     pd_mode = parser.add_mutually_exclusive_group()
     pd_mode.add_argument("--pd-diagnostic", action="store_true", help="Add read-only CC-controller diagnostics")
     pd_mode.add_argument("--pd-profiles", action="store_true", help="Build the receive-only PD profiles candidate")
+    pd_mode.add_argument("--pd-cable-read", action="store_true", help="Build the active SOP' cable read candidate")
     pd_mode.add_argument("--pd-rd-test", action="store_true", help="Build the CC1 Rd attach test candidate")
     pd_mode.add_argument("--pd-ack-test", action="store_true", help="Build the CC1 GoodCRC test candidate")
     args = parser.parse_args()
+    pd_profiles = args.pd_profiles or args.pd_cable_read
     rd_test = args.pd_rd_test or args.pd_ack_test
-    if args.pd_diagnostic or args.pd_profiles or rd_test:
+    if args.pd_diagnostic or pd_profiles or rd_test:
         args.measurement = True
     variant = ""
     if args.measurement:
         variant = "measurement"
     if args.pd_diagnostic:
         variant = "pd-diagnostic"
-    if args.pd_profiles:
-        variant = "pd-profiles"
+    if pd_profiles:
+        variant = "pd-cable-read" if args.pd_cable_read else "pd-profiles"
     if rd_test:
         variant = "pd-ack-test" if args.pd_ack_test else "pd-rd-test"
     out = ROOT / "build" / variant
@@ -138,8 +140,10 @@ def main():
 
     rust_ir = out / "meter-thumb.ll"
     rust_features = ["--cfg", 'feature="board"']
-    if args.pd_profiles:
+    if pd_profiles:
         rust_features += ["--cfg", 'feature="pd-profiles"']
+    if args.pd_cable_read:
+        rust_features += ["--cfg", 'feature="pd-cable-read"']
     if rd_test:
         rust_features += ["--cfg", 'feature="pd-rd-test"']
     if args.pd_ack_test:
@@ -158,8 +162,10 @@ def main():
                bsp / "board.c", bsp / "memory.c"]
     if args.measurement:
         sources.append(bsp / "t3p_meter.c")
-    if args.pd_profiles:
+    if pd_profiles:
         sources.append(bsp / "t3p_pd.c")
+    if args.pd_cable_read:
+        sources.append(bsp / "t3p_cable_read.c")
     if rd_test:
         sources.append(bsp / "t3p_rd_test.c")
     for source in sources:
@@ -173,8 +179,10 @@ def main():
             flags = ["-DT3P_MEASURE"] if args.measurement else []
             if args.pd_diagnostic:
                 flags.append("-DT3P_PD_DIAGNOSTIC")
-            if args.pd_profiles:
+            if pd_profiles:
                 flags.append("-DT3P_PD_PROFILES")
+            if args.pd_cable_read:
+                flags.append("-DT3P_PD_CABLE_READ")
             if rd_test:
                 flags.append("-DT3P_PD_RD_TEST")
             if args.pd_ack_test:
@@ -199,6 +207,8 @@ def main():
         report["status"] += "; read-only PD diagnostic"
     if args.pd_profiles:
         report["status"] += "; receive-only PD profiles candidate"
+    if args.pd_cable_read:
+        report["status"] += "; CC1 active cable identity candidate"
     if args.pd_rd_test:
         report["status"] += "; CC1 Rd attach test"
     if args.pd_ack_test:

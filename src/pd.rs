@@ -516,10 +516,11 @@ pub(crate) struct Profiles {
 
 impl Profiles {
     pub(crate) fn status(self, mode: u32) -> &'static [u8] {
-        if matches!(self.state, 4 | 5 | 9) {
+        if matches!(self.state, 4 | 5 | 9 | 16) {
             return match self.state {
                 4 => b"CONFIG MISMATCH",
                 5 => b"I2C ERROR",
+                16 => b"RESTORE FAILED",
                 _ => b"TIMER UNAVAILABLE",
             };
         }
@@ -571,6 +572,7 @@ impl Profiles {
             2 => b"CAPTURED",
             3 if mode == 1 => b"NO EPR CAPS",
             3 if mode == 2 => b"DONE",
+            3 if mode == CABLE_MODE && cfg!(feature = "pd-cable-read") => b"NO REPLY",
             3 if mode == CABLE_MODE => b"NO CABLE ID",
             3 => b"NO SOURCE CAPS",
             4 => b"CONFIG MISMATCH",
@@ -579,6 +581,11 @@ impl Profiles {
             7 => b"BAD RX FRAME",
             8 => b"LINK RESET",
             9 => b"TIMER UNAVAILABLE",
+            11 => b"VBUS PRESENT",
+            12 => b"CC BUSY",
+            13 => b"NO RA ON CC2",
+            14 => b"VCONN FAULT",
+            15 => b"ACK WITHOUT ID",
             _ => b"PARTIAL",
         }
     }

@@ -37,6 +37,7 @@ fn main() -> io::Result<()> {
             "--cable-raw" => (2, 1),
             "--cable-flags" => (2, 2),
             "--cable-timeout" => (3, 0),
+            "--cable-vbus" => (11, 0),
             _ => return None,
         })
     });

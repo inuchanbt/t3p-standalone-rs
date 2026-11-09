@@ -274,8 +274,13 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
                     pd.cable.captured() && pd.cable_section + 1 < CABLE_SECTIONS
                 }) =>
             {
-                b"TAP MORE 2X CAP HOLD EXIT"
+                if cfg!(feature = "pd-cable-read") {
+                    b"TAP MORE 2X READ HOLD EXIT"
+                } else {
+                    b"TAP MORE 2X CAP HOLD EXIT"
+                }
             }
+            CABLE_PAGE if cfg!(feature = "pd-cable-read") => b"TAP NEXT 2X READ HOLD EXIT",
             CABLE_PAGE => b"TAP NEXT 2X CAP HOLD EXIT",
             PROFILES_PAGE | EPR_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
             2..PROFILES_PAGE => b"TAP NEXT 2X RANGE HOLD RESET",

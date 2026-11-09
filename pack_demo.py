@@ -53,6 +53,8 @@ def main():
         check.append("--pd-diagnostic")
     if "receive-only PD profiles candidate" in build_audit["status"]:
         check.append("--pd-profiles")
+    if "CC1 active cable identity candidate" in build_audit["status"]:
+        check.append("--pd-cable-read")
     if "CC1 Rd attach test" in build_audit["status"]:
         check.append("--pd-rd-test")
     if "CC1 GoodCRC test" in build_audit["status"]:

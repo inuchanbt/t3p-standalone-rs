@@ -38,13 +38,32 @@ static void stop_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *b
     capture->state = state;
 }
 
+static int capture_available(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus)
+{
+    if (capture->state == T3P_PD_LISTENING) stop_capture(capture, bus, T3P_PD_READY);
+    return capture->state != T3P_PD_BUS_ERROR && capture->state != T3P_PD_CONFIG &&
+           capture->state != T3P_PD_TIMER_ERROR && capture->state != T3P_PD_CABLE_RESTORE;
+}
+
+#ifdef T3P_PD_CABLE_READ
+void meter_pd_status(uint32_t, uint32_t, uint32_t);
+
+void t3p_pd_read_cable(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus,
+                       struct t3p_bsp *board)
+{
+    if (!capture_available(capture, bus)) return;
+    capture->cc = 1;
+    capture->mode = T3P_PD_CABLE;
+    capture->fifo_warning = 0;
+    meter_pd_status(T3P_PD_LISTENING, capture->cc, capture->mode);
+    capture->state = t3p_cable_read(board, bus);
+}
+#endif
+
 void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, uint32_t now,
                           enum t3p_pd_mode mode)
 {
-    if (capture->state == T3P_PD_LISTENING) stop_capture(capture, bus, T3P_PD_READY);
-    if (capture->state == T3P_PD_BUS_ERROR || capture->state == T3P_PD_CONFIG ||
-        capture->state == T3P_PD_TIMER_ERROR)
-        return;
+    if (!capture_available(capture, bus)) return;
     capture->fifo_warning = 0;
     /* Only CC1 reception has been observed on the tested T3P. */
     capture->cc = 1;

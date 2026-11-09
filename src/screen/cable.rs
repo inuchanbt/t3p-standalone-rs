@@ -21,20 +21,35 @@ pub(super) fn render(p: &mut Strip<'_>, pd: Profiles) {
 
     let Some(identity) = pd.cable.identity else {
         p.outline(8, 55, 224, 141, GRID);
-        p.text(18, 73, b"E-MARKER RX", 2, AMPS);
-        p.text(18, 109, b"WAIT FOR SOURCE TO QUERY CABLE", 1, TEXT);
-        p.text(
-            18,
-            132,
-            if pd.mode == CABLE_MODE && pd.state == 1 {
-                b"RECONNECT SOURCE NOW"
-            } else {
-                b"2X TO LISTEN FOR 30S"
-            },
-            1,
-            MUTED,
-        );
-        p.text(18, 155, b"USE A KNOWN E-MARKED CABLE", 1, MUTED);
+        if cfg!(feature = "pd-cable-read") {
+            let hint: &[u8] = match (pd.mode, pd.state) {
+                (_, 4 | 5 | 9 | 16) => b"POWER CYCLE T3P",
+                (CABLE_MODE, 1) => b"READING SOP1",
+                (CABLE_MODE, 11 | 12) => b"DISCONNECT SOURCE AND SINK",
+                (CABLE_MODE, 13) => b"FLIP PLUG AND RETRY",
+                (CABLE_MODE, 14) => b"UNPLUG AND CHECK CABLE",
+                _ => b"2X TO READ ON CC1",
+            };
+            p.text(18, 73, b"DISCOVER IDENTITY", 2, AMPS);
+            p.text(18, 109, b"HID POWER. CABLE ONLY.", 1, TEXT);
+            p.text(18, 132, b"LEAVE FAR END OPEN", 1, MUTED);
+            p.text(18, 155, hint, 1, MUTED);
+        } else {
+            p.text(18, 73, b"E-MARKER RX", 2, AMPS);
+            p.text(18, 109, b"WAIT FOR SOURCE TO QUERY CABLE", 1, TEXT);
+            p.text(
+                18,
+                132,
+                if pd.mode == CABLE_MODE && pd.state == 1 {
+                    b"RECONNECT SOURCE NOW"
+                } else {
+                    b"2X TO LISTEN FOR 30S"
+                },
+                1,
+                MUTED,
+            );
+            p.text(18, 155, b"USE A KNOWN E-MARKED CABLE", 1, MUTED);
+        }
         return;
     };
 

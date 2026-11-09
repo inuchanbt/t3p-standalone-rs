@@ -158,7 +158,11 @@ void t3p_board_start(void)
             enum t3p_pd_mode mode = (redraw & START_CABLE) ? T3P_PD_CABLE :
                                     (redraw & START_SNIFF) ? T3P_PD_SNIFF :
                                     (redraw & START_EPR) ? T3P_PD_EPR : T3P_PD_SPR;
-            t3p_pd_start_capture(&pd, &fast_bus, now, mode);
+#ifdef T3P_PD_CABLE_READ
+            if (mode == T3P_PD_CABLE) t3p_pd_read_cable(&pd, &fast_bus, &board);
+            else
+#endif
+                t3p_pd_start_capture(&pd, &fast_bus, now, mode);
             meter_pd_status(pd.state, pd.cc, pd.mode);
             meter_pd_warning(pd.fifo_warning);
             redraw = REDRAW;

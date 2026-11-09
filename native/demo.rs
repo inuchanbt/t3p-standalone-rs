@@ -232,6 +232,10 @@ unsafe extern "C" fn meter_pd_status(state: u32, cc: u32, mode: u32) {
         *(&raw mut PD_STATE) = state;
         *(&raw mut PD_CC) = cc;
         *(&raw mut PD_MODE) = mode;
+        #[cfg(feature = "pd-cable-read")]
+        if state == 16 && mode == CABLE_MODE {
+            *(&raw mut PD_CABLE) = crate::CableCapture::new();
+        }
         if state == 1 {
             if mode == 0 {
                 *(&raw mut PD_CAPS) = None;

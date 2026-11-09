@@ -1,0 +1,215 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+#include "t3p_pd.h"
+
+#define DEVICE_ID 0x01
+#define SWITCHES0 0x02
+#define SWITCHES1 0x03
+#define MEASURE 0x04
+#define CONTROL0 0x06
+#define CONTROL1 0x07
+#define CONTROL3 0x09
+#define POWER 0x0b
+#define RESET 0x0c
+#define OCPREG 0x0d
+#define INTERRUPTA 0x3e
+#define STATUS0 0x40
+#define STATUS1 0x41
+#define FIFO 0x43
+
+#define RD_BOTH 0x03
+#define MEAS_CC1 0x04
+#define MEAS_CC2 0x08
+#define RP_CC1 0x40
+#define RP_CC2 0x80
+#define VCONN_CC2 0x20
+#define SOURCE_CC1_AUTO_CRC 0xb5 /* Source/DFP for SOP, Rev 2.0 GoodCRC, TX on CC1 */
+#define HOST_CUR_DEFAULT_MASKED 0x24
+#define ENSOP1 0x01
+#define TX_FLUSH 0x40
+#define RX_FLUSH 0x04
+#define PD_RESET 0x02
+#define RETRY_TWICE 0x05
+#define PD_POWER 0x0f
+#define OSC_POWER 0x09
+#define BASE_POWER 0x01
+#define CABLE_OCP_300MA 0x0a
+
+#define I_OCP_TEMP 0x80
+#define I_TXSENT 0x04
+#define I_HARDRST 0x01
+#define I_GCRCSENT 0x01
+#define VBUSOK 0x80
+#define ACTIVITY 0x40
+#define COMP 0x20
+#define CRC_CHK 0x10
+#define RX_EMPTY 0x20
+#define RX_FULL 0x10
+#define TX_IDLE 0x08
+#define OCP_OR_OVERTEMP 0x03
+#define I_CRC_CHK 0x10
+#define I_COLLISION 0x02
+
+#define VBUS_PRESENT_MV 4000u /* Allow the observed HID-only reading of about 3 V. */
+#define VCONN_SETTLE_MS 55u
+#define VCONN_OFF_MS 230u
+#define RESPONSE_MS 35u
+
+/* Indices of the consecutive registers read starting at INTERRUPTA. */
+enum { IRQ_A, IRQ_B, LIVE0, LIVE1, IRQ, STATUS_COUNT };
+
+int32_t meter_pd_record(const uint8_t *, uint32_t, uint32_t, uint32_t);
+
+static int configure(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
+{
+    uint8_t actual, expected = value;
+    if (reg == CONTROL0) expected &= ~TX_FLUSH;
+    if (reg == CONTROL1) expected &= ~RX_FLUSH;
+    return t3p_pd_cable_write(bus, reg, value) ||
+           t3p_pd_rx_read(bus, reg, &actual, 1) || actual != expected;
+}
+
+static int restore(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
+{
+    return configure(bus, reg, value) && configure(bus, reg, value);
+}
+
+static enum t3p_pd_state check_vbus(struct t3p_meter_bus *bus)
+{
+    uint16_t mv;
+    int16_t ma;
+    if (t3p_meter_sample(bus, &mv, &ma)) return T3P_PD_BUS_ERROR;
+    return mv >= VBUS_PRESENT_MV ? T3P_PD_CABLE_VBUS : T3P_PD_READY;
+}
+
+static enum t3p_pd_state probe_cc(struct t3p_bsp *board, struct t3p_meter_bus *bus,
+                                  uint8_t switches, uint8_t mdac, int want_high,
+                                  enum t3p_pd_state mismatch)
+{
+    uint8_t status;
+    if (configure(bus, MEASURE, mdac) || configure(bus, SWITCHES0, switches))
+        return T3P_PD_BUS_ERROR;
+    if (t3p_bsp_delay(board, 2)) return T3P_PD_TIMER_ERROR;
+    if (t3p_pd_rx_read(bus, STATUS0, &status, 1)) return T3P_PD_BUS_ERROR;
+    if (status & VBUSOK) return T3P_PD_CABLE_VBUS;
+    if (status & ACTIVITY) return T3P_PD_CABLE_CC_BUSY;
+    return !!(status & COMP) == want_high ? T3P_PD_READY : mismatch;
+}
+
+static enum t3p_pd_state check_lines(struct t3p_bsp *board, struct t3p_meter_bus *bus)
+{
+    /* Check for an external Rp on either line with Rd still on, then use the
+     * default Rp current to look for Ra on CC2 and an open CC1 at the far end. */
+    enum t3p_pd_state state = probe_cc(board, bus, RD_BOTH | MEAS_CC1, 0x03, 0,
+                                       T3P_PD_CABLE_CC_BUSY); /* 168 mV */
+    if (state != T3P_PD_READY) return state;
+    state = probe_cc(board, bus, RD_BOTH | MEAS_CC2, 0x03, 0, T3P_PD_CABLE_CC_BUSY);
+    if (state != T3P_PD_READY) return state;
+    state = probe_cc(board, bus, RP_CC2 | MEAS_CC2, 0x04, 0, T3P_PD_CABLE_NO_RA); /* 210 mV */
+    if (state != T3P_PD_READY) return state;
+    return probe_cc(board, bus, RP_CC1 | MEAS_CC1, 0x26, 1, T3P_PD_CABLE_CC_BUSY); /* 1.638 V */
+}
+
+static enum t3p_pd_state read_status(struct t3p_meter_bus *bus, uint8_t status[STATUS_COUNT])
+{
+    if (t3p_pd_rx_read(bus, INTERRUPTA, status, STATUS_COUNT)) return T3P_PD_BUS_ERROR;
+    if ((status[IRQ_A] & I_OCP_TEMP) || (status[LIVE1] & OCP_OR_OVERTEMP))
+        return T3P_PD_CABLE_VCONN_FAULT;
+    if (status[LIVE0] & VBUSOK) return T3P_PD_CABLE_VBUS;
+    if ((status[IRQ_A] & I_HARDRST) || (status[IRQ] & I_COLLISION)) return T3P_PD_CABLE_CC_BUSY;
+    if (status[LIVE1] & RX_FULL) return T3P_PD_FIFO_FULL;
+    return T3P_PD_READY;
+}
+
+static enum t3p_pd_state exchange(struct t3p_bsp *board, struct t3p_meter_bus *bus,
+                                  unsigned *vconn_attempted)
+{
+    if (configure(bus, POWER, PD_POWER) || configure(bus, CONTROL0, HOST_CUR_DEFAULT_MASKED))
+        return T3P_PD_BUS_ERROR;
+    enum t3p_pd_state state = check_lines(board, bus);
+    if (state != T3P_PD_READY) return state;
+
+    uint8_t status[STATUS_COUNT];
+    if (t3p_pd_cable_write(bus, RESET, PD_RESET) ||
+        configure(bus, CONTROL0, HOST_CUR_DEFAULT_MASKED | TX_FLUSH) ||
+        configure(bus, CONTROL1, ENSOP1 | RX_FLUSH) ||
+        configure(bus, CONTROL3, RETRY_TWICE) ||
+        configure(bus, OCPREG, CABLE_OCP_300MA) ||
+        t3p_pd_rx_read(bus, INTERRUPTA, status, sizeof(status)))
+        return T3P_PD_BUS_ERROR;
+    if ((status[LIVE1] & 0x3f) != (RX_EMPTY | TX_IDLE)) return T3P_PD_FIFO_FULL;
+    state = check_vbus(bus);
+    if (state != T3P_PD_READY) return state;
+
+    *vconn_attempted = 1;
+    if (configure(bus, SWITCHES0, RP_CC1 | MEAS_CC1 | VCONN_CC2))
+        return T3P_PD_BUS_ERROR;
+    uint32_t started = t3p_bsp_millis(board);
+    do {
+        state = read_status(bus, status);
+        if (state != T3P_PD_READY) return state;
+        if ((status[LIVE0] & (COMP | ACTIVITY)) != COMP || !(status[LIVE1] & RX_EMPTY))
+            return T3P_PD_CABLE_CC_BUSY;
+        if (t3p_bsp_delay(board, 1)) return T3P_PD_TIMER_ERROR;
+    } while (t3p_bsp_millis(board) - started < VCONN_SETTLE_MS);
+
+    if (configure(bus, SWITCHES1, SOURCE_CC1_AUTO_CRC) || t3p_pd_send_identity(bus))
+        return T3P_PD_BUS_ERROR;
+    started = t3p_bsp_millis(board);
+    unsigned acknowledged = 0, rx_ready = 0;
+    do {
+        state = read_status(bus, status);
+        if (state != T3P_PD_READY) return state;
+        acknowledged |= status[IRQ_A] & I_TXSENT;
+        rx_ready |= (status[IRQ_B] & I_GCRCSENT) || (status[IRQ] & I_CRC_CHK) ||
+                    (status[LIVE0] & CRC_CHK);
+        if (rx_ready && !(status[LIVE1] & RX_EMPTY) && !(status[LIVE0] & ACTIVITY)) {
+            uint8_t frame[35];
+            if (t3p_pd_rx_read(bus, FIFO, frame, 3)) return T3P_PD_BUS_ERROR;
+            if (frame[0] >> 5 != 6u) return T3P_PD_CABLE_CC_BUSY;
+            unsigned body = 4u + 4u * ((frame[2] >> 4) & 7u);
+            if (t3p_pd_rx_read(bus, FIFO, frame + 3, body)) return T3P_PD_BUS_ERROR;
+            int32_t result = meter_pd_record(frame, 3 + body, T3P_PD_CABLE, t3p_bsp_millis(board));
+            if (result > 0) return T3P_PD_CAPTURED;
+            if (result < 0) return T3P_PD_BAD_FRAME;
+            rx_ready = 0;
+        }
+        if (t3p_bsp_delay(board, 1)) return T3P_PD_TIMER_ERROR;
+    } while (t3p_bsp_millis(board) - started < RESPONSE_MS);
+    return acknowledged ? T3P_PD_CABLE_NO_ID : T3P_PD_TIMEOUT;
+}
+
+enum t3p_pd_state t3p_cable_read(struct t3p_bsp *board, struct t3p_meter_bus *bus)
+{
+    uint8_t regs[9], power, ocp, fifo;
+    if (t3p_pd_rx_read(bus, DEVICE_ID, regs, sizeof(regs)) ||
+        t3p_pd_rx_read(bus, POWER, &power, 1) || t3p_pd_rx_read(bus, OCPREG, &ocp, 1) ||
+        t3p_pd_rx_read(bus, STATUS1, &fifo, 1) ||
+        t3p_meter_identify(bus))
+        return T3P_PD_BUS_ERROR;
+    if (regs[0] != 0x91 || regs[1] != RD_BOTH || (regs[2] & 0x0f) || (regs[3] & 0xc0) ||
+        (regs[5] & 0xd3) || regs[6] || regs[7] != 0x02 || regs[8] != 0x06 ||
+        power != BASE_POWER || (fifo & 0x0f) != TX_IDLE)
+        return T3P_PD_CONFIG;
+    enum t3p_pd_state state = check_vbus(bus);
+    if (state != T3P_PD_READY) return state;
+
+    unsigned vconn_attempted = 0;
+    state = exchange(board, bus, &vconn_attempted);
+
+    /* Every path from exchange can have touched the PHY. Remove VCONN first
+     * and attempt every restore even if a preceding I2C transaction fails. */
+    int switch_failed = restore(bus, SWITCHES0, RD_BOTH);
+    int failed = switch_failed;
+    failed |= restore(bus, SWITCHES1, regs[2]);
+    failed |= restore(bus, CONTROL3, regs[8]);
+    failed |= restore(bus, POWER, OSC_POWER);
+    failed |= t3p_pd_cable_write(bus, RESET, PD_RESET) && t3p_pd_cable_write(bus, RESET, PD_RESET);
+    failed |= restore(bus, CONTROL0, regs[5] | TX_FLUSH);
+    failed |= restore(bus, CONTROL1, RX_FLUSH);
+    failed |= restore(bus, MEASURE, regs[3]);
+    if (!switch_failed) failed |= restore(bus, OCPREG, ocp);
+    failed |= restore(bus, POWER, power);
+    if (failed) return T3P_PD_CABLE_RESTORE;
+    if (vconn_attempted && t3p_bsp_delay(board, VCONN_OFF_MS)) return T3P_PD_TIMER_ERROR;
+    return state;
+}

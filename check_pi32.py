@@ -25,9 +25,12 @@ def main():
     parser.add_argument("--measurement", action="store_true")
     parser.add_argument("--pd-diagnostic", action="store_true")
     parser.add_argument("--pd-profiles", action="store_true")
+    parser.add_argument("--pd-cable-read", action="store_true")
     parser.add_argument("--pd-rd-test", action="store_true")
     parser.add_argument("--pd-ack-test", action="store_true")
     args = parser.parse_args()
+    if args.pd_cable_read:
+        args.pd_profiles = args.measurement = True
     sys.path.insert(0, str(args.sim / "tools/llvm"))
     from sim import CPU, Memory
     import check as instruction_check
@@ -293,6 +296,9 @@ def main():
             check_cable("listening")
             cpu.call(symbols["meter_pd_status"], [3, 1, 3])
             check_cable("timeout")
+            if args.pd_cable_read:
+                cpu.call(symbols["meter_pd_status"], [11, 1, 3])
+                check_cable("vbus")
             cpu.call(symbols["meter_long_press"], [])
             # Compare the overview with the same protocol status as its host reference.
             cpu.call(symbols["meter_pd_status"], [0, 0, 0])

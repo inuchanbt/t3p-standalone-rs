@@ -46,6 +46,12 @@ PD SNIFF の次にある **CABLE** で左ボタンをダブル押しすると、
 
 CC1 の実機試験でも、T3P に同じ識別情報が表示されました。写真の PD ヘッダー `518F` と5個の VDO は、VBUS 約 5.005 V で CY4500-EPR が記録した最初の SOP′ Discover Identity ACK と一致しました。`SOP1 RX:003` は照会、その GoodCRC、識別応答の3件と整合します。`CAPTURE WARN` は、受信 FIFO の警告が立った状態で CRC が一致する識別応答を取得したことを示します。
 
+### ケーブル単体の能動読取試験
+
+`--pd-cable-read` 版では **CABLE** からケーブル単体を読み取れます。T3P は側面の HID ポートから給電し、測定用のメス端子に e-marker 付きのケーブルを挿します。ケーブルの反対側と T3P の測定用オス端子は空けて、**CABLE** で左ボタンをダブル押しします。`NO RA ON CC2` が出たら、T3P 側のプラグを裏返して再試行します。`CAPTURED` が出たら短押しで SUMMARY・RAW・FLAGS を確認できます。
+
+VBUS と CC の終端を確認したうえで、CC2 に一時的に VCONN を供給し、CC1 で SOP′ Discover Identity を送ります。試行が終わるたびに PHY の設定を元に戻します。`NO REPLY` は応答なし、`ACK WITHOUT ID` は GoodCRC を検出したものの解読できる Identity が届かなかったことを示します。今回は Discover Identity が対象です。送受信の処理はオフラインで検証済みで、T3P 実機での読取は未確認です。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
+
 ## CC1 の Rd 接続試験
 
 `python build.py --pd-rd-test` でビルドし、電流グラフの次にある **RD TEST** を開きます。HID で給電し、測定用の両端子を空けて始めます。左ボタンをダブル押しして `RD OFF` を表示させてから、動作実績のある USB-C 電源を CC1 の向きで T3P のメス端子につなぎます。反対側の測定端子は空けておきます。約2秒待ってから左ボタンを1回短押しして Rd を入れ、保存された前後の VBUS を比べます。`5V SEEN` は、Rd を切ったときは4 V未満で、Rd を入れた後は3回連続で4.5〜5.5 Vだったことを示します。
@@ -140,6 +146,8 @@ PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記
 PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm`、`preview-profiles-listening.ppm`、`preview-profiles-offer.ppm` は `--measurement` にそれぞれ `--profiles-page`、`--profiles-listening`、`--profiles-offer` を加えて生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-timeout.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-timeout`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`preview-sniff-ready.ppm`、`preview-sniff-log.ppm`、`preview-sniff-old.ppm`、`preview-sniff-alert.ppm` は `--measurement` にそれぞれ `--sniff-page`、`--sniff-log`、`--sniff-old`、`--sniff-alert` を加えて生成します。`preview-cable-ready.ppm`、`preview-cable-listening.ppm`、`preview-cable-summary.ppm`、`preview-cable-raw.ppm`、`preview-cable-flags.ppm`、`preview-cable-timeout.ppm` は `--measurement` にそれぞれ `--cable-page`、`--cable-listening`、`--cable-summary`、`--cable-raw`、`--cable-flags`、`--cable-timeout` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
 
 `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin` でローカルの更新ファイルを作ります。
+
+ケーブル単体の能動読取版は `python build.py --pd-cable-read` でビルドします。同じ比較画像を `cargo run --offline --features pd-cable-read --bin preview` で `build/pd-cable-read` に生成し、`--measurement --profiles-ui --cable-vbus` で `preview-cable-vbus.ppm` も追加します。更新ファイルは `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_3.0.3.bin` で作ります。
 
 **RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
 

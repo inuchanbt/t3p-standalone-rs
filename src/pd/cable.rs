@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 use super::{BadFrame, SOP_TOKEN, SOP1_TOKEN, checked_fifo};
 
-/// Receive-only SOP' Discover Identity capture. Ordinary SOP frames are
-/// still delivered by the PHY while SOP' reception is enabled.
+/// Decode SOP' Discover Identity replies from a passive or active read.
+/// Ordinary SOP frames can still be delivered while SOP' reception is enabled.
 #[derive(Clone, Copy, Default)]
 pub struct CableCapture {
     pub(crate) identity: Option<CableIdentity>,

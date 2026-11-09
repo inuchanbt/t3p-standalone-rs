@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "t3p_meter.h"
+#ifdef T3P_PD_CABLE_READ
+#include "t3p_pd.h"
+#endif
 #ifdef T3P_PD_RD_TEST
 #include "t3p_rd_test.h"
 #endif
@@ -176,6 +179,28 @@ static int pd_write_register(struct t3p_meter_bus *b, uint8_t reg, uint8_t value
 int t3p_pd_rx_read(struct t3p_meter_bus *b, uint8_t reg, uint8_t *data, unsigned count)
 {
     return read_register(b, 0x44, reg, data, count);
+}
+#endif
+
+#ifdef T3P_PD_CABLE_READ
+int t3p_pd_cable_write(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
+{
+    return pd_write_register(b, reg, value);
+}
+
+int t3p_pd_send_identity(struct t3p_meter_bus *b)
+{
+    static const uint8_t tokens[] = {
+        0x12, 0x12, 0x1b, 0x1b,          /* SOP' ordered set */
+        0x86, 0x8f, 0x10,                /* PACKSYM(6), PD 3.x VDM, ID 0 */
+        0x01, 0xa0, 0x00, 0xff,          /* USB-IF Discover Identity, SVDM 2.0 */
+        0xff, 0x14, 0xfe, 0xa1,          /* JAMCRC, EOP, TXOFF, TXON */
+    };
+    int error = start(b) || write_byte(b, 0x44) || write_byte(b, 0x43);
+    for (unsigned i = 0; i < sizeof(tokens) && !error; ++i)
+        error = write_byte(b, tokens[i]);
+    stop(b);
+    return error ? -1 : 0;
 }
 #endif
 
