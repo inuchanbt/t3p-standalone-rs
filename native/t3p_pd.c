@@ -160,11 +160,16 @@ void t3p_pd_poll_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *b
 {
     /* Catch up on queued EPR or sniff traffic without a display strip or sleep
      * between records. Bound work so other tasks still run regularly. */
+    unsigned consumed = 0;
     capture->catch_up = 0;
     for (unsigned i = 0; i < RX_BURST_LIMIT; ++i) {
-        if (!poll_one(capture, bus, now) || capture->mode == T3P_PD_SPR)
-            break;
-        if (i + 1 == RX_BURST_LIMIT && capture->state == T3P_PD_LISTENING)
-            capture->catch_up = 1;
+        if (!poll_one(capture, bus, now)) break;
+        ++consumed;
+        if (capture->mode == T3P_PD_SPR) break;
     }
+    /* A follow-up can arrive just after the last status read even when the
+     * burst limit was not reached. Give it one immediate retry; a subsequent
+     * empty poll restores the normal delay and the timer-stall check. */
+    if (consumed && capture->mode != T3P_PD_SPR && capture->state == T3P_PD_LISTENING)
+        capture->catch_up = 1;
 }

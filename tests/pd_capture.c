@@ -125,7 +125,9 @@ int main(void)
     t3p_pd_poll_capture(&pd, &bus, 12002);
     assert(records == epr_before + 4 && phy.queued == 1 && pd.state == T3P_PD_LISTENING && pd.catch_up);
     t3p_pd_poll_capture(&pd, &bus, 12002);
-    assert(records == epr_before + 5 && phy.queued == 0 && pd.state == T3P_PD_LISTENING && !pd.catch_up);
+    assert(records == epr_before + 5 && phy.queued == 0 && pd.state == T3P_PD_LISTENING && pd.catch_up);
+    t3p_pd_poll_capture(&pd, &bus, 12002);
+    assert(!pd.catch_up); /* An empty retry resumes normal waiting. */
 
     phy.consumed = 0;
     phy.registers[0x41] = 0x08;
@@ -177,7 +179,9 @@ int main(void)
     t3p_pd_poll_capture(&pd, &bus, 44002);
     assert(records == before + 4 && phy.queued == 1 && pd.state == T3P_PD_LISTENING && pd.catch_up);
     t3p_pd_poll_capture(&pd, &bus, 44002);
-    assert(records == before + 5 && phy.queued == 0 && pd.state == T3P_PD_LISTENING && !pd.catch_up);
+    assert(records == before + 5 && phy.queued == 0 && pd.state == T3P_PD_LISTENING && pd.catch_up);
+    t3p_pd_poll_capture(&pd, &bus, 44002);
+    assert(!pd.catch_up);
 
     /* A CRC completion seen while CC is still active is retained until idle. */
     phy.consumed = 0;
@@ -208,7 +212,9 @@ int main(void)
     phy.registers[0x42] = 0x18; /* latched FIFO alert and CRC completion */
     before = records;
     t3p_pd_poll_capture(&pd, &bus, 75000);
-    assert(pd.state == T3P_PD_LISTENING && pd.fifo_warning && records == before + 1);
+    assert(pd.state == T3P_PD_LISTENING && pd.fifo_warning && records == before + 1 && pd.catch_up);
+    t3p_pd_poll_capture(&pd, &bus, 75000);
+    assert(pd.state == T3P_PD_LISTENING && !pd.catch_up);
 
     /* An actual RX_FULL snapshot still stops; restarting clears the warning. */
     t3p_pd_start_capture(&pd, &bus, 76000, T3P_PD_SNIFF);
@@ -217,5 +223,16 @@ int main(void)
     t3p_pd_poll_capture(&pd, &bus, 76000);
     assert(pd.state == T3P_PD_FIFO_FULL && pd.fifo_warning);
     assert(phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
+
+    /* The immediate retry applies only to EPR and sniff, not SPR. */
+    t3p_pd_start_capture(&pd, &bus, 77000, T3P_PD_SPR);
+    assert(pd.state == T3P_PD_LISTENING);
+    phy.consumed = 0;
+    phy.queued = 1;
+    phy.registers[0x41] = 0x08;
+    phy.registers[0x42] = 0x10;
+    before = records;
+    t3p_pd_poll_capture(&pd, &bus, 77000);
+    assert(pd.state == T3P_PD_LISTENING && records == before + 1 && !pd.catch_up);
     return 0;
 }
