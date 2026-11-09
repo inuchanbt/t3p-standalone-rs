@@ -58,7 +58,9 @@ CC1 の実機試験でも、T3P に同じ識別情報が表示されました。
 
 `python build.py --pd-ack-test` でビルドすると同じ位置に **PD ACK TEST** が出ます。接続とボタン操作は上の Rd 試験と同じです。短押し後、FUSB302B 互換のコントローラーがシンクとして、有効な SOP パケットに自動で GoodCRC を返します。3秒以内に 4.5〜5.5 V、CRC が一致する `Source_Capabilities`、送信を示す `I_GCRCSENT` の3つがそろうと `PD ACK SEEN` になります。画面には提示された PDO 数と、GoodCRC の送信を検出したかを表示します。今回は最初の提示への応答を検証します。5 V の PD 契約と情報照会は次の段階です。
 
-実機の初回は 5.085 V、PDO 5件で `PD ACK SEEN` となりました。CY4500-EPR でも最初の `Source_Capabilities` の終了から 78 µs 後に、同じメッセージ ID の SOP GoodCRC を確認しました。再試行では同じ電圧で `NO SRC CAPS` となり、アナライザーでは `Source_Capabilities` が繰り返され、SOP GoodCRC は観測されませんでした。V2 は試行ごとに `PD_RESET` でコントローラー内部の PD 送受信回路を初期化してから、受信 FIFO をクリアして GoodCRC の自動応答を有効にします。V2 の繰り返し動作は実機確認待ちです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+V1 の実機試験では、初回は 5.085 V、PDO 5件で `PD ACK SEEN` となりました。CY4500-EPR でも最初の `Source_Capabilities` の終了から 78 µs 後に、同じメッセージ ID の SOP GoodCRC を確認しました。再試行では同じ電圧で `NO SRC CAPS` となり、アナライザーでは `Source_Capabilities` が繰り返され、SOP GoodCRC は観測されませんでした。V2 は試行ごとに `PD_RESET` でコントローラー内部の PD 送受信回路を初期化してから、受信 FIFO をクリアして GoodCRC の自動応答を有効にします。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+
+V2 の実機試験では、繰り返し試行して毎回 `PD ACK SEEN` と `SRC PDO: 5` が表示されました。そのうち1回の再試行を CY4500-EPR で記録し、PDO 5件を載せた `Source_Capabilities`（メッセージ ID 0）の終了から 78 µs 後に、同じ ID の SOP GoodCRC を確認しました。
 
 ## 実機での検証
 

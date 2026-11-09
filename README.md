@@ -58,7 +58,9 @@ On hardware with `PD_RD_TEST_V2`, a double press with the source already supplyi
 
 Build with `python build.py --pd-ack-test` to open **PD ACK TEST** in the same position. Use the Rd test connection and button sequence above. After the short press, the FUSB302B-compatible controller automatically answers valid SOP packets with GoodCRC as a sink. `PD ACK SEEN` requires a 4.5–5.5 V reading, a CRC-checked `Source_Capabilities` message and the controller's `I_GCRCSENT` flag within three seconds. The screen shows the number of offered PDOs and whether the controller reported sending a GoodCRC. This test covers the response to the initial offer. Establishing a 5 V PD contract and sending information queries are separate steps.
 
-The first hardware attempt showed `PD ACK SEEN` at 5.085 V with five PDOs. The CY4500-EPR trace showed a matching SOP GoodCRC 78 µs after the end of the initial `Source_Capabilities`. A later attempt showed `NO SRC CAPS` at the same voltage while the analyzer saw repeated `Source_Capabilities` and no SOP GoodCRC. V2 resets the controller's local PD transmit and receive logic with `PD_RESET` before flushing RX and enabling GoodCRC on every attempt. Repeatability with V2 is pending hardware verification. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+The first V1 hardware attempt showed `PD ACK SEEN` at 5.085 V with five PDOs. The CY4500-EPR trace showed a matching SOP GoodCRC 78 µs after the end of the initial `Source_Capabilities`. A later attempt showed `NO SRC CAPS` at the same voltage while the analyzer saw repeated `Source_Capabilities` and no SOP GoodCRC. V2 resets the controller's local PD transmit and receive logic with `PD_RESET` before flushing RX and enabling GoodCRC on every attempt. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+
+Repeated V2 hardware trials showed `PD ACK SEEN` and `SRC PDO: 5` on every attempt. The CY4500-EPR recorded one of those retries. It showed a five-PDO `Source_Capabilities` (message ID 0) followed by a matching SOP GoodCRC 78 µs after the offer ended.
 
 ## Hardware bring-up
 
