@@ -58,7 +58,9 @@ V3 は Identity の応答に応じて追加の問い合わせを行います。
 
 - Modal 対応を広告したケーブルには Discover SVIDs と各 SVID の Discover Modes を送ります。最大32種類の SVID、最後の SVID 応答の生データ、各 SVID の VDO をオブジェクト位置順に表示します。SVID 一覧の続きは最大6ページまで読み、上限に達すると `LIST LIMIT` を表示します。
 - PD 3.x のケーブルには Get Manufacturer Info を送ります。メーカー名とこの応答の VID/PID は Identity の値と分けて表示します。PD 3.x のアクティブケーブルには Get Status も送り、温度とシャットダウン状態を表示します。解読した Active Cable VDO が第2プラグのコントローラーを広告していれば、SOP″ を Soft Reset で同期してから、そのコントローラーにも Get Status を送ります。
-- 各ページに `ACK`、`NAK`、`NOT SUPPORTED`、`NO GOODCRC`、`NO REPLY` などを表示します。ケーブルによって返す情報は異なります。後続の問い合わせが失敗しても、PHY の設定を復元できれば取得済みの情報は確認できます。V3 の追加分はホストとシミュレーターで検証し、実機確認はこれからです。 [KWS-X1 の CABLE メニュー](https://github.com/kralonur/kws-x1-standalone-rs#16-cable) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
+- 各ページに `ACK`、`NAK`、`NOT SUPPORTED`、`NO GOODCRC`、`NO REPLY` などを表示します。ケーブルによって返す情報は異なります。後続の問い合わせが失敗しても、PHY の設定を復元できれば取得済みの情報は確認できます。 [KWS-X1 の CABLE メニュー](https://github.com/kralonur/kws-x1-standalone-rs#16-cable) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
+
+T3P 実機で住友のパッシブケーブル単体（`20C2/0A14`）を読み取れました。SVID 一覧の `1E4E` と `8087` はどちらも Discover Modes に `ACK` を返し、モード VDO はそれぞれ `9031011C`、`00030001` でした。Manufacturer Info の応答は `1E4E/0903` と `eEver`（画面表示は `EEVER`）でした。状態画面では SOP′ が `PASSIVE`、SOP″ が `NOT PRESENT` / `NOT QUERIED` と表示されました。アクティブケーブルの Get Status と SOP″ 通信はシミュレーターで検証済みで、実機確認が残っています。
 
 ## CC1 の Rd 接続試験
 
