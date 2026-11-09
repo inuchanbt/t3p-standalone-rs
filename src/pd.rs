@@ -9,7 +9,6 @@ pub(crate) const SNIFF_PAGE: u32 = 7;
 pub(crate) const CABLE_PAGE: u32 = 8;
 pub(crate) const PD_PAGE_COUNT: u32 = CABLE_PAGE + 1;
 pub(crate) const CABLE_MODE: u32 = 3;
-pub(crate) const CABLE_SECTIONS: u8 = 3;
 const SOP_TOKEN: u8 = 7;
 const SOP1_TOKEN: u8 = 6;
 
@@ -515,7 +514,7 @@ pub(crate) struct Profiles {
 }
 
 impl Profiles {
-    pub(crate) fn status(self, mode: u32) -> &'static [u8] {
+    pub(crate) fn status(&self, mode: u32) -> &'static [u8] {
         if matches!(self.state, 4 | 5 | 9 | 16) {
             return match self.state {
                 4 => b"CONFIG MISMATCH",
@@ -688,7 +687,11 @@ mod tests {
         let mut cable = CableCapture::new();
         assert_eq!(cable.push(&reply), Ok(true));
         assert_eq!(cable.identity.unwrap().words()[0], 0xff00_8041);
-        assert!(cable.identity.unwrap().vdo().is_none());
+        let id = cable.identity.unwrap();
+        assert!(id.pd2());
+        let legacy = id.vdo().unwrap();
+        assert_eq!((legacy.current, legacy.latency), (2, 1));
+        assert!(!legacy.epr);
 
         reply[1] = 0x8f;
         reply[4] = 0xa8;

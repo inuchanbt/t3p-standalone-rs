@@ -304,6 +304,31 @@ def main():
                 check_cable("no-ra")
                 cpu.call(symbols["meter_pd_status"], [1, 1, 3])
                 check_cable("listening")
+                for line in (ROOT / "tests/cable_scan.hex").read_text(encoding="ascii").splitlines():
+                    if line.startswith("#"):
+                        continue
+                    query, index, expected, *payload = line.split()
+                    query, index, expected = int(query), int(index), int(expected)
+                    if payload:
+                        packet = bytes.fromhex(" ".join(payload))
+                        cpu.mem.write(strip, packet)
+                        if cpu.call(symbols["meter_pd_cable_reply"],
+                                    [query, index, strip, len(packet)])[0] != expected:
+                            raise ValueError(f"Pi32v2 misclassified cable query {query}, index {index}")
+                    if expected:
+                        cpu.call(symbols["meter_pd_cable_result"], [query, index, expected])
+                if cpu.call(symbols["meter_pd_cable_parameters"], [])[0] != 0x2081:
+                    raise ValueError("Pi32v2 decoded the wrong cable query parameters")
+                for index, svid in enumerate((0x1e4e, 0x8087, 0)):
+                    if cpu.call(symbols["meter_pd_cable_svid"], [index])[0] != svid:
+                        raise ValueError("Pi32v2 decoded the wrong cable SVID list")
+                cpu.call(symbols["meter_pd_status"], [2, 1, 3])
+                for section in range(10):
+                    if section in (0, 6, 8):
+                        check_cable(f"scan-{section}")
+                    if section < 9:
+                        cpu.call(symbols["meter_next_page"], [])
+                print("Pi32v2 active cable scan, SVID Modes and manufacturer views match")
             cpu.call(symbols["meter_long_press"], [])
             # Compare the overview with the same protocol status as its host reference.
             cpu.call(symbols["meter_pd_status"], [0, 0, 0])

@@ -23,8 +23,8 @@ mod settings {
 }
 
 use energy::{Totals, Tracker};
-use pd::{CABLE_SECTIONS, PD_PAGE_COUNT, PROFILES_PAGE, Profiles};
 pub use pd::{CableCapture, EprCaps, EprCapture, EprEvent, PdSniff, SourceCaps};
+use pd::{PD_PAGE_COUNT, PROFILES_PAGE, Profiles};
 use power_history::{GraphTrace, GraphWindow, History, Sample};
 use settings::TimerMode;
 
@@ -155,10 +155,10 @@ impl Overview {
         }
     }
 
-    pub fn set_pd_cable(&mut self, capture: CableCapture, section: u8) {
+    pub fn set_pd_cable(&mut self, capture: &CableCapture, section: u8) {
         if let Some(ref mut profiles) = self.pd_profiles {
-            profiles.cable = capture;
-            profiles.cable_section = section.min(CABLE_SECTIONS - 1);
+            profiles.cable = *capture;
+            profiles.cable_section = section.min(capture.sections() - 1);
         }
     }
 

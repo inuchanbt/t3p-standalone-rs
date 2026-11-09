@@ -25,6 +25,7 @@
 #define SOURCE_CC1_AUTO_CRC 0xb5 /* Source/DFP for SOP, Rev 2.0 GoodCRC, TX on CC1 */
 #define HOST_CUR_330UA_MASKED 0x2c
 #define ENSOP1 0x01
+#define ENSOP2 0x02
 #define TX_FLUSH 0x40
 #define RX_FLUSH 0x04
 #define PD_RESET 0x02
@@ -58,11 +59,16 @@
 #define VCONN_SETTLE_MS 55u
 #define VCONN_OFF_MS 230u
 #define RESPONSE_MS 35u
+#define VDM_BUSY_MS 50u
+#define SVID_PAGE_LIMIT 6u
+#define PD2 0x40u
+#define PD3 0x80u
+#define SOP1_TOKEN 6u
+#define SOP2_TOKEN 5u
 
 /* Indices of the consecutive registers read starting at INTERRUPTA. */
 enum { IRQ_A, IRQ_B, LIVE0, LIVE1, IRQ, STATUS_COUNT };
 
-int32_t meter_pd_record(const uint8_t *, uint32_t, uint32_t, uint32_t);
 void meter_pd_cable_cc(uint32_t cc1, uint32_t cc2);
 
 static int configure(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
@@ -158,6 +164,182 @@ static enum t3p_pd_state read_status(struct t3p_meter_bus *bus, uint8_t status[S
     return T3P_PD_READY;
 }
 
+struct cable_link {
+    uint16_t revision, svdm;
+    uint8_t id;
+    unsigned second;
+};
+
+static enum t3p_pd_state wait_idle(struct t3p_bsp *board, struct t3p_meter_bus *bus,
+                                  unsigned settle_ms)
+{
+    uint32_t started = t3p_bsp_millis(board);
+    for (;;) {
+        uint8_t status[STATUS_COUNT];
+        enum t3p_pd_state state = read_status(bus, status);
+        if (state != T3P_PD_READY) return state;
+        if (!(status[LIVE1] & RX_EMPTY)) return T3P_PD_CABLE_CC_BUSY;
+        unsigned elapsed = t3p_bsp_millis(board) - started;
+        if (elapsed >= settle_ms && !(status[LIVE0] & ACTIVITY) && (status[LIVE1] & TX_IDLE))
+            return status[LIVE0] & COMP ? T3P_PD_READY : T3P_PD_CABLE_CC_BUSY;
+        if (elapsed >= settle_ms + 5u) return T3P_PD_CABLE_CC_BUSY;
+        if (t3p_bsp_delay(board, 1)) return T3P_PD_TIMER_ERROR;
+    }
+}
+
+static int send_query(struct t3p_meter_bus *bus, const struct cable_link *link,
+                      enum t3p_cable_query query, uint32_t index)
+{
+    uint16_t header = link->revision | ((uint16_t)link->id << 9);
+    uint8_t payload[4];
+    unsigned length = 0;
+    switch (query) {
+    case CABLE_ID:
+    case CABLE_SVIDS:
+    case CABLE_MODES: {
+        uint16_t svid = query == CABLE_MODES ? meter_pd_cable_svid(index) : 0xff00;
+        uint16_t vdm = 0x8000 | link->svdm | (query + 1);
+        header |= 0x100f; /* One VDO, Vendor_Defined. */
+        payload[0] = (uint8_t)vdm;
+        payload[1] = (uint8_t)(vdm >> 8);
+        payload[2] = (uint8_t)svid;
+        payload[3] = (uint8_t)(svid >> 8);
+        length = sizeof(payload);
+        break;
+    }
+    case CABLE_MFR:
+        header |= 0x9006; /* Get_Manufacturer_Info, one data object. */
+        payload[0] = 2;
+        payload[1] = 0x80; /* Chunk 0, two bytes of data. */
+        payload[2] = 0;    /* Target = port/cable plug */
+        payload[3] = 0;    /* Reference = 0 */
+        length = sizeof(payload);
+        break;
+    case CABLE_SOP2_RESET:
+        header |= 13; /* Soft_Reset */
+        break;
+    case CABLE_STATUS:
+    case CABLE_SOP2_STATUS:
+        header |= 18; /* Get_Status */
+        break;
+    }
+    return t3p_pd_cable_tx(bus, link->second, header, payload, length);
+}
+
+static enum t3p_pd_state receive_reply(struct t3p_bsp *board, struct t3p_meter_bus *bus,
+                                       struct cable_link *link, enum t3p_cable_query query,
+                                       uint32_t index, enum t3p_cable_result *result)
+{
+    uint32_t started = t3p_bsp_millis(board);
+    unsigned acknowledged = 0, rx_ready = 0;
+    unsigned ignored = 0;
+    uint8_t status[STATUS_COUNT];
+    do {
+        enum t3p_pd_state state = read_status(bus, status);
+        if (state != T3P_PD_READY) return state;
+        acknowledged |= status[IRQ_A] & I_TXSENT;
+        rx_ready |= (status[IRQ_A] & I_TXSENT) || (status[IRQ_B] & I_GCRCSENT) ||
+                    (status[IRQ] & I_CRC_CHK) || (status[LIVE0] & CRC_CHK);
+        if (rx_ready && !(status[LIVE1] & RX_EMPTY) && !(status[LIVE0] & ACTIVITY)) {
+            uint8_t frame[35];
+            if (t3p_pd_rx_read(bus, FIFO, frame, 3)) return T3P_PD_BUS_ERROR;
+            if (frame[0] >> 5 != (link->second ? SOP2_TOKEN : SOP1_TOKEN))
+                return T3P_PD_CABLE_CC_BUSY;
+            unsigned body = 4u + 4u * ((frame[2] >> 4) & 7u);
+            if (t3p_pd_rx_read(bus, FIFO, frame + 3, body)) return T3P_PD_BUS_ERROR;
+            int32_t reply = meter_pd_cable_reply(query, index, frame, 3 + body);
+            if (reply < 0) return T3P_PD_BAD_FRAME;
+            if (reply != CABLE_IGNORE) {
+                *result = (enum t3p_cable_result)reply;
+                link->id = (link->id + 1) & 7;
+                return T3P_PD_READY;
+            }
+            /* Another complete record can already be queued behind GoodCRC. */
+            if (++ignored == 16) return T3P_PD_CABLE_CC_BUSY;
+            continue;
+        }
+        if (t3p_bsp_delay(board, 1)) return T3P_PD_TIMER_ERROR;
+    } while (t3p_bsp_millis(board) - started < RESPONSE_MS);
+    if (acknowledged) link->id = (link->id + 1) & 7;
+    *result = acknowledged ? CABLE_NO_REPLY : CABLE_NO_CRC;
+    return T3P_PD_READY;
+}
+
+static enum t3p_pd_state query_cable(struct t3p_bsp *board, struct t3p_meter_bus *bus,
+                                     struct cable_link *link, enum t3p_cable_query query,
+                                     uint32_t index, enum t3p_cable_result *result)
+{
+    for (unsigned attempt = 0; attempt < 2; ++attempt) {
+        enum t3p_pd_state state = wait_idle(board, bus, attempt ? VDM_BUSY_MS : 0);
+        if (state != T3P_PD_READY) return state;
+        if (send_query(bus, link, query, index)) return T3P_PD_BUS_ERROR;
+        state = receive_reply(board, bus, link, query, index, result);
+        if (state != T3P_PD_READY) return state;
+        meter_pd_cable_result(query, index, *result);
+        if (*result != CABLE_BUSY) break;
+    }
+    return T3P_PD_READY;
+}
+
+static enum t3p_pd_state discover(struct t3p_bsp *board, struct t3p_meter_bus *bus)
+{
+    struct cable_link link = { .revision = PD3, .svdm = 0x2000 };
+    enum t3p_cable_result result;
+    enum t3p_pd_state state = query_cable(board, bus, &link, CABLE_ID, 0, &result);
+    if (state != T3P_PD_READY) return state;
+    if (result != CABLE_ACK && result != CABLE_BUSY) {
+        /* Some older markers only answer a PD 2.0 Discover Identity. */
+        link.revision = PD2;
+        link.svdm = 0;
+        state = query_cable(board, bus, &link, CABLE_ID, 0, &result);
+        if (state != T3P_PD_READY) return state;
+    }
+    if (result != CABLE_ACK) {
+        return result == CABLE_NO_CRC && !link.id ? T3P_PD_TIMEOUT : T3P_PD_CABLE_NO_ID;
+    }
+
+    uint32_t parameters = meter_pd_cable_parameters();
+    link.revision = parameters & 0xc0;
+    link.svdm = parameters & 0x7800;
+    if (parameters & CABLE_MODAL) {
+        for (unsigned page = 0; page < SVID_PAGE_LIMIT; ++page) {
+            state = query_cable(board, bus, &link, CABLE_SVIDS, 0, &result);
+            if (state != T3P_PD_READY) return state;
+            if (result != CABLE_MORE) break;
+        }
+        if (result == CABLE_MORE) meter_pd_cable_result(CABLE_SVIDS, 0, CABLE_LIMIT);
+        for (unsigned i = 0; meter_pd_cable_svid(i); ++i) {
+            state = query_cable(board, bus, &link, CABLE_MODES, i, &result);
+            if (state != T3P_PD_READY) return state;
+        }
+    }
+    if (link.revision != PD3) goto done;
+
+    state = query_cable(board, bus, &link, CABLE_MFR, 0, &result);
+    if (state != T3P_PD_READY) return state;
+    if (parameters & CABLE_ACTIVE) {
+        state = query_cable(board, bus, &link, CABLE_STATUS, 0, &result);
+        if (state != T3P_PD_READY) return state;
+    }
+    if (parameters & CABLE_SECOND) {
+        state = wait_idle(board, bus, 0);
+        if (state != T3P_PD_READY) return state;
+        if (configure(bus, CONTROL1, ENSOP2)) return T3P_PD_BUS_ERROR;
+        link.second = 1;
+        link.id = 0;
+        state = query_cable(board, bus, &link, CABLE_SOP2_RESET, 0, &result);
+        if (state != T3P_PD_READY) return state;
+        if (result == CABLE_ACK) {
+            state = query_cable(board, bus, &link, CABLE_SOP2_STATUS, 0, &result);
+            if (state != T3P_PD_READY) return state;
+        }
+    }
+done:
+    /* Give the controller time to finish the last automatic GoodCRC. */
+    state = wait_idle(board, bus, 0);
+    return state == T3P_PD_READY ? T3P_PD_CAPTURED : state;
+}
+
 static enum t3p_pd_state exchange(struct t3p_bsp *board, struct t3p_meter_bus *bus,
                                   unsigned *vconn_attempted)
 {
@@ -191,30 +373,8 @@ static enum t3p_pd_state exchange(struct t3p_bsp *board, struct t3p_meter_bus *b
         if (t3p_bsp_delay(board, 1)) return T3P_PD_TIMER_ERROR;
     } while (t3p_bsp_millis(board) - started < VCONN_SETTLE_MS);
 
-    if (configure(bus, SWITCHES1, SOURCE_CC1_AUTO_CRC) || t3p_pd_send_identity(bus))
-        return T3P_PD_BUS_ERROR;
-    started = t3p_bsp_millis(board);
-    unsigned acknowledged = 0, rx_ready = 0;
-    do {
-        state = read_status(bus, status);
-        if (state != T3P_PD_READY) return state;
-        acknowledged |= status[IRQ_A] & I_TXSENT;
-        rx_ready |= (status[IRQ_B] & I_GCRCSENT) || (status[IRQ] & I_CRC_CHK) ||
-                    (status[LIVE0] & CRC_CHK);
-        if (rx_ready && !(status[LIVE1] & RX_EMPTY) && !(status[LIVE0] & ACTIVITY)) {
-            uint8_t frame[35];
-            if (t3p_pd_rx_read(bus, FIFO, frame, 3)) return T3P_PD_BUS_ERROR;
-            if (frame[0] >> 5 != 6u) return T3P_PD_CABLE_CC_BUSY;
-            unsigned body = 4u + 4u * ((frame[2] >> 4) & 7u);
-            if (t3p_pd_rx_read(bus, FIFO, frame + 3, body)) return T3P_PD_BUS_ERROR;
-            int32_t result = meter_pd_record(frame, 3 + body, T3P_PD_CABLE, t3p_bsp_millis(board));
-            if (result > 0) return T3P_PD_CAPTURED;
-            if (result < 0) return T3P_PD_BAD_FRAME;
-            rx_ready = 0;
-        }
-        if (t3p_bsp_delay(board, 1)) return T3P_PD_TIMER_ERROR;
-    } while (t3p_bsp_millis(board) - started < RESPONSE_MS);
-    return acknowledged ? T3P_PD_CABLE_NO_ID : T3P_PD_TIMEOUT;
+    if (configure(bus, SWITCHES1, SOURCE_CC1_AUTO_CRC)) return T3P_PD_BUS_ERROR;
+    return discover(board, bus);
 }
 
 enum t3p_pd_state t3p_cable_read(struct t3p_bsp *board, struct t3p_meter_bus *bus)

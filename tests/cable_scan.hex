@@ -1,0 +1,9 @@
+# Query, index, expected result, then an optional FIFO record.
+# Standalone Identity from CABLE_02. Subsequent packets are synthetic test data.
+0 0 0 c0 81 01 63 8b 46 14
+0 0 1 c0 8f 51 41 a0 00 ff c2 20 60 1c 00 00 00 00 10 03 14 0a 43 26 0a 46 79 15 22 7f
+1 0 1 c0 8f 33 42 a0 00 ff 4e 1e 87 80 00 00 00 00 e0 9f 20 63
+2 0 1 c0 8f 25 43 a0 4e 1e 1c 01 31 90 6f bf 86 1b
+2 1 0 c0 81 07 56 2e 25 fd
+2 1 9
+3 0 1 c0 87 b7 0a 80 4e 1e 03 09 65 45 76 65 72 00 94 67 be 5a

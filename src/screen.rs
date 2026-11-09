@@ -3,9 +3,7 @@ mod cable;
 #[cfg(feature = "pd-rd-test")]
 mod rd_test;
 
-use crate::pd::{
-    CABLE_PAGE, CABLE_SECTIONS, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, Pdo, Profiles, SNIFF_PAGE,
-};
+use crate::pd::{CABLE_PAGE, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, Pdo, Profiles, SNIFF_PAGE};
 use crate::{Overview, SIDE, STRIP_ROWS};
 
 const BG: u16 = 0x0000;
@@ -263,6 +261,7 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
             SNIFF_PAGE
                 if view
                     .pd_profiles
+                    .as_ref()
                     .and_then(|pd| pd.sniff)
                     .is_some_and(|sniff| sniff.start > 0) =>
             {
@@ -270,9 +269,10 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
             }
             SNIFF_PAGE => b"TAP NEXT 2X CAP HOLD EXIT",
             CABLE_PAGE
-                if view.pd_profiles.is_some_and(|pd| {
-                    pd.cable.captured() && pd.cable_section + 1 < CABLE_SECTIONS
-                }) =>
+                if view
+                    .pd_profiles
+                    .as_ref()
+                    .is_some_and(|pd| pd.cable_section + 1 < pd.cable.sections()) =>
             {
                 if cfg!(feature = "pd-cable-read") {
                     b"TAP MORE 2X READ HOLD EXIT"
@@ -394,7 +394,7 @@ fn overview(p: &mut Strip<'_>, view: &Overview) {
         } else {
             p.text(29, 196, b"-- -- -- -- --", 1, TEXT);
         }
-    } else if let Some(profiles) = view.pd_profiles {
+    } else if let Some(profiles) = &view.pd_profiles {
         p.text(14, 196, b"PD PROFILES", 1, AMPS);
         p.text(84, 196, profiles.status(profiles.mode), 1, TEXT);
     } else {
@@ -420,7 +420,7 @@ fn pd_number(
     x + (number.len() + suffix.len()) * 5 * scale
 }
 
-fn profiles(p: &mut Strip<'_>, pd: Profiles) {
+fn profiles(p: &mut Strip<'_>, pd: &Profiles) {
     p.text(8, 36, b"SPR OFFER", 1, WATTS);
     p.text(94, 36, pd.status(0), 1, TEXT);
     if pd.mode == 0 && pd.cc != 0 {
@@ -522,7 +522,7 @@ fn pd_count(p: &mut Strip<'_>, x: usize, y: usize, label: &[u8], value: u8, scal
     p.text(x + label.len() * 5 * scale, y, &digits, scale, TEXT);
 }
 
-fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
+fn epr_profiles(p: &mut Strip<'_>, pd: &Profiles) {
     p.text(8, 36, b"EPR PDO 8-11", 1, PURPLE);
     p.text(94, 36, pd.status(1), 1, TEXT);
     if pd.mode == 1 && pd.cc != 0 {
@@ -624,7 +624,7 @@ fn sniff_count(p: &mut Strip<'_>, x: usize, y: usize, label: &[u8], value: u16) 
     p.text(x + label.len() * 5, y, &digits, 1, TEXT);
 }
 
-fn pd_sniff(p: &mut Strip<'_>, pd: Profiles) {
+fn pd_sniff(p: &mut Strip<'_>, pd: &Profiles) {
     p.text(8, 35, b"PD LOG", 1, AMPS);
     p.text(69, 35, pd.status(2), 1, TEXT);
     if pd.mode == 2 && pd.cc != 0 {
@@ -858,22 +858,22 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
         0 => overview(&mut p, view),
         1 => energy(&mut p, view),
         PROFILES_PAGE => {
-            if let Some(pd) = view.pd_profiles {
+            if let Some(pd) = &view.pd_profiles {
                 profiles(&mut p, pd);
             }
         }
         EPR_PAGE => {
-            if let Some(pd) = view.pd_profiles {
+            if let Some(pd) = &view.pd_profiles {
                 epr_profiles(&mut p, pd);
             }
         }
         SNIFF_PAGE => {
-            if let Some(pd) = view.pd_profiles {
+            if let Some(pd) = &view.pd_profiles {
                 pd_sniff(&mut p, pd);
             }
         }
         CABLE_PAGE => {
-            if let Some(pd) = view.pd_profiles {
+            if let Some(pd) = &view.pd_profiles {
                 cable::render(&mut p, pd);
             }
         }

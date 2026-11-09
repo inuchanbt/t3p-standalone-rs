@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #[cfg(feature = "pd-profiles")]
-use crate::pd::{CABLE_MODE, CABLE_SECTIONS};
+use crate::pd::CABLE_MODE;
 use crate::pd::{CABLE_PAGE, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, SNIFF_PAGE};
 use crate::{Meter, Overview, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
 
@@ -176,7 +176,7 @@ unsafe extern "C" fn meter_next_page() {
         #[cfg(feature = "pd-profiles")]
         if *(&raw const PAGE) == CABLE_PAGE {
             let section = &mut *(&raw mut PD_CABLE_SECTION);
-            if (&*(&raw const PD_CABLE)).captured() && *section + 1 < CABLE_SECTIONS {
+            if *section + 1 < (&*(&raw const PD_CABLE)).sections() {
                 *section += 1;
                 return;
             }
@@ -260,6 +260,43 @@ unsafe extern "C" fn meter_pd_cable_cc(cc1: u32, cc2: u32) {
     unsafe { (&mut *(&raw mut PD_CABLE)).set_cc_probe(cc1, cc2) };
 }
 
+#[cfg(feature = "pd-cable-read")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_pd_cable_reply(
+    query: u32,
+    index: u32,
+    frame: *const u8,
+    length: u32,
+) -> i32 {
+    if frame.is_null() || !(7..=35).contains(&length) {
+        return -1;
+    }
+    // The native reader supplies a complete record from its live 35-byte buffer.
+    let bytes = unsafe { core::slice::from_raw_parts(frame, length as usize) };
+    match unsafe { (&mut *(&raw mut PD_CABLE)).record_query_reply(query, index, bytes) } {
+        Ok(result) => result as i32,
+        Err(_) => -1,
+    }
+}
+
+#[cfg(feature = "pd-cable-read")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_pd_cable_result(query: u32, index: u32, result: u32) {
+    unsafe { (&mut *(&raw mut PD_CABLE)).record_query_result(query, index, result) };
+}
+
+#[cfg(feature = "pd-cable-read")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_pd_cable_parameters() -> u32 {
+    unsafe { (&*(&raw const PD_CABLE)).query_parameters() }
+}
+
+#[cfg(feature = "pd-cable-read")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_pd_cable_svid(index: u32) -> u32 {
+    u32::from(unsafe { (&*(&raw const PD_CABLE)).query_svid(index as usize) }.unwrap_or(0))
+}
+
 #[cfg(feature = "pd-profiles")]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_pd_record(frame: *const u8, length: u32, mode: u32, now: u32) -> i32 {
@@ -337,7 +374,7 @@ unsafe extern "C" fn meter_snapshot() {
             *(&raw const PD_SNIFF_OFFSET),
         );
         #[cfg(feature = "pd-profiles")]
-        view.set_pd_cable(*(&raw const PD_CABLE), *(&raw const PD_CABLE_SECTION));
+        view.set_pd_cable(&*(&raw const PD_CABLE), *(&raw const PD_CABLE_SECTION));
         view.set_page(*(&raw const PAGE));
         view.set_graph_window(*(&raw const GRAPH_WINDOW));
         (&*(&raw const METER)).overview(view);

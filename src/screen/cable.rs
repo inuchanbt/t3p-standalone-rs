@@ -2,19 +2,39 @@
 use super::{AMPS, GRID, MUTED, PANEL, Strip, TEXT, VOLTS, sniff_count};
 use crate::pd::{CABLE_MODE, Profiles, cable::CableIdentity};
 
-pub(super) fn render(p: &mut Strip<'_>, pd: Profiles) {
+#[cfg(feature = "pd-cable-read")]
+mod detail;
+
+pub(super) fn render(p: &mut Strip<'_>, pd: &Profiles) {
     let section = pd.cable_section;
-    p.text(
-        8,
-        35,
-        match section {
-            1 => b"RAW 2/3",
-            2 => b"FLAGS 3/3",
-            _ => b"SUMMARY 1/3",
-        },
-        1,
-        AMPS,
-    );
+    let title: &[u8] = match section {
+        1 => b"RAW 2/3",
+        2 => b"FLAGS 3/3",
+        _ => b"SUMMARY 1/3",
+    };
+    #[cfg(feature = "pd-cable-read")]
+    let extra = pd.cable.extra_section(section);
+    #[cfg(feature = "pd-cable-read")]
+    let (title, gap) = if pd.cable.sections() > 3 {
+        let title = extra.map_or_else(
+            || match section {
+                1 => b"RAW" as &[u8],
+                2 => b"FLAGS",
+                _ => b"SUMMARY",
+            },
+            detail::title,
+        );
+        let digits = |n| [b'0' + n / 10, b'0' + n % 10];
+        let [a, b] = digits(section + 1);
+        let [c, d] = digits(pd.cable.sections());
+        p.text(180, 35, &[a, b, b'/', c, d], 1, MUTED);
+        (title, 20)
+    } else {
+        (title, 24)
+    };
+    #[cfg(not(feature = "pd-cable-read"))]
+    let gap = 24;
+    p.text(8, 35, title, 1, AMPS);
     p.text(80, 35, pd.status(CABLE_MODE), 1, TEXT);
     p.text(215, 35, b"CC1", 1, AMPS);
     sniff_count(p, 8, 207, b"SOP1 RX:", u16::from(pd.cable.sop_prime));
@@ -41,6 +61,17 @@ pub(super) fn render(p: &mut Strip<'_>, pd: Profiles) {
                 p.text(126, 176, b"CC2", 1, AMPS);
                 p.text(147, 172, &cc_voltage(cc2), 2, TEXT);
             }
+            #[cfg(feature = "pd-cable-read")]
+            if pd.cable.discovery.identity_result != crate::pd::cable::QueryResult::Ignore {
+                p.text(91, 207, b"ID:", 1, MUTED);
+                p.text(
+                    111,
+                    207,
+                    detail::result(pd.cable.discovery.identity_result),
+                    1,
+                    TEXT,
+                );
+            }
         } else {
             p.text(18, 73, b"E-MARKER RX", 2, AMPS);
             p.text(18, 109, b"WAIT FOR SOURCE TO QUERY CABLE", 1, TEXT);
@@ -60,10 +91,21 @@ pub(super) fn render(p: &mut Strip<'_>, pd: Profiles) {
         return;
     };
 
+    #[cfg(feature = "pd-cable-read")]
+    if let Some(page) = extra {
+        detail::render(p, &pd.cable.discovery, identity, page);
+        return;
+    }
     match section {
         1 => raw(p, identity),
         2 => flags(p, identity),
-        _ => summary(p, identity),
+        _ => {
+            summary(p, identity, gap);
+            #[cfg(feature = "pd-cable-read")]
+            if gap == 20 {
+                detail::summary(p, &pd.cable.discovery);
+            }
+        }
     }
 }
 
@@ -90,7 +132,8 @@ fn cc_voltage(code: u8) -> [u8; 6] {
 fn row(p: &mut Strip<'_>, y: usize, label: &[u8], value: &[u8], color: u16) {
     p.rect(8, y, 224, 17, PANEL);
     p.text(12, y + 5, label, 1, MUTED);
-    p.text(81, y + 2, value, 2, color);
+    let (offset, scale) = if value.len() > 15 { (5, 1) } else { (2, 2) };
+    p.text(81, y + offset, value, scale, color);
 }
 
 fn hex_digit(value: u32) -> u8 {
@@ -105,47 +148,54 @@ fn hex<const N: usize>(value: u32) -> [u8; N] {
     out
 }
 
-fn summary(p: &mut Strip<'_>, id: CableIdentity) {
+fn summary(p: &mut Strip<'_>, id: CableIdentity, gap: usize) {
     let words = id.words();
     let active = id.active();
     row(
         p,
         53,
         b"TYPE",
-        if active { b"ACTIVE" } else { b"PASSIVE" },
+        match (active, id.vdo().is_some_and(|vdo| vdo.plug == 3)) {
+            (true, true) => b"ACTIVE CAPTIVE",
+            (false, true) => b"PASSIVE CAPTIVE",
+            (true, false) => b"ACTIVE",
+            (false, false) => b"PASSIVE",
+        },
         AMPS,
     );
     let (vid, pid) = (hex::<4>(words[1]), hex::<4>(words[3] >> 16));
     let ids = [
         vid[0], vid[1], vid[2], vid[3], b'/', pid[0], pid[1], pid[2], pid[3],
     ];
-    row(p, 149, b"VID/PID", &ids, TEXT);
-    row(p, 173, b"XID", &hex::<8>(words[2]), TEXT);
+    row(p, 53 + gap * 4, b"VID/PID", &ids, TEXT);
+    row(p, 53 + gap * 5, b"XID", &hex::<8>(words[2]), TEXT);
     let Some(vdo) = id.vdo() else {
-        row(p, 77, b"VDO LAYOUT", b"RAW ONLY", VOLTS);
+        row(p, 53 + gap, b"VDO LAYOUT", b"RAW ONLY", VOLTS);
         return;
     };
-    let active_vdo2 = if active { words[5] } else { 0 };
+    let active_vdo2 = if active && !id.pd2() { words[5] } else { 0 };
+    let two_lanes = !active || active_vdo2 & 8 != 0;
     let speed: &[u8] = match vdo.speed {
         0 if active_vdo2 & (1 << 5) == 0 => b"USB 2.0 480MBPS",
         1 => b"USB 3.2 GEN1",
+        2 if id.pd2() => b"USB 3.2 GEN2",
         2 => match active_vdo2 & 0x110 {
             0 => b"USB3.2/USB4 G2",
             0x010 => b"USB4 GEN2",
             0x100 => b"USB 3.2 GEN2",
             _ => b"--",
         },
-        3 if !active => b"USB4 G3 40GBPS",
-        3 => b"USB4 GEN3",
-        4 => b"USB4 GEN4",
+        3 if !id.pd2() && two_lanes => b"USB4 G3 40GBPS",
+        3 if !id.pd2() => b"USB4 GEN3",
+        4 if !id.pd2() && two_lanes => b"USB4 G4 80GBPS",
+        4 if !id.pd2() => b"USB4 GEN4",
         _ => b"--",
     };
-    row(p, 77, b"USB", speed, AMPS);
+    row(p, 53 + gap, b"USB", speed, AMPS);
 
     let voltage: &[u8] = match vdo.voltage {
-        0 => b"20",
         3 => b"50",
-        _ => b"--",
+        _ => b"20",
     };
     let current = match vdo.current {
         1 => b'3',
@@ -157,12 +207,16 @@ fn summary(p: &mut Strip<'_>, id: CableIdentity) {
     ];
     let rating: &[u8] = if active && !vdo.vbus_through {
         b"NO VBUS"
+    } else if id.pd2() && vdo.current == 0 {
+        b"3A ASSUMED"
+    } else if id.pd2() {
+        &rating[4..6]
     } else if vdo.epr {
         &rating
     } else {
         &rating[..6]
     };
-    row(p, 101, b"RATING", rating, VOLTS);
+    row(p, 53 + gap * 2, b"RATING", rating, VOLTS);
     let length_range = [
         b'0' + vdo.latency.saturating_sub(1),
         b'-',
@@ -177,7 +231,7 @@ fn summary(p: &mut Strip<'_>, id: CableIdentity) {
         10 if active => b"300M",
         _ => b"--",
     };
-    row(p, 125, b"LENGTH EST", length, TEXT);
+    row(p, 53 + gap * 3, b"LENGTH EST", length, TEXT);
 }
 
 fn raw(p: &mut Strip<'_>, id: CableIdentity) {
@@ -235,7 +289,11 @@ fn flags(p: &mut Strip<'_>, id: CableIdentity) {
         p,
         107,
         b"HW / FW / VDO",
-        &codes(digit(vdo.hardware), digit(vdo.firmware), digit(vdo.version)),
+        &codes(
+            digit(vdo.hardware),
+            digit(vdo.firmware),
+            if id.pd2() { b'-' } else { digit(vdo.version) },
+        ),
         TEXT,
     );
     row(
@@ -244,7 +302,11 @@ fn flags(p: &mut Strip<'_>, id: CableIdentity) {
         b"PLUG/EPR/LAT",
         &codes(
             digit(vdo.plug),
-            digit(u8::from(vdo.epr)),
+            if id.pd2() {
+                b'-'
+            } else {
+                digit(u8::from(vdo.epr))
+            },
             digit(vdo.latency),
         ),
         TEXT,
@@ -255,7 +317,7 @@ fn flags(p: &mut Strip<'_>, id: CableIdentity) {
         b"TERM/VBUS/CUR",
         &codes(
             digit(vdo.termination),
-            digit(vdo.voltage),
+            if id.pd2() { b'-' } else { digit(vdo.voltage) },
             digit(vdo.current),
         ),
         TEXT,

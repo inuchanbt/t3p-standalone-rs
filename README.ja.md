@@ -40,7 +40,7 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 
 PD SNIFF の次にある **CABLE** で左ボタンをダブル押しすると、CC1 で最大30秒間待機します。HID 給電を続けたまま `LISTENING` を確認し、5 V の試験構成で e-marker 付きのケーブルを使って電源をつなぎ直します。電源側が VCONN を供給してケーブルに問い合わせます。T3P はパッシブまたはアクティブケーブルからの、CRC が一致した最初の SOP′ Discover Identity ACK を取得します。`SOP1 RX` は要求や GoodCRC も含む CRC 一致の SOP′ 受信件数で、上限は255件です。
 
-`CAPTURED` または `CAPTURE WARN` が出たら、短押しで **SUMMARY**（概要）、**RAW**（生データ）、**FLAGS**（ビットフィールド）の順に進み、最後に OVERVIEW に戻ります。概要はケーブルの種別、申告された USB 速度と電力定格、遅延からの長さの推定、VID/PID と XID を表示します。USB PD 3.x / SVDM 2.x のパッシブ Cable VDO 1.0 とアクティブ Cable VDO 1.3 を解読します。ほかの形式では識別情報と生データを確認できます。ダブル押しで取得し直し、長押しで OVERVIEW に戻ります。取得結果は RAM に保持します。
+`CAPTURED` または `CAPTURE WARN` が出たら、短押しで **SUMMARY**（概要）、**RAW**（生データ）、**FLAGS**（ビットフィールド）の順に進み、最後に OVERVIEW に戻ります。概要はケーブルの種別、申告された USB 速度と電力定格、遅延からの長さの推定、VID/PID と XID を表示します。PD 2.0 の旧 Cable VDO と、PD 3.x / SVDM 2.x のパッシブ VDO 1.0・アクティブ VDO 1.3 を解読します。ほかの形式では識別情報と生データを確認できます。ダブル押しで取得し直し、長押しで OVERVIEW に戻ります。取得結果は RAM に保持します。
 
 住友ケーブルを使った CY4500-EPR 記録の Discover Identity を再生し、パッシブ、USB4 Gen 3、50 V / 5 A EPR、VID/PID `20C2/0A14` と表示できることを確認しました。 [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery) · [KWS-X1 の CABLE メニュー](https://github.com/kralonur/kws-x1-standalone-rs#16-cable)
 
@@ -48,11 +48,17 @@ CC1 の実機試験でも、T3P に同じ識別情報が表示されました。
 
 ### ケーブル単体の能動読取試験
 
-`--pd-cable-read` 版では **CABLE** からケーブル単体の読取を試せます。T3P は側面の HID ポートから給電し、測定用のメス端子に e-marker 付きのケーブルを挿します。ケーブルの反対側と T3P の測定用オス端子は空けて、**CABLE** で左ボタンをダブル押しします。`CAPTURED` が出たら短押しで SUMMARY・RAW・FLAGS を確認できます。
+`--pd-cable-read` 版では **CABLE** からケーブル単体を読み取れます。T3P は側面の HID ポートから給電し、測定用のメス端子に e-marker 付きのケーブルを挿します。ケーブルの反対側と T3P の測定用オス端子は空けて、**CABLE** で左ボタンをダブル押しします。短押しで SUMMARY・RAW・FLAGS と番号付きの詳細ページを順に表示します。ダブル押しで再取得し、長押しで OVERVIEW に戻ります。
 
 最初の実機試験は、プラグの両向きで `NO RA ON CC2` で止まりました。改訂版は両方の CC を 330 µA でプルアップして調べ、検査後に読取が失敗した場合に CC1・CC2 の概算電圧を表示します。`HIGH` は測定上限の約 2.69 V を超えたこと、`LOW` は約 0.04 V を下回ったことを示します。CC1 が約 0.3 V で CC2 が `HIGH` なら、ケーブルの終端が CC1 側にある可能性があります。
 
-VBUS を確認し、CC2 が Ra の範囲内で CC1 が開放と判定できたとき、CC2 に一時的に VCONN を供給し、CC1 で SOP′ Discover Identity を送ります。試行が終わるたびに PHY の設定を元に戻します。`NO REPLY` は応答なし、`ACK WITHOUT ID` は GoodCRC を検出したものの解読できる Identity が届かなかったことを示します。ケーブル単体での Identity 取得は実機での確認が必要です。 [FUSB302B データシート](https://www.onsemi.com/download/data-sheet/pdf/fusb302b-d.pdf) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
+VBUS を確認し、CC2 が Ra の範囲内で CC1 が開放と判定できたとき、CC2 に一時的に VCONN を供給し、CC1 で SOP′ Discover Identity を送ります。試行が終わるたびに PHY の設定を元に戻します。住友ケーブル単体での Identity 取得は実機で確認済みです（VID/PID `20C2/0A14`）。CY4500-EPR でもケーブルの Identity ACK と T3P の GoodCRC を確認しました。 [FUSB302B データシート](https://www.onsemi.com/download/data-sheet/pdf/fusb302b-d.pdf)
+
+V3 は Identity の応答に応じて追加の問い合わせを行います。
+
+- Modal 対応を広告したケーブルには Discover SVIDs と各 SVID の Discover Modes を送ります。最大32種類の SVID、最後の SVID 応答の生データ、各 SVID の VDO をオブジェクト位置順に表示します。SVID 一覧の続きは最大6ページまで読み、上限に達すると `LIST LIMIT` を表示します。
+- PD 3.x のケーブルには Get Manufacturer Info を送ります。メーカー名とこの応答の VID/PID は Identity の値と分けて表示します。PD 3.x のアクティブケーブルには Get Status も送り、温度とシャットダウン状態を表示します。解読した Active Cable VDO が第2プラグのコントローラーを広告していれば、SOP″ を Soft Reset で同期してから、そのコントローラーにも Get Status を送ります。
+- 各ページに `ACK`、`NAK`、`NOT SUPPORTED`、`NO GOODCRC`、`NO REPLY` などを表示します。ケーブルによって返す情報は異なります。後続の問い合わせが失敗しても、PHY の設定を復元できれば取得済みの情報は確認できます。V3 の追加分はホストとシミュレーターで検証し、実機確認はこれからです。 [KWS-X1 の CABLE メニュー](https://github.com/kralonur/kws-x1-standalone-rs#16-cable) · [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery)
 
 ## CC1 の Rd 接続試験
 
@@ -149,7 +155,7 @@ PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします�
 
 `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin` でローカルの更新ファイルを作ります。
 
-ケーブル単体の能動読取版は `python build.py --pd-cable-read` でビルドします。同じ比較画像を `cargo run --offline --features pd-cable-read --bin preview` で `build/pd-cable-read` に生成します。`--measurement --profiles-ui` に `--cable-vbus` または `--cable-no-ra` を加え、それぞれ `preview-cable-vbus.ppm` と `preview-cable-no-ra.ppm` を追加します。更新ファイルは `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_V2_3.0.3.bin` で作ります。
+ケーブル単体の能動読取版は `python build.py --pd-cable-read` でビルドします。同じ比較画像を `cargo run --offline --features pd-cable-read --bin preview` で `build/pd-cable-read` に生成します。`--measurement --profiles-ui` に `--cable-vbus` または `--cable-no-ra` を加え、それぞれ `preview-cable-vbus.ppm` と `preview-cable-no-ra.ppm` を追加します。同じ共通オプションに `--cable-scan=N` を加え、`N` を `0`・`6`・`8` として `preview-cable-scan-N.ppm` を作ります。この比較には実機の Identity 応答と合成した追加応答を使います。更新ファイルは `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_V3_3.0.3.bin` で作ります。
 
 **RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
 

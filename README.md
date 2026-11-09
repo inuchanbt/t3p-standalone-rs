@@ -40,7 +40,7 @@ The current receive-priority trial pauses automatic screen refresh during EPR OF
 
 Open **CABLE** after PD SNIFF and double press the left button to listen on CC1 for up to 30 seconds. Keep the T3P powered via HID and reconnect the source with a known e-marked cable in the 5 V test setup once `LISTENING` appears. The source supplies VCONN and queries the cable. The T3P listens for the first CRC-valid SOP′ Discover Identity ACK from a passive or active cable. `SOP1 RX` counts CRC-valid SOP′ records, including requests and GoodCRC, up to 255.
 
-After `CAPTURED` or `CAPTURE WARN`, a short press advances through **SUMMARY**, **RAW** and **FLAGS**, then returns to OVERVIEW. The summary shows the type, advertised USB speed and power rating, latency-based length estimate, VID/PID and XID. USB PD 3.x / SVDM 2.x passive Cable VDO 1.0 and active Cable VDO 1.3 are decoded. Other layouts retain the identity and raw VDOs for inspection. Double press to replace the capture, or hold to return to OVERVIEW. The result is kept in RAM.
+After `CAPTURED` or `CAPTURE WARN`, a short press advances through **SUMMARY**, **RAW** and **FLAGS**, then returns to OVERVIEW. The summary shows the type, advertised USB speed and power rating, latency-based length estimate, VID/PID and XID. The decoder understands the legacy PD 2.0 Cable VDO and the PD 3.x / SVDM 2.x passive VDO 1.0 and active VDO 1.3 layouts. Other layouts retain the identity and raw VDOs for inspection. Double press to replace the capture, or hold to return to OVERVIEW. The result is kept in RAM.
 
 The test fixture reproduces the Discover Identity exchange from the CY4500-EPR capture of the Sumitomo cable. Replay yields a passive USB4 Gen 3 cable rated 50 V / 5 A with the EPR bit set and VID/PID `20C2/0A14`. [USB Power Delivery specification](https://www.usb.org/document-library/usb-power-delivery) · [KWS-X1 CABLE menu](https://github.com/kralonur/kws-x1-standalone-rs#16-cable)
 
@@ -48,11 +48,17 @@ The CC1 hardware trial showed the same identity on the T3P. The photographed PD 
 
 ### Active cable read trial
 
-The `--pd-cable-read` build adds an experimental standalone read to **CABLE**. Power the T3P from its side HID port. Plug a known e-marked cable into the T3P measurement receptacle and leave the far end and the T3P measurement plug open. Double press the left button on **CABLE**. `CAPTURED` opens the same SUMMARY, RAW and FLAGS views.
+The `--pd-cable-read` build reads a cable in **CABLE**. Power the T3P from its side HID port. Plug an e-marked cable into the T3P measurement receptacle and leave the far end and the T3P measurement plug open. Double press the left button on **CABLE**. Short presses advance through SUMMARY, RAW and FLAGS, followed by the numbered detail pages. Double press again to read a new cable, or hold to exit to OVERVIEW.
 
 The first hardware trial stopped at `NO RA ON CC2` in both plug orientations. The revised trial probes both CC pins with 330 µA pull-ups and shows their approximate voltages if the read fails after the probe. `HIGH` indicates a reading above the probe's roughly 2.69 V range, and `LOW` indicates a reading below about 0.04 V. A reading around 0.3 V on CC1 with `HIGH` on CC2 suggests that the cable termination is on CC1.
 
-After checking for VBUS and confirming that CC2 is in the Ra range and CC1 is open, the firmware temporarily switches VCONN onto CC2 and sends a SOP′ Discover Identity request on CC1. It restores the PHY settings after each attempt. `NO REPLY` means no response was detected. `ACK WITHOUT ID` means the PHY saw GoodCRC but no decodable Identity arrived. Standalone Identity acquisition still needs hardware verification. [FUSB302B data sheet](https://www.onsemi.com/download/data-sheet/pdf/fusb302b-d.pdf) · [USB Power Delivery specification](https://www.usb.org/document-library/usb-power-delivery)
+After checking for VBUS and confirming that CC2 is in the Ra range and CC1 is open, the firmware temporarily switches VCONN onto CC2 and sends SOP′ Discover Identity on CC1. It restores the PHY settings after each attempt. The standalone Identity read was verified on hardware with the Sumitomo cable (`20C2/0A14`). The CY4500-EPR trace showed the cable's Identity ACK and the T3P's GoodCRC. [FUSB302B data sheet](https://www.onsemi.com/download/data-sheet/pdf/fusb302b-d.pdf)
+
+V3 uses the Identity response to choose the remaining queries:
+
+- A cable that advertises modal operation gets Discover SVIDs and Discover Modes for each SVID. The screen shows up to 32 unique SVIDs, the last raw SVID reply, and each SVID's reply in object-position order. It requests up to six SVID list pages and shows `LIST LIMIT` when the list reaches a scan limit.
+- PD 3.x cables get Get Manufacturer Info. The maker name and the VID/PID from that reply are displayed separately from the Identity fields. Active PD 3.x cables also get Get Status for temperature and shutdown state. If a decoded Active Cable VDO advertises a second plug controller, the T3P synchronizes SOP″ with Soft Reset and then queries that controller's status.
+- Each page shows the outcome of its own query, such as `ACK`, `NAK`, `NOT SUPPORTED`, `NO GOODCRC` or `NO REPLY`. The cable may omit optional replies. The firmware keeps the Identity and any successful results if a subsequent query fails, subject to the PHY restore check. The V3 follow-up queries have been tested in the host and simulator and are awaiting hardware verification. [KWS-X1 CABLE menu](https://github.com/kralonur/kws-x1-standalone-rs#16-cable) · [USB Power Delivery specification](https://www.usb.org/document-library/usb-power-delivery)
 
 ## CC1 Rd attach test
 
@@ -149,7 +155,7 @@ Build the PD profiles trial with `python build.py --pd-profiles`. In `build/pd-p
 
 Package the PD and CABLE trial locally with `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin`.
 
-For the active cable reader, build with `python build.py --pd-cable-read`. Generate the same references under `build/pd-cable-read` using `cargo run --offline --features pd-cable-read --bin preview`. Add `preview-cable-vbus.ppm` and `preview-cable-no-ra.ppm` with `--measurement --profiles-ui` and `--cable-vbus` or `--cable-no-ra` respectively. Package with `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_V2_3.0.3.bin`.
+For the active cable reader, build with `python build.py --pd-cable-read`. Generate the same references under `build/pd-cable-read` using `cargo run --offline --features pd-cable-read --bin preview`. Add `preview-cable-vbus.ppm` and `preview-cable-no-ra.ppm` with `--measurement --profiles-ui` and `--cable-vbus` or `--cable-no-ra` respectively. With the same two shared flags, use `--cable-scan=N` to generate `preview-cable-scan-N.ppm` for `N` equal to `0`, `6` and `8`. The fixture combines the hardware Identity reply with synthetic follow-up replies. Package with `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_V3_3.0.3.bin`.
 
 For **RD TEST**, generate the seven measurement references under `build/pd-rd-test`. Generate `preview-rd-off.ppm` and `preview-rd-5v.ppm` with `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` or `--rd-5v` for the respective reference. Package with `python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin`.
 

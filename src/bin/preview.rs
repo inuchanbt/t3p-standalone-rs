@@ -42,6 +42,15 @@ fn main() -> io::Result<()> {
             _ => return None,
         })
     });
+    #[cfg(feature = "pd-cable-read")]
+    let cable_scan = flags.iter().find_map(|flag| {
+        flag.to_str()?
+            .strip_prefix("--cable-scan=")?
+            .parse::<u8>()
+            .ok()
+    });
+    #[cfg(feature = "pd-cable-read")]
+    let cable_view = cable_scan.map(|section| (2, section)).or(cable_view);
     let energy = flags.iter().any(|x| x == "--energy");
     let power = flags.iter().any(|x| x == "--power");
     let voltage = flags.iter().any(|x| x == "--voltage");
@@ -172,10 +181,30 @@ fn main() -> io::Result<()> {
     if let Some((state, section)) = cable_view {
         let mut cable = CableCapture::new();
         #[cfg(feature = "pd-cable-read")]
+        if cable_scan.is_some() {
+            for line in include_str!("../../tests/cable_scan.hex").lines() {
+                if line.starts_with('#') {
+                    continue;
+                }
+                let mut fields = line.split_whitespace();
+                let mut number = || fields.next().unwrap().parse::<u32>().unwrap();
+                let (query, index, expected) = (number(), number(), number());
+                let frame: Vec<_> = fields
+                    .map(|hex| u8::from_str_radix(hex, 16).unwrap())
+                    .collect();
+                if !frame.is_empty() {
+                    assert_eq!(cable.record_query_reply(query, index, &frame), Ok(expected));
+                }
+                if expected != 0 {
+                    cable.record_query_result(query, index, expected);
+                }
+            }
+        }
+        #[cfg(feature = "pd-cable-read")]
         if state == 13 {
             cable.set_cc_probe(7, 64);
         }
-        if state == 2 {
+        if state == 2 && !cable.captured() {
             for line in include_str!("../../tests/cable_identity.hex").lines() {
                 let frame: Vec<_> = line
                     .split_whitespace()
@@ -187,7 +216,7 @@ fn main() -> io::Result<()> {
         }
         view.set_pd_profiles(state, u32::from(state != 0), None);
         view.set_epr_profiles(3, None);
-        view.set_pd_cable(cable, section);
+        view.set_pd_cable(&cable, section);
     }
     view.set_page(if cable_view.is_some() {
         8

@@ -188,17 +188,19 @@ int t3p_pd_cable_write(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
     return pd_write_register(b, reg, value);
 }
 
-int t3p_pd_send_identity(struct t3p_meter_bus *b)
+int t3p_pd_cable_tx(struct t3p_meter_bus *b, unsigned second, uint16_t header,
+                   const uint8_t *payload, unsigned length)
 {
-    static const uint8_t tokens[] = {
-        0x12, 0x12, 0x1b, 0x1b,          /* SOP' ordered set */
-        0x86, 0x8f, 0x10,                /* PACKSYM(6), PD 3.x VDM, ID 0 */
-        0x01, 0xa0, 0x00, 0xff,          /* USB-IF Discover Identity, SVDM 2.0 */
-        0xff, 0x14, 0xfe, 0xa1,          /* JAMCRC, EOP, TXOFF, TXON */
+    if (length > 28 || length != 4u * ((header >> 12) & 7u)) return -1;
+    const uint8_t prefix[] = {
+        0x12, second ? 0x1b : 0x12, second ? 0x12 : 0x1b, 0x1b, /* SOP' or SOP'' */
+        0x80 | (2 + length), (uint8_t)header, (uint8_t)(header >> 8), /* PACKSYM and header */
     };
+    static const uint8_t suffix[] = {0xff, 0x14, 0xfe, 0xa1}; /* JAMCRC, EOP, TXOFF, TXON */
     int error = start(b) || write_byte(b, 0x44) || write_byte(b, 0x43);
-    for (unsigned i = 0; i < sizeof(tokens) && !error; ++i)
-        error = write_byte(b, tokens[i]);
+    for (unsigned i = 0; i < sizeof(prefix) && !error; ++i) error = write_byte(b, prefix[i]);
+    for (unsigned i = 0; i < length && !error; ++i) error = write_byte(b, payload[i]);
+    for (unsigned i = 0; i < sizeof(suffix) && !error; ++i) error = write_byte(b, suffix[i]);
     stop(b);
     return error ? -1 : 0;
 }
