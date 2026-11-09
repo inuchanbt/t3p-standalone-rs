@@ -142,11 +142,14 @@ fn main() -> io::Result<()> {
         sniff
             .push(&parse(include_str!("../../tests/pd_offer.hex")))
             .unwrap();
-        for line in include_str!("../../tests/sniff_exchange.hex").lines() {
-            sniff.push(&parse(line)).unwrap();
-        }
-        for line in include_str!("../../tests/sniff_epr.hex").lines() {
-            sniff.push(&parse(line)).unwrap();
+        for exchange in [
+            include_str!("../../tests/sniff_exchange.hex"),
+            include_str!("../../tests/sniff_epr.hex"),
+            include_str!("../../tests/sniff_keepalive.hex"),
+        ] {
+            for line in exchange.lines() {
+                sniff.push(&parse(line)).unwrap();
+            }
         }
         view.set_pd_profiles(3, 1, None);
         view.set_epr_profiles(2, None);

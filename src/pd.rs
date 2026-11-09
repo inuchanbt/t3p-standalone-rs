@@ -293,7 +293,7 @@ impl SniffEvent {
     }
 }
 
-/// Bounded CRC-checked SOP message history. GoodCRC is counted separately.
+/// Bounded CRC-checked SOP history with separate counts for GoodCRC and EPR keepalives.
 #[derive(Clone, Copy)]
 pub struct PdSniff {
     events: [SniffEvent; SNIFF_CAPACITY],
@@ -301,6 +301,8 @@ pub struct PdSniff {
     count: u8,
     total: u16,
     good_crc: u16,
+    keepalive: u16,
+    keepalive_ack: u16,
 }
 
 impl Default for PdSniff {
@@ -317,6 +319,8 @@ impl PdSniff {
             count: 0,
             total: 0,
             good_crc: 0,
+            keepalive: 0,
+            keepalive_ack: 0,
         }
     }
 
@@ -345,6 +349,19 @@ impl PdSniff {
         } else {
             (0, 0)
         };
+        self.total = self.total.saturating_add(1);
+        if hi & 0x80 != 0 && kind == 16 && lo >> 6 == 2 {
+            // Extended Control, chunk zero, with a two-byte data block.
+            let counter = match (hi & 1, payload) {
+                (0, [2, 0x80, 3, 0]) => Some(&mut self.keepalive),
+                (1, [2, 0x80, 4, 0]) => Some(&mut self.keepalive_ack),
+                _ => None,
+            };
+            if let Some(counter) = counter {
+                *counter = counter.saturating_add(1);
+                return Ok(());
+            }
+        }
         let index = (usize::from(self.start) + usize::from(self.count)) % SNIFF_CAPACITY;
         self.events[index] = SniffEvent {
             lo,
@@ -357,7 +374,6 @@ impl PdSniff {
         } else {
             self.count += 1;
         }
-        self.total = self.total.saturating_add(1);
         Ok(())
     }
 
@@ -399,6 +415,8 @@ impl PdSniff {
             retained: self.count,
             total: self.total,
             good_crc: self.good_crc,
+            keepalive: self.keepalive,
+            keepalive_ack: self.keepalive_ack,
         }
     }
 }
@@ -418,6 +436,8 @@ pub(crate) struct SniffWindow {
     pub(crate) retained: u8,
     pub(crate) total: u16,
     pub(crate) good_crc: u16,
+    pub(crate) keepalive: u16,
+    pub(crate) keepalive_ack: u16,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -621,6 +641,49 @@ mod tests {
         bad[3] ^= 1;
         assert!(sniff.push(&bad).is_err());
         assert_eq!(sniff.counts(), (4, 1));
+    }
+
+    #[test]
+    fn sniff_counts_epr_keepalives_without_evicting_negotiation_rows() {
+        let mut lines = include_str!("../tests/sniff_keepalive.hex").lines();
+        let keepalive = fixture::<11>(lines.next().unwrap());
+        let ack = fixture::<11>(lines.next().unwrap());
+        let (first, second) = epr_frames();
+        let mut sniff = PdSniff::new();
+        sniff.push(&first).unwrap();
+        sniff.push(&second).unwrap();
+        for _ in 0..SNIFF_CAPACITY {
+            sniff.push(&keepalive).unwrap();
+            sniff.push(&ack).unwrap();
+        }
+        let mut bad = keepalive;
+        bad[10] ^= 1;
+        assert_eq!(sniff.push(&bad), Err(BadFrame));
+
+        let window = sniff.window(0);
+        assert_eq!(window.total as usize, 2 + 2 * SNIFF_CAPACITY);
+        assert_eq!(window.retained, 2);
+        assert_eq!(window.keepalive as usize, SNIFF_CAPACITY);
+        assert_eq!(window.keepalive_ack as usize, SNIFF_CAPACITY);
+        assert_eq!(window.rows[0].label(), (&b"EPR_SRC_CAP"[..], b'C', 0));
+        assert_eq!(window.rows[1].label(), (&b"EPR_SRC_CAP"[..], b'C', 1));
+
+        // A different Extended Control subtype and an unexpected sender stay visible.
+        let mut get_caps = keepalive;
+        get_caps[5] = 1;
+        let mut wrong_role = ack;
+        wrong_role[2] &= !1;
+        for mut frame in [get_caps, wrong_role] {
+            let crc = crc32(&frame[1..7]).to_le_bytes();
+            frame[7..].copy_from_slice(&crc);
+            sniff.push(&frame).unwrap();
+        }
+        let window = sniff.window(0);
+        assert_eq!(window.retained, 4);
+        assert_eq!(window.keepalive as usize, SNIFF_CAPACITY);
+        assert_eq!(window.keepalive_ack as usize, SNIFF_CAPACITY);
+        assert_eq!(window.rows[2].label(), (&b"EXT"[..], b'T', 16));
+        assert_eq!(window.rows[3].label(), (&b"EXT"[..], b'T', 16));
     }
 
     #[test]

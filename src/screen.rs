@@ -591,15 +591,15 @@ fn epr_profiles(p: &mut Strip<'_>, pd: Profiles) {
     );
 }
 
-fn sniff_count(p: &mut Strip<'_>, x: usize, label: &[u8], value: u16) {
+fn sniff_count(p: &mut Strip<'_>, x: usize, y: usize, label: &[u8], value: u16) {
     let value = value.min(999);
     let digits = [
         b'0' + (value / 100) as u8,
         b'0' + (value / 10 % 10) as u8,
         b'0' + (value % 10) as u8,
     ];
-    p.text(x, 46, label, 1, MUTED);
-    p.text(x + label.len() * 5, 46, &digits, 1, TEXT);
+    p.text(x, y, label, 1, MUTED);
+    p.text(x + label.len() * 5, y, &digits, 1, TEXT);
 }
 
 fn pd_sniff(p: &mut Strip<'_>, pd: Profiles) {
@@ -608,19 +608,30 @@ fn pd_sniff(p: &mut Strip<'_>, pd: Profiles) {
     if pd.mode == 2 && pd.cc != 0 {
         p.text(215, 35, b"CC1", 1, AMPS);
     }
-    let (total, good_crc) = pd
+    let (total, good_crc, keepalive, keepalive_ack) = pd
         .sniff
-        .map(|sniff| (sniff.total, sniff.good_crc))
-        .unwrap_or((0, 0));
-    sniff_count(p, 8, b"MSG:", total);
-    sniff_count(p, 83, b"GCRC:", good_crc);
+        .map(|sniff| {
+            (
+                sniff.total,
+                sniff.good_crc,
+                sniff.keepalive,
+                sniff.keepalive_ack,
+            )
+        })
+        .unwrap_or((0, 0, 0, 0));
+    sniff_count(p, 8, 46, b"MSG:", total);
+    sniff_count(p, 83, 46, b"GCRC:", good_crc);
+    sniff_count(p, 8, 207, b"EPR KEEPALIVE:", keepalive);
+    sniff_count(p, 105, 207, b"ACK:", keepalive_ack);
     if pd.sniff.is_none_or(|sniff| sniff.end == 0) {
         p.outline(8, 60, 224, 141, GRID);
         p.text(18, 75, b"RX ONLY RD ON", 2, AMPS);
         p.text(
             18,
             112,
-            if pd.mode == 2 && pd.state == 1 {
+            if keepalive != 0 || keepalive_ack != 0 {
+                b"EPR KEEPALIVE ONLY"
+            } else if pd.mode == 2 && pd.state == 1 {
                 b"WAITING FOR PD TRAFFIC"
             } else {
                 b"NO LOGGED MESSAGES"

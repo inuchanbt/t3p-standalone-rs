@@ -182,8 +182,11 @@ def main():
             if cpu.call(symbols["meter_double_press"], [])[0] != 3:
                 raise ValueError("Pi32v2 PD sniff double press did not request capture")
             cpu.call(symbols["meter_pd_status"], [1, 1, 2])
-            exchange = [frame] + [bytes.fromhex(line) for name in ("sniff_exchange.hex", "sniff_epr.hex")
-                                  for line in (ROOT / "tests" / name).read_text(encoding="ascii").splitlines()]
+            exchange = [frame] + [
+                bytes.fromhex(line)
+                for name in ("sniff_exchange.hex", "sniff_epr.hex", "sniff_keepalive.hex")
+                for line in (ROOT / "tests" / name).read_text(encoding="ascii").splitlines()
+            ]
             for index, packet in enumerate(exchange):
                 if index == len(exchange) // 2:
                     cpu.call(symbols["meter_pd_warning"], [1])
@@ -229,7 +232,7 @@ def main():
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-measurement.ppm").read_bytes():
                 raise ValueError("Pi32v2 PD sniff long press did not exit without resetting readings")
-            print("Pi32v2 PD sniff EPR actions, older history and long-press exit match")
+            print("Pi32v2 PD sniff EPR actions, keepalive counts, older history and long-press exit match")
             cpu.call(symbols["meter_pd_status"], [0, 0, 0])
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])

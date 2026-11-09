@@ -24,17 +24,21 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 
 ## PD SNIFF 試験版
 
-次の **PD SNIFF** 画面では、ダブル押しから30秒間、CC1 で CRC が一致した SOP メッセージを記録します。同じ画面で再度ダブル押しすると CC1 で新しい記録を始め、それまでの履歴は消えます。履歴は RAM のみで GoodCRC を除く直近192件を保持します。まず新しい8件を古い順に表示し、短押しで8件ずつ過去に戻り、最も古いページでもう一度短押しすると OVERVIEW に進みます。約1秒長押しすると積算値をリセットせずにすぐ抜けられます。たとえば `R:185-192/192` は保持中の192件のうち表示している範囲です。満杯になると古い記録から上書きされます。受信中は新着により表示範囲がずれるため、古い履歴は `DONE` 後の確認を推奨します。`SRC` / `SNK` は各メッセージの電源ロールビットに基づく表示であり、物理的な送信元を独立に確認したものではありません。Source Capabilities、Request、Accept、PS_RDY、EPR などの主な種類を名前で示し、未対応の種類は `CTRL`・`DATA`・`EXT` と種類番号 `T` で表示します。複数ページの履歴を実機で確認しました。192件を超えたときの上書きと長押しでの終了は実機未確認です。
+次の **PD SNIFF** 画面では、ダブル押しから30秒間、CC1 で CRC が一致した SOP メッセージを記録します。同じ画面で再度ダブル押しすると CC1 で新しい記録を始め、それまでの履歴は消えます。履歴は RAM のみに最大192行を保持します。まず新しい8件を古い順に表示し、短押しで8件ずつ過去に戻り、最も古いページでもう一度短押しすると OVERVIEW に進みます。約1秒長押しすると積算値をリセットせずにすぐ抜けられます。たとえば `R:185-192/192` は保持中の192件のうち表示している範囲です。満杯になると古い記録から上書きされます。受信中は新着により表示範囲がずれるため、古い履歴は `DONE` 後の確認を推奨します。`SRC` / `SNK` は各メッセージの電源ロールビットに基づく表示であり、物理的な送信元を独立に確認したものではありません。Source Capabilities、Request、Accept、PS_RDY、EPR などの主な種類を名前で示し、未対応の種類は `CTRL`・`DATA`・`EXT` と種類番号 `T` で表示します。複数ページの履歴を実機で確認しました。192件を超えたときの上書きと長押しでの終了は実機未確認です。
 
 データオブジェクトが1つの EPR_Mode は `EPR_ENTER`、`EPR_ACK`、`EPR_OK`、`EPR_FAIL`、`EPR_EXIT` に分けます。未知のアクションは `EPR_Axx`、`Ixx` はメッセージ ID、`Dxx` はアクションに付随するデータの生値を16進数で表示します。Enter のデータはシンクの Operational PDP、Enter Failed では `D00` が原因不明、`D01` がケーブルの EPR 非対応、`D02` が VCONN 失敗、`D03` が RDO の EPR 対応ビットなし、`D04` が電源側の一時的な失敗、`D05` が PDO の EPR 対応ビットなしを表します。その他の値は生値のままです。個々のメッセージを解読するもので、やり取り全体や実際の電圧を確定するものではありません。Enter・Ack・OK・Exit は実機表示と CY4500 の記録が一致しました。Fail と未知のアクションは実機未確認です。 [EPRMDO 定義](https://chromium.googlesource.com/chromiumos/platform/ec/+/6e6e567deac5b5ab8fbe0d706cd82ebeb21e35b4/include/usb_pd.h)
 
-行末の `N` はデータオブジェクト数、`P` は要求した PDO の位置、`C` は拡張メッセージのチャンク、`Q` はチャンク要求、`I` はメッセージ ID です。`MSG` は記録した件数、`GCRC` は一覧から除外した GoodCRC の件数で、表示は各999までです。`DONE` は待機時間の終了を表し、全パケットの受信や契約成立を保証しません。EPR と SNIFF の受信処理は通常最短1 ms間隔で確認し、溜まった記録は1回の処理で最大4件まで続けて読み出します。1件以上受信した直後は通常の待機を1回省いて再確認し、追加の受信がなければ通常の待機に戻ります。実際の間隔は I²C や画面描画にも左右されます。この再確認の変更は実機未確認です。先行する高速化版では下記のように成功と取りこぼしの両方がありました。読み出しで消える FIFO アラートは受信を継続しつつ `WARN` として保持します。FUSB302B 互換ならこのアラートは RX または TX の満杯を示しますが、それだけで必ずパケットが失われたとは断定できません。RX 満杯の状態を実際に読み取った場合は `FIFO FULL` で停止します。不正なフレームやリンクリセットでも停止して状態を表示します。特に短い間隔の通信は取りこぼす可能性があり、契約電圧や電流の推定は行いません。CC プルダウンの設定は上記と同じです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+シンクの EPR KeepAlive と電源の KeepAlive_ACK は画面下に別々に集計します。この2種類と GoodCRC は履歴の行を使いません。`MSG` は KeepAlive と ACK を含む、GoodCRC 以外の CRC が一致した SOP メッセージの総数です。`GCRC` は受信した GoodCRC の総数です。各カウンターの表示は999までです。 [Extended Control の定義](https://chromium.googlesource.com/chromiumos/platform/ec/+/6e6e567deac5b5ab8fbe0d706cd82ebeb21e35b4/include/usb_pd.h#667)
+
+行末の `N` はデータオブジェクト数、`P` は要求した PDO の位置、`C` は拡張メッセージのチャンク、`Q` はチャンク要求、`I` はメッセージ ID です。`DONE` は待機時間の終了を表し、全パケットの受信や契約成立を保証しません。EPR と SNIFF の受信処理は通常最短1 ms間隔で確認し、溜まった記録は1回の処理で最大4件まで続けて読み出します。1件以上受信した直後は通常の待機を1回省いて再確認し、追加の受信がなければ通常の待機に戻ります。実際の間隔は I²C や画面描画にも左右されます。読み出しで消える FIFO アラートは受信を継続しつつ `WARN` として保持します。FUSB302B 互換ならこのアラートは RX または TX の満杯を示しますが、それだけで必ずパケットが失われたとは断定できません。RX 満杯の状態を実際に読み取った場合は `FIFO FULL` で停止します。不正なフレームやリンクリセットでも停止して状態を表示します。特に短い間隔の通信は取りこぼす可能性があり、契約電圧や電流の推定は行いません。CC プルダウンの設定は上記と同じです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
 警告は SPR・EPR・SNIFF の結果ごとに RAM 内で保持し、同じ種類の新しい取得を始めるか電源を切ると消えます。
 
 現行の受信優先試験版では、EPR OFFER または PD SNIFF の取得中、受信以外の処理を減らすため画面の定期更新を止めます。途中で別画面に移った場合も、取得終了まで表示はその時点のままです。ボタン操作時と取得終了時は再描画し、電圧・電流のサンプリングと積算は継続します。比較試験では `LISTENING` 画面が落ち着いてから接続し、取得終了までボタンを押さずに待ってください。SPR の取得中は従来どおり定期更新します。この画面更新停止を導入した前版 `PD_RX_PRIORITY` は下記の実機試験で使われましたが、定期更新停止そのものは別途確認できていません。通信の取りこぼしがなくなる保証はありません。
 
 ## 実機での検証
+
+追加の比較試験では、`EPR_REQUEST P01` に続く `PS_RDY` までの T3P の13行が CY4500 と一致しました。`EPR_SRC_CAP` の C00・Q01・C01 も含まれます。T3P は `DONE` で `MSG:139 GCRC:139` でした。CY4500 の139件目は最初の Source_Capabilities から29.0秒後で、37.7秒後までにさらに19往復の維持通信を記録しました。CY4500 の Extended Control 164件はすべて KeepAlive または KeepAlive_ACK でした。別の EPR OFFER 試験では `CAPTURE WARN`、`SPR:000`、`E0:001`、`E1:001` で、表示した4件の PDO が CY4500 と一致しました。CY4500 には冒頭の SPR の提示もあり、両試験の VBUS は約5 Vでした。
 
 その次の実機試験では `PD_RX_PRIORITY` 版を使用したと報告がありました。EPR OFFER の写真2枚はいずれも `CAPTURE WARN`、`RX:019`、`E0:001`、`E1:001` で、表示された 28 V / 5 A、36 V / 5 A、48 V / 5 A、15～48 V AVS / 240 W はそれぞれの CY4500 記録と一致しました。SNIFF の2回はどちらも `DONE WARN` で、1回目は17件・GoodCRC 15件、2回目は16件・GoodCRC 16件です。対応する CY4500 の各記録は GoodCRC を除く SOP メッセージ18件と GoodCRC 18件でした。1回目の写真の2～17行には C00 と C01 が含まれ、電源からの `ACCEPT I07` がありません。1行目の写真はありません。2回目の16行はすべて写真にあり、電源からの `C01` と `ACCEPT I02` がありません。記録された VBUS は約5 Vで、48 V は提示能力です。この結果だけでは取りこぼしの原因は確定できません。
 
@@ -103,7 +107,7 @@ PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記
 
 PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm`、`preview-profiles-listening.ppm`、`preview-profiles-offer.ppm` は `--measurement` にそれぞれ `--profiles-page`、`--profiles-listening`、`--profiles-offer` を加えて生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-timeout.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-timeout`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`preview-sniff-ready.ppm`、`preview-sniff-log.ppm`、`preview-sniff-old.ppm`、`preview-sniff-alert.ppm` は `--measurement` にそれぞれ `--sniff-page`、`--sniff-log`、`--sniff-old`、`--sniff-alert` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
 
-`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_RX_RETRY_3.0.3.bin` でローカルの更新ファイルを作ります。
+`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_KEEPALIVE_3.0.3.bin` でローカルの更新ファイルを作ります。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 
