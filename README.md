@@ -40,9 +40,11 @@ The current receive-priority trial pauses automatic screen refresh during EPR OF
 
 Open **CABLE** after PD SNIFF and double press the left button to listen on CC1 for up to 30 seconds. Keep the T3P powered via HID and reconnect the source with a known e-marked cable in the 5 V test setup once `LISTENING` appears. The source supplies VCONN and queries the cable. The T3P listens for the first CRC-valid SOP′ Discover Identity ACK from a passive or active cable. `SOP1 RX` counts CRC-valid SOP′ records, including requests and GoodCRC, up to 255.
 
-After `CAPTURED`, a short press advances through **SUMMARY**, **RAW** and **FLAGS**, then returns to OVERVIEW. The summary shows the type, advertised USB speed and power rating, latency-based length estimate, VID/PID and XID. USB PD 3.x / SVDM 2.x passive Cable VDO 1.0 and active Cable VDO 1.3 are decoded. Other layouts retain the identity and raw VDOs for inspection. Double press to replace the capture, or hold to return to OVERVIEW. The result is kept in RAM.
+After `CAPTURED` or `CAPTURE WARN`, a short press advances through **SUMMARY**, **RAW** and **FLAGS**, then returns to OVERVIEW. The summary shows the type, advertised USB speed and power rating, latency-based length estimate, VID/PID and XID. USB PD 3.x / SVDM 2.x passive Cable VDO 1.0 and active Cable VDO 1.3 are decoded. Other layouts retain the identity and raw VDOs for inspection. Double press to replace the capture, or hold to return to OVERVIEW. The result is kept in RAM.
 
-The test fixture reproduces the Discover Identity exchange from the CY4500-EPR capture of the Sumitomo cable. Replay yields a passive USB4 Gen 3 cable rated 50 V / 5 A with the EPR bit set and VID/PID `20C2/0A14`. The new SOP′ receiver still needs a T3P hardware test. [USB Power Delivery specification](https://www.usb.org/document-library/usb-power-delivery) · [KWS-X1 CABLE menu](https://github.com/kralonur/kws-x1-standalone-rs#16-cable)
+The test fixture reproduces the Discover Identity exchange from the CY4500-EPR capture of the Sumitomo cable. Replay yields a passive USB4 Gen 3 cable rated 50 V / 5 A with the EPR bit set and VID/PID `20C2/0A14`. [USB Power Delivery specification](https://www.usb.org/document-library/usb-power-delivery) · [KWS-X1 CABLE menu](https://github.com/kralonur/kws-x1-standalone-rs#16-cable)
+
+The CC1 hardware trial showed the same identity on the T3P. The photographed PD header `518F` and all five VDOs match the first SOP′ Discover Identity ACK in the CY4500-EPR recording, at about 5.005 V on VBUS. `SOP1 RX:003` agrees with the request, its GoodCRC and the identity response. `CAPTURE WARN` indicates a FIFO alert during a capture that successfully decoded the identity with a matching CRC.
 
 ## Hardware bring-up
 

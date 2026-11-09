@@ -40,9 +40,11 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 
 PD SNIFF の次にある **CABLE** で左ボタンをダブル押しすると、CC1 で最大30秒間待機します。HID 給電を続けたまま `LISTENING` を確認し、5 V の試験構成で e-marker 付きのケーブルを使って電源をつなぎ直します。電源側が VCONN を供給してケーブルに問い合わせます。T3P はパッシブまたはアクティブケーブルからの、CRC が一致した最初の SOP′ Discover Identity ACK を取得します。`SOP1 RX` は要求や GoodCRC も含む CRC 一致の SOP′ 受信件数で、上限は255件です。
 
-`CAPTURED` が出たら、短押しで **SUMMARY**（概要）、**RAW**（生データ）、**FLAGS**（ビットフィールド）の順に進み、最後に OVERVIEW に戻ります。概要はケーブルの種別、申告された USB 速度と電力定格、遅延からの長さの推定、VID/PID と XID を表示します。USB PD 3.x / SVDM 2.x のパッシブ Cable VDO 1.0 とアクティブ Cable VDO 1.3 を解読します。ほかの形式では識別情報と生データを確認できます。ダブル押しで取得し直し、長押しで OVERVIEW に戻ります。取得結果は RAM に保持します。
+`CAPTURED` または `CAPTURE WARN` が出たら、短押しで **SUMMARY**（概要）、**RAW**（生データ）、**FLAGS**（ビットフィールド）の順に進み、最後に OVERVIEW に戻ります。概要はケーブルの種別、申告された USB 速度と電力定格、遅延からの長さの推定、VID/PID と XID を表示します。USB PD 3.x / SVDM 2.x のパッシブ Cable VDO 1.0 とアクティブ Cable VDO 1.3 を解読します。ほかの形式では識別情報と生データを確認できます。ダブル押しで取得し直し、長押しで OVERVIEW に戻ります。取得結果は RAM に保持します。
 
-住友ケーブルを使った CY4500-EPR 記録の Discover Identity を再生し、パッシブ、USB4 Gen 3、50 V / 5 A EPR、VID/PID `20C2/0A14` と表示できることを確認しました。T3P 実機での SOP′ 受信は検証待ちです。 [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery) · [KWS-X1 の CABLE メニュー](https://github.com/kralonur/kws-x1-standalone-rs#16-cable)
+住友ケーブルを使った CY4500-EPR 記録の Discover Identity を再生し、パッシブ、USB4 Gen 3、50 V / 5 A EPR、VID/PID `20C2/0A14` と表示できることを確認しました。 [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery) · [KWS-X1 の CABLE メニュー](https://github.com/kralonur/kws-x1-standalone-rs#16-cable)
+
+CC1 の実機試験でも、T3P に同じ識別情報が表示されました。写真の PD ヘッダー `518F` と5個の VDO は、VBUS 約 5.005 V で CY4500-EPR が記録した最初の SOP′ Discover Identity ACK と一致しました。`SOP1 RX:003` は照会、その GoodCRC、識別応答の3件と整合します。`CAPTURE WARN` は、受信 FIFO の警告が立った状態で CRC が一致する識別応答を取得したことを示します。
 
 ## 実機での検証
 
