@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--pd-diagnostic", action="store_true")
     parser.add_argument("--pd-profiles", action="store_true")
     parser.add_argument("--pd-rd-test", action="store_true")
+    parser.add_argument("--pd-ack-test", action="store_true")
     args = parser.parse_args()
     sys.path.insert(0, str(args.sim / "tools/llvm"))
     from sim import CPU, Memory
@@ -113,18 +114,30 @@ def main():
             if render() != (out / f"preview-{name}.ppm").read_bytes():
                 raise ValueError(f"Pi32v2 {name} graph differs from host preview")
         cpu.call(symbols["meter_next_page"], [])
-        if args.pd_rd_test:
+        if args.pd_rd_test or args.pd_ack_test:
+            test_name = "PD ACK TEST" if args.pd_ack_test else "RD TEST"
             if cpu.call(symbols["meter_on_rd_test_page"], [])[0] != 1:
-                raise ValueError("Pi32v2 did not enter RD TEST")
+                raise ValueError(f"Pi32v2 did not enter {test_name}")
+            if args.pd_ack_test:
+                frame = bytes.fromhex((ROOT / "tests/pd_offer.hex").read_text(encoding="ascii"))
+                cpu.mem.write(strip, frame[:-1] + bytes([frame[-1] ^ 1]))
+                if cpu.call(symbols["meter_pd_ack_pdo_count"], [strip, len(frame)])[0] != 0xffffffff:
+                    raise ValueError("Pi32v2 accepted a source offer with an invalid CRC")
+                cpu.mem.write(strip, frame)
+                pdos = cpu.call(symbols["meter_pd_ack_pdo_count"], [strip, len(frame)])[0]
+                if pdos != 7:
+                    raise ValueError("Pi32v2 did not decode the seven PDOs in the source offer")
             for name, state, on_mv in (("off", 1, 65535), ("5v", 3, 5094)):
                 cpu.call(symbols["meter_rd_test"], [state, 3010, on_mv])
+                if args.pd_ack_test:
+                    cpu.call(symbols["meter_rd_ack"], [pdos if state == 3 else 0, int(state == 3)])
                 cpu.call(symbols["meter_snapshot"], [])
                 if render() != (out / f"preview-rd-{name}.ppm").read_bytes():
-                    raise ValueError(f"Pi32v2 RD TEST {name} frame differs from host preview")
+                    raise ValueError(f"Pi32v2 {test_name} {name} frame differs from host preview")
             cpu.call(symbols["meter_next_page"], [])
             if cpu.call(symbols["meter_on_rd_test_page"], [])[0] != 0:
-                raise ValueError("Pi32v2 did not exit RD TEST")
-            print("Pi32v2 RD TEST navigation and both result frames match")
+                raise ValueError(f"Pi32v2 did not exit {test_name}")
+            print(f"Pi32v2 {test_name} navigation and both result frames match")
         if args.pd_profiles:
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-profiles-ready.ppm").read_bytes():

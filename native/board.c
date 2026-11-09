@@ -13,6 +13,9 @@
 #include "t3p_rd_test.h"
 uint32_t meter_on_rd_test_page(void);
 void meter_rd_test(uint32_t state, uint32_t off_mv, uint32_t on_mv);
+#ifdef T3P_PD_ACK_TEST
+void meter_rd_ack(uint32_t pdos, uint32_t goodcrc);
+#endif
 static struct t3p_rd_test rd_test = { .off_mv = UINT16_MAX, .on_mv = UINT16_MAX };
 #endif
 
@@ -126,6 +129,14 @@ void t3p_board_start(void)
     if (t3p_meter_fast_bus(&board, &fast_bus)) pd.state = T3P_PD_TIMER_ERROR;
     meter_pd_status(pd.state, 0, pd.mode);
 #endif
+#ifdef T3P_PD_RD_TEST
+    struct t3p_meter_bus *rd_bus = &meter_bus;
+#ifdef T3P_PD_ACK_TEST
+    struct t3p_meter_bus ack_bus = meter_bus;
+    if (t3p_meter_fast_bus(&board, &ack_bus)) rd_test.state = T3P_RD_TIMER_ERROR;
+    rd_bus = &ack_bus;
+#endif
+#endif
 #ifdef T3P_PD_DIAGNOSTIC
     uint32_t pd_at = start - 2000;
 #endif
@@ -137,9 +148,9 @@ void t3p_board_start(void)
         redraw |= poll_key(now);
 #ifdef T3P_PD_RD_TEST
         enum t3p_rd_state before = rd_test.state;
-        if (redraw & RD_CANCEL) t3p_rd_test_cancel(&rd_test, &meter_bus);
-        else if (redraw & RD_STEP) t3p_rd_test_step(&rd_test, &meter_bus, now);
-        t3p_rd_test_poll(&rd_test, &meter_bus, now);
+        if (redraw & RD_CANCEL) t3p_rd_test_cancel(&rd_test, rd_bus);
+        else if (redraw & RD_STEP) t3p_rd_test_step(&rd_test, rd_bus, now);
+        t3p_rd_test_poll(&rd_test, rd_bus, now);
         if (rd_test.state != before) redraw |= REDRAW;
 #endif
 #ifdef T3P_PD_PROFILES
@@ -179,6 +190,9 @@ void t3p_board_start(void)
 #ifdef T3P_PD_PROFILES
             if (pd.state == T3P_PD_LISTENING) sample_bus = &fast_bus;
 #endif
+#ifdef T3P_PD_ACK_TEST
+            if (rd_test.state == T3P_RD_ON) sample_bus = rd_bus;
+#endif
             if (!identified && now - identified_at >= 1000) {
                 identified = !t3p_meter_identify(sample_bus);
                 identified_at = now;
@@ -198,9 +212,15 @@ void t3p_board_start(void)
         if (!redraw && pd.state == T3P_PD_LISTENING && pd.mode != T3P_PD_SPR)
             refresh_due = 0;
 #endif
+#ifdef T3P_PD_ACK_TEST
+        if (!redraw && rd_test.state == T3P_RD_ON) refresh_due = 0;
+#endif
         if (refresh_due) {
 #ifdef T3P_PD_RD_TEST
             meter_rd_test(rd_test.state, rd_test.off_mv, rd_test.on_mv);
+#endif
+#ifdef T3P_PD_ACK_TEST
+            meter_rd_ack(rd_test.pdos, rd_test.goodcrc);
 #endif
             meter_snapshot();
             redraw = 0;
@@ -209,7 +229,7 @@ void t3p_board_start(void)
                 if (t3p_bsp_rectangle(&board, 0, PANEL_SIDE - 1, top, top + STRIP_ROWS - 1,
                                       strip, PANEL_SIDE * STRIP_ROWS)) {
 #ifdef T3P_PD_RD_TEST
-                    t3p_rd_test_cancel(&rd_test, &meter_bus);
+                    t3p_rd_test_cancel(&rd_test, rd_bus);
 #endif
                     t3p_signal_failure(4);
                 }
@@ -217,6 +237,12 @@ void t3p_board_start(void)
                 redraw |= poll_key(between_strips);
 #ifdef T3P_PD_PROFILES
                 redraw |= poll_pd(&pd, &fast_bus, between_strips);
+#endif
+#ifdef T3P_PD_ACK_TEST
+                if (rd_test.state == T3P_RD_ON) {
+                    t3p_rd_test_poll(&rd_test, rd_bus, between_strips);
+                    if (rd_test.state != T3P_RD_ON) redraw |= REDRAW;
+                }
 #endif
             }
             t3p_bsp_backlight(&board, 1);
@@ -226,9 +252,12 @@ void t3p_board_start(void)
 #ifdef T3P_PD_PROFILES
         if (pd.state == T3P_PD_LISTENING) pause_ms = pd.catch_up ? 0 : 1;
 #endif
+#ifdef T3P_PD_ACK_TEST
+        if (rd_test.state == T3P_RD_ON) pause_ms = 1;
+#endif
         if (pause_ms && t3p_bsp_delay(&board, pause_ms)) {
 #ifdef T3P_PD_RD_TEST
-            t3p_rd_test_cancel(&rd_test, &meter_bus);
+            t3p_rd_test_cancel(&rd_test, rd_bus);
 #endif
             t3p_signal_failure(5);
         }

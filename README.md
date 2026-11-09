@@ -52,6 +52,12 @@ Build with `python build.py --pd-rd-test` and tap past the current graph to open
 
 The first step times out after 30 seconds and the second after 3 seconds. Hold during the test to cancel. Hold on the result to exit, or unplug the source and double press to retry. The test checks the startup configuration and writes only `SWITCHES0` (`04` then `05`), restoring `03` when the test ends. For `RESTORE ERROR`, unplug the source and power-cycle the T3P. The test uses the meter's uncalibrated VBUS reading. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
+On hardware with `PD_RD_TEST_V2`, a double press with the source already supplying VBUS showed `VBUS PRESENT`. With the source unplugged, a double press showed `RD OFF` and 3.003 V. After connecting the source on CC1 and tapping once, the stored readings were 2.660 V with Rd off and 5.085 V with Rd on, with `5V SEEN` and `DEFAULT RD RESTORED`. A separate photo with the source unplugged showed `NO 5V` and 3.002 V in both slots. These are the T3P's displayed readings.
+
+## CC1 GoodCRC test
+
+Build with `python build.py --pd-ack-test` to open **PD ACK TEST** in the same position. Use the Rd test connection and button sequence above. After the short press, the FUSB302B-compatible controller automatically answers valid SOP packets with GoodCRC as a sink. `PD ACK SEEN` requires a 4.5–5.5 V reading, a CRC-checked `Source_Capabilities` message and the controller's `I_GCRCSENT` flag within three seconds. The screen shows the number of offered PDOs and whether the controller reported sending a GoodCRC. An inline analyzer can confirm which packet it acknowledged. This test covers the response to the initial offer. Establishing a 5 V PD contract and sending information queries are separate steps. Hardware verification of this build is pending. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+
 ## Hardware bring-up
 
 In a sustained EPR test on CC1 with `PD_KEEPALIVE`, the T3P showed `DONE`, `MSG:117 GCRC:117` and `EPR KEEPALIVE:045 ACK:045`. All 27 history rows across four pages matched the CY4500 trace in order. The counts match the trace from its first SOP packet through the GoodCRC after the 45th KeepAlive ACK, at 27.47 seconds. VBUS measured about 5 V in that interval.
@@ -132,6 +138,8 @@ Build the PD profiles trial with `python build.py --pd-profiles`. In `build/pd-p
 Package the PD and CABLE trial locally with `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin`.
 
 For **RD TEST**, generate the seven measurement references under `build/pd-rd-test`. Generate `preview-rd-off.ppm` and `preview-rd-5v.ppm` with `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` or `--rd-5v` for the respective reference. Package with `python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin`.
+
+For **PD ACK TEST**, use `build/pd-ack-test` for the same seven measurement references and generate the two Rd screen references with `--features pd-ack-test`. Package with `python pack_demo.py --build-dir build/pd-ack-test --output-name T3P_RUST_METER_PD_ACK_TEST_3.0.3.bin`.
 
 The simulator check requires the pinned [pi32v2-isa revision](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f). The output ELF is for offline evaluation. `pack_demo.py` currently depends on the separate local `doom_on_t3p` research workspace, unpacked stock firmware, and its packing tools. Manufacturer firmware and update binaries are not distributed here.
 

@@ -52,6 +52,12 @@ CC1 の実機試験でも、T3P に同じ識別情報が表示されました。
 
 待機は Rd OFF が30秒、Rd ON が3秒です。試験中に長押しすると中止し、結果画面で長押しするとメニューに戻ります。再試行するときは電源を外してダブル押しします。起動時の設定を確認し、`SWITCHES0` だけに `04`、`05` の順で書き込み、試験終了時に `03` に戻します。`RESTORE ERROR` なら電源を外し、T3P の電源を入れ直します。VBUS は未校正のメーターの読み値です。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
+`PD_RD_TEST_V2` の実機試験では、電源接続済みでダブル押しすると `VBUS PRESENT` が出ました。電源を外してダブル押しすると `RD OFF` と 3.003 V が表示されました。その後 CC1 の向きで電源をつなぎ、短押しすると Rd OFF 時は 2.660 V、Rd ON 時は 5.085 V で、`5V SEEN` と `DEFAULT RD RESTORED` が出ました。電源を外した状態の写真では `NO 5V` で、両方の欄が 3.002 V でした。数値はすべて T3P の表示値です。
+
+## CC1 の GoodCRC 試験
+
+`python build.py --pd-ack-test` でビルドすると同じ位置に **PD ACK TEST** が出ます。接続とボタン操作は上の Rd 試験と同じです。短押し後、FUSB302B 互換のコントローラーがシンクとして、有効な SOP パケットに自動で GoodCRC を返します。3秒以内に 4.5〜5.5 V、CRC が一致する `Source_Capabilities`、送信を示す `I_GCRCSENT` の3つがそろうと `PD ACK SEEN` になります。画面には提示された PDO 数と、GoodCRC の送信を検出したかを表示します。どのパケットへの応答かは、直列接続のアナライザーで確認できます。今回は最初の提示への応答を検証します。5 V の PD 契約と情報照会は次の段階です。この版の実機確認はこれからです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+
 ## 実機での検証
 
 `PD_KEEPALIVE` 版で EPR を維持した CC1 試験では、T3P は `DONE`、`MSG:117 GCRC:117`、`EPR KEEPALIVE:045 ACK:045` を表示しました。4ページの全27行は内容と順序が CY4500 と一致しました。件数は、CY4500 の最初の SOP パケットから45往復目の ACK に続く GoodCRC までの27.47秒間と一致します。この区間の VBUS は約5 Vでした。
@@ -132,6 +138,8 @@ PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします�
 `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin` でローカルの更新ファイルを作ります。
 
 **RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
+
+**PD ACK TEST** は実測版の7枚の比較画像を `build/pd-ack-test` に用意し、`--features pd-ack-test` で Rd 画面の比較画像2枚を生成します。`python pack_demo.py --build-dir build/pd-ack-test --output-name T3P_RUST_METER_PD_ACK_TEST_3.0.3.bin` で更新ファイルを作ります。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

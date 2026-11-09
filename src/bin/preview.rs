@@ -228,6 +228,10 @@ fn main() -> io::Result<()> {
             state,
             off_mv: 3010,
             on_mv,
+            #[cfg(feature = "pd-ack-test")]
+            pdos: if state == 3 { 7 } else { 0 },
+            #[cfg(feature = "pd-ack-test")]
+            goodcrc: state == 3,
         }));
     }
     let mut pixels = [0; SIDE * STRIP_ROWS];

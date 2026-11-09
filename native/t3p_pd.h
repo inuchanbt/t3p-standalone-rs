@@ -19,8 +19,6 @@ struct t3p_pd_capture {
     enum t3p_pd_mode mode;
 };
 
-int t3p_meter_fast_bus(struct t3p_bsp *, struct t3p_meter_bus *);
-int t3p_pd_rx_read(struct t3p_meter_bus *, uint8_t, uint8_t *, unsigned);
 int t3p_pd_rx_config(struct t3p_meter_bus *, uint8_t, uint8_t);
 void t3p_pd_start_capture(struct t3p_pd_capture *, struct t3p_meter_bus *, uint32_t,
                           enum t3p_pd_mode);

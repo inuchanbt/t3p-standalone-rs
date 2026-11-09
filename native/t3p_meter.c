@@ -6,7 +6,7 @@
 
 #define PB 0xfd3100u
 #define TIMER_COUNT 0xfd0604u
-#ifdef T3P_PD_PROFILES
+#if defined(T3P_PD_PROFILES) || defined(T3P_PD_ACK_TEST)
 #define PD_TIMER 0xfd0614u
 #endif
 #define SCL (1u << 2)
@@ -41,7 +41,7 @@ static int delay(void *ctx)
     }
     return -1;
 }
-#ifdef T3P_PD_PROFILES
+#if defined(T3P_PD_PROFILES) || defined(T3P_PD_ACK_TEST)
 static int pd_delay(void *ctx)
 {
     struct t3p_bsp *b = ctx;
@@ -172,12 +172,14 @@ static int pd_write_register(struct t3p_meter_bus *b, uint8_t reg, uint8_t value
     return error ? -1 : 0;
 }
 #endif
-#ifdef T3P_PD_PROFILES
+#if defined(T3P_PD_PROFILES) || defined(T3P_PD_ACK_TEST)
 int t3p_pd_rx_read(struct t3p_meter_bus *b, uint8_t reg, uint8_t *data, unsigned count)
 {
     return read_register(b, 0x44, reg, data, count);
 }
+#endif
 
+#ifdef T3P_PD_PROFILES
 int t3p_pd_rx_config(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
 {
     /* Preserve both Rd bits. Allow only CC1 RX routing, power, RX flush and SOP' RX. */
@@ -210,6 +212,52 @@ int t3p_pd_set_rd(struct t3p_meter_bus *b, uint8_t switches)
         return -1;
     return pd_write_register(b, 0x02, switches) ||
            t3p_pd_read_register(b, 0x02, &actual) || actual != switches ? -1 : 0;
+}
+#endif
+#ifdef T3P_PD_ACK_TEST
+#define ACK_SWITCHES0 0x02
+#define ACK_SWITCHES1 0x03
+#define ACK_CONTROL1 0x07
+#define ACK_POWER 0x0b
+#define ACK_INTERRUPTA 0x3e
+#define ACK_RX_FLUSH 0x04
+#define ACK_SINK_CC1 0x25 /* AUTO_CRC, TXCC1, Rev 2.0, Sink/UFP */
+
+static int write_checked(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value,
+                         uint8_t expected)
+{
+    uint8_t actual;
+    return pd_write_register(bus, reg, value) || t3p_pd_rx_read(bus, reg, &actual, 1) ||
+           actual != expected ? -1 : 0;
+}
+
+int t3p_pd_arm_ack(struct t3p_meter_bus *bus, uint8_t *saved_switches1, unsigned *restore)
+{
+    uint8_t registers[3], status[5];
+    if (t3p_pd_rx_read(bus, ACK_SWITCHES0, registers, sizeof(registers))) return -1;
+    /* Verify Rd is still off, TX is disabled and the measurement mux selects CC. */
+    if (registers[0] != T3P_RD_CC1_OFF || (registers[1] & 0x0f) || (registers[2] & 0x40))
+        return 1;
+
+    *saved_switches1 = registers[1];
+    *restore = 1;
+    /* Flush RX with its receiver off and clear stale interrupt latches. */
+    if (write_checked(bus, ACK_POWER, 0x09, 0x09) ||
+        write_checked(bus, ACK_CONTROL1, ACK_RX_FLUSH, 0) ||
+        t3p_pd_rx_read(bus, ACK_INTERRUPTA, status, sizeof(status)))
+        return -1;
+    if ((status[3] & 0x3f) != 0x28) return 1; /* RX and TX FIFOs empty */
+    return write_checked(bus, ACK_POWER, 0x0f, 0x0f) ||
+           write_checked(bus, ACK_SWITCHES1, ACK_SINK_CC1, ACK_SINK_CC1) ? -1 : 0;
+}
+
+int t3p_pd_disarm_ack(struct t3p_meter_bus *bus, uint8_t saved_switches1)
+{
+    int tx_failed = write_checked(bus, ACK_SWITCHES1, saved_switches1, saved_switches1) &&
+                    write_checked(bus, ACK_SWITCHES1, saved_switches1, saved_switches1);
+    int power_failed = write_checked(bus, ACK_POWER, 0x01, 0x01) &&
+                       write_checked(bus, ACK_POWER, 0x01, 0x01);
+    return tx_failed || power_failed ? -1 : 0;
 }
 #endif
 int t3p_meter_identify(struct t3p_meter_bus *b)

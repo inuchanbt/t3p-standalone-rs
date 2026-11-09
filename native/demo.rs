@@ -37,6 +37,10 @@ static mut RD_TEST: crate::RdTest = crate::RdTest {
     state: 0,
     off_mv: u16::MAX,
     on_mv: u16::MAX,
+    #[cfg(feature = "pd-ack-test")]
+    pdos: 0,
+    #[cfg(feature = "pd-ack-test")]
+    goodcrc: false,
 };
 #[cfg(feature = "pd-profiles")]
 static mut PD_STATE: u32 = 0;
@@ -108,11 +112,35 @@ unsafe extern "C" fn meter_on_rd_test_page() -> u32 {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_rd_test(state: u32, off_mv: u32, on_mv: u32) {
     unsafe {
-        *(&raw mut RD_TEST) = crate::RdTest {
-            state: state as u8,
-            off_mv: off_mv as u16,
-            on_mv: on_mv as u16,
-        };
+        let test = &mut *(&raw mut RD_TEST);
+        test.state = state as u8;
+        test.off_mv = off_mv as u16;
+        test.on_mv = on_mv as u16;
+    }
+}
+
+#[cfg(feature = "pd-ack-test")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_rd_ack(pdos: u32, goodcrc: u32) {
+    unsafe {
+        let test = &mut *(&raw mut RD_TEST);
+        test.pdos = pdos.min(7) as u8;
+        test.goodcrc = goodcrc != 0;
+    }
+}
+
+#[cfg(feature = "pd-ack-test")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_pd_ack_pdo_count(frame: *const u8, len: u32) -> i32 {
+    if frame.is_null() || !(7..=35).contains(&len) {
+        return -1;
+    }
+    // The native FIFO reader owns the initialized record until this call returns.
+    let record = unsafe { core::slice::from_raw_parts(frame, len as usize) };
+    match crate::SourceCaps::from_fifo(record) {
+        Ok(Some(caps)) => caps.rows().len() as i32,
+        Ok(None) => 0,
+        Err(_) => -1,
     }
 }
 

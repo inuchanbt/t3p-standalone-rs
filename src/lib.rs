@@ -37,6 +37,10 @@ pub struct RdTest {
     pub state: u8,
     pub off_mv: u16,
     pub on_mv: u16,
+    #[cfg(feature = "pd-ack-test")]
+    pub pdos: u8,
+    #[cfg(feature = "pd-ack-test")]
+    pub goodcrc: bool,
 }
 
 #[derive(Clone, Copy)]

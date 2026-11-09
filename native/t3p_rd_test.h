@@ -10,7 +10,8 @@ enum { T3P_RD_DEFAULT = 0x03, T3P_RD_CC1_OFF = 0x04, T3P_RD_CC1_ON = 0x05 };
 enum t3p_rd_state {
     T3P_RD_READY, T3P_RD_OFF, T3P_RD_ON, T3P_RD_5V_SEEN, T3P_RD_NO_5V,
     T3P_RD_TIMED_OUT, T3P_RD_CANCELLED, T3P_RD_VBUS_PRESENT, T3P_RD_BAD_CONFIG,
-    T3P_RD_BUS_ERROR, T3P_RD_RESTORE_FAILED, T3P_RD_VBUS_HIGH
+    T3P_RD_BUS_ERROR, T3P_RD_RESTORE_FAILED, T3P_RD_VBUS_HIGH, T3P_RD_NO_CAPS,
+    T3P_RD_NO_GOODCRC, T3P_RD_RX_ERROR, T3P_RD_TIMER_ERROR
 };
 
 struct t3p_rd_test {
@@ -18,10 +19,18 @@ struct t3p_rd_test {
     uint32_t started, sampled;
     uint16_t off_mv, on_mv;
     unsigned good_samples;
+#ifdef T3P_PD_ACK_TEST
+    uint8_t saved_switches1, pdos;
+    unsigned restore_ack, goodcrc, rx_ready;
+#endif
 };
 
 int t3p_pd_rd_baseline(struct t3p_meter_bus *);
 int t3p_pd_set_rd(struct t3p_meter_bus *, uint8_t switches);
+#ifdef T3P_PD_ACK_TEST
+int t3p_pd_arm_ack(struct t3p_meter_bus *, uint8_t *, unsigned *);
+int t3p_pd_disarm_ack(struct t3p_meter_bus *, uint8_t);
+#endif
 void t3p_rd_test_step(struct t3p_rd_test *, struct t3p_meter_bus *, uint32_t now);
 void t3p_rd_test_cancel(struct t3p_rd_test *, struct t3p_meter_bus *);
 void t3p_rd_test_poll(struct t3p_rd_test *, struct t3p_meter_bus *, uint32_t now);
