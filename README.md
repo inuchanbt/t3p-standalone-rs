@@ -38,6 +38,8 @@ The current receive-priority trial pauses automatic screen refresh during an EPR
 
 ## Hardware bring-up
 
+In a sustained EPR test on CC1 with `PD_KEEPALIVE`, the T3P showed `DONE`, `MSG:117 GCRC:117` and `EPR KEEPALIVE:045 ACK:045`. All 27 history rows across four pages matched the CY4500 trace in order. The counts match the trace from its first SOP packet through the GoodCRC after the 45th KeepAlive ACK, at 27.47 seconds. VBUS measured about 5 V in that interval.
+
 With `PD_KEEPALIVE`, both CC1 SNIFF runs showed `DONE`. All 18 displayed rows in each run matched the corresponding CY4500 trace in order, and the GoodCRC counts matched at 18. The sink sent `EPR_EXIT` about 29 ms after the EPR `PS_RDY`. Both traces had zero KeepAlive and ACK messages, matching the two zero counters on the T3P. Nonzero counts were verified by replaying the earlier, longer CY4500 trace on the host.
 
 Both EPR OFFER runs showed `CAPTURED` and `RX:019 SPR:001 E0:001 E1:001`. These counts match each CY4500 trace through the second EPR capabilities chunk, inclusive. PDOs 8 through 11 also matched at 28, 36 and 48 V at 5 A, and 15–48 V AVS with a PDP of 240 W. The CY4500 measured VBUS around 5 V across the four runs.
