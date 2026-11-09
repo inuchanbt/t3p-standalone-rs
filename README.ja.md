@@ -56,7 +56,9 @@ CC1 の実機試験でも、T3P に同じ識別情報が表示されました。
 
 ## CC1 の GoodCRC 試験
 
-`python build.py --pd-ack-test` でビルドすると同じ位置に **PD ACK TEST** が出ます。接続とボタン操作は上の Rd 試験と同じです。短押し後、FUSB302B 互換のコントローラーがシンクとして、有効な SOP パケットに自動で GoodCRC を返します。3秒以内に 4.5〜5.5 V、CRC が一致する `Source_Capabilities`、送信を示す `I_GCRCSENT` の3つがそろうと `PD ACK SEEN` になります。画面には提示された PDO 数と、GoodCRC の送信を検出したかを表示します。どのパケットへの応答かは、直列接続のアナライザーで確認できます。今回は最初の提示への応答を検証します。5 V の PD 契約と情報照会は次の段階です。この版の実機確認はこれからです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+`python build.py --pd-ack-test` でビルドすると同じ位置に **PD ACK TEST** が出ます。接続とボタン操作は上の Rd 試験と同じです。短押し後、FUSB302B 互換のコントローラーがシンクとして、有効な SOP パケットに自動で GoodCRC を返します。3秒以内に 4.5〜5.5 V、CRC が一致する `Source_Capabilities`、送信を示す `I_GCRCSENT` の3つがそろうと `PD ACK SEEN` になります。画面には提示された PDO 数と、GoodCRC の送信を検出したかを表示します。今回は最初の提示への応答を検証します。5 V の PD 契約と情報照会は次の段階です。
+
+実機の初回は 5.085 V、PDO 5件で `PD ACK SEEN` となりました。CY4500-EPR でも最初の `Source_Capabilities` の終了から 78 µs 後に、同じメッセージ ID の SOP GoodCRC を確認しました。再試行では同じ電圧で `NO SRC CAPS` となり、アナライザーでは `Source_Capabilities` が繰り返され、SOP GoodCRC は観測されませんでした。V2 は試行ごとに `PD_RESET` でコントローラー内部の PD 送受信回路を初期化してから、受信 FIFO をクリアして GoodCRC の自動応答を有効にします。V2 の繰り返し動作は実機確認待ちです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
 ## 実機での検証
 
@@ -139,7 +141,7 @@ PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします�
 
 **RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
 
-**PD ACK TEST** は実測版の7枚の比較画像を `build/pd-ack-test` に用意し、`--features pd-ack-test` で Rd 画面の比較画像2枚を生成します。`python pack_demo.py --build-dir build/pd-ack-test --output-name T3P_RUST_METER_PD_ACK_TEST_3.0.3.bin` で更新ファイルを作ります。
+**PD ACK TEST** は実測版の7枚の比較画像を `build/pd-ack-test` に用意し、`--features pd-ack-test` で Rd 画面の比較画像2枚を生成します。`python pack_demo.py --build-dir build/pd-ack-test --output-name T3P_RUST_METER_PD_ACK_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

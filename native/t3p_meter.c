@@ -219,8 +219,10 @@ int t3p_pd_set_rd(struct t3p_meter_bus *b, uint8_t switches)
 #define ACK_SWITCHES1 0x03
 #define ACK_CONTROL1 0x07
 #define ACK_POWER 0x0b
+#define ACK_RESET 0x0c
 #define ACK_INTERRUPTA 0x3e
 #define ACK_RX_FLUSH 0x04
+#define ACK_PD_RESET 0x02
 #define ACK_SINK_CC1 0x25 /* AUTO_CRC, TXCC1, Rev 2.0, Sink/UFP */
 
 static int write_checked(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value,
@@ -241,8 +243,10 @@ int t3p_pd_arm_ack(struct t3p_meter_bus *bus, uint8_t *saved_switches1, unsigned
 
     *saved_switches1 = registers[1];
     *restore = 1;
-    /* Flush RX with its receiver off and clear stale interrupt latches. */
+    /* Reset the local PD logic on every attach. Keep the oscillator on and
+       the receiver off while resetting and flushing RX. */
     if (write_checked(bus, ACK_POWER, 0x09, 0x09) ||
+        pd_write_register(bus, ACK_RESET, ACK_PD_RESET) ||
         write_checked(bus, ACK_CONTROL1, ACK_RX_FLUSH, 0) ||
         t3p_pd_rx_read(bus, ACK_INTERRUPTA, status, sizeof(status)))
         return -1;

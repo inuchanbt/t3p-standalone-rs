@@ -56,7 +56,9 @@ On hardware with `PD_RD_TEST_V2`, a double press with the source already supplyi
 
 ## CC1 GoodCRC test
 
-Build with `python build.py --pd-ack-test` to open **PD ACK TEST** in the same position. Use the Rd test connection and button sequence above. After the short press, the FUSB302B-compatible controller automatically answers valid SOP packets with GoodCRC as a sink. `PD ACK SEEN` requires a 4.5–5.5 V reading, a CRC-checked `Source_Capabilities` message and the controller's `I_GCRCSENT` flag within three seconds. The screen shows the number of offered PDOs and whether the controller reported sending a GoodCRC. An inline analyzer can confirm which packet it acknowledged. This test covers the response to the initial offer. Establishing a 5 V PD contract and sending information queries are separate steps. Hardware verification of this build is pending. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+Build with `python build.py --pd-ack-test` to open **PD ACK TEST** in the same position. Use the Rd test connection and button sequence above. After the short press, the FUSB302B-compatible controller automatically answers valid SOP packets with GoodCRC as a sink. `PD ACK SEEN` requires a 4.5–5.5 V reading, a CRC-checked `Source_Capabilities` message and the controller's `I_GCRCSENT` flag within three seconds. The screen shows the number of offered PDOs and whether the controller reported sending a GoodCRC. This test covers the response to the initial offer. Establishing a 5 V PD contract and sending information queries are separate steps.
+
+The first hardware attempt showed `PD ACK SEEN` at 5.085 V with five PDOs. The CY4500-EPR trace showed a matching SOP GoodCRC 78 µs after the end of the initial `Source_Capabilities`. A later attempt showed `NO SRC CAPS` at the same voltage while the analyzer saw repeated `Source_Capabilities` and no SOP GoodCRC. V2 resets the controller's local PD transmit and receive logic with `PD_RESET` before flushing RX and enabling GoodCRC on every attempt. Repeatability with V2 is pending hardware verification. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
 ## Hardware bring-up
 
@@ -139,7 +141,7 @@ Package the PD and CABLE trial locally with `python pack_demo.py --build-dir bui
 
 For **RD TEST**, generate the seven measurement references under `build/pd-rd-test`. Generate `preview-rd-off.ppm` and `preview-rd-5v.ppm` with `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` or `--rd-5v` for the respective reference. Package with `python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin`.
 
-For **PD ACK TEST**, use `build/pd-ack-test` for the same seven measurement references and generate the two Rd screen references with `--features pd-ack-test`. Package with `python pack_demo.py --build-dir build/pd-ack-test --output-name T3P_RUST_METER_PD_ACK_TEST_3.0.3.bin`.
+For **PD ACK TEST**, use `build/pd-ack-test` for the same seven measurement references and generate the two Rd screen references with `--features pd-ack-test`. Package with `python pack_demo.py --build-dir build/pd-ack-test --output-name T3P_RUST_METER_PD_ACK_TEST_V2_3.0.3.bin`.
 
 The simulator check requires the pinned [pi32v2-isa revision](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f). The output ELF is for offline evaluation. `pack_demo.py` currently depends on the separate local `doom_on_t3p` research workspace, unpacked stock firmware, and its packing tools. Manufacturer firmware and update binaries are not distributed here.
 
