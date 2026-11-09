@@ -10,7 +10,7 @@ enum t3p_pd_state {
     T3P_PD_PARTIAL
 };
 
-enum t3p_pd_mode { T3P_PD_SPR, T3P_PD_EPR, T3P_PD_SNIFF };
+enum t3p_pd_mode { T3P_PD_SPR, T3P_PD_EPR, T3P_PD_SNIFF, T3P_PD_CABLE };
 
 struct t3p_pd_capture {
     uint32_t started, polled;

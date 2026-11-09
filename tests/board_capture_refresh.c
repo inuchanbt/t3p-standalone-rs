@@ -59,6 +59,7 @@ void t3p_pd_start_capture(struct t3p_pd_capture *pd, struct t3p_meter_bus *bus,
 {
     (void)bus;
     assert(!capturing);
+    assert((unsigned)mode + 1 == requested_action);
     capture_at = now;
     capturing = 1;
     pd->mode = mode;
@@ -112,5 +113,6 @@ int main(void)
     verify_capture(1);
     verify_capture(2);
     verify_capture(3);
+    verify_capture(4);
     return 0;
 }

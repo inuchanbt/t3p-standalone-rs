@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+pub(crate) mod cable;
+pub use cable::CableCapture;
+
 pub(crate) const PROFILES_PAGE: u32 = 5;
 pub(crate) const EPR_PAGE: u32 = 6;
 pub(crate) const SNIFF_PAGE: u32 = 7;
+pub(crate) const CABLE_PAGE: u32 = 8;
+pub(crate) const PD_PAGE_COUNT: u32 = CABLE_PAGE + 1;
+pub(crate) const CABLE_MODE: u32 = 3;
+pub(crate) const CABLE_SECTIONS: u8 = 3;
+const SOP_TOKEN: u8 = 7;
+const SOP1_TOKEN: u8 = 6;
 
 #[derive(Clone, Copy)]
 pub struct SourceCaps {
@@ -13,12 +22,12 @@ pub struct SourceCaps {
 #[derive(Debug, PartialEq, Eq)]
 pub struct BadFrame;
 
-fn checked_fifo(frame: &[u8]) -> Result<(u8, u8, &[u8]), BadFrame> {
+fn checked_fifo(frame: &[u8], sop: u8) -> Result<(u8, u8, &[u8]), BadFrame> {
     let &[token, lo, hi, ref rest @ ..] = frame else {
         return Err(BadFrame);
     };
     let payload_len = usize::from((hi >> 4) & 7) * 4;
-    if token >> 5 != 7 || rest.len() != payload_len + 4 {
+    if token >> 5 != sop || rest.len() != payload_len + 4 {
         return Err(BadFrame);
     }
     if crc32(&frame[1..][..2 + payload_len]).to_le_bytes() != rest[payload_len..] {
@@ -31,7 +40,7 @@ impl SourceCaps {
     /// FUSB302 RX FIFO record: SOP token, two header bytes, data objects, CRC.
     /// A well-formed packet of another type is ignored.
     pub fn from_fifo(frame: &[u8]) -> Result<Option<Self>, BadFrame> {
-        let (lo, hi, payload) = checked_fifo(frame)?;
+        let (lo, hi, payload) = checked_fifo(frame, SOP_TOKEN)?;
         let count = payload.len() / 4;
         // Non-extended Source_Capabilities from the source on SOP.
         if hi & 0x81 != 0x01 || lo & 0x1f != 1 || count == 0 {
@@ -123,7 +132,7 @@ impl EprCapture {
 
     /// Accept two independently CRC-checked EPR_Source_Capabilities chunks.
     pub fn push(&mut self, frame: &[u8], now: u32) -> Result<EprEvent, BadFrame> {
-        let (lo, hi, payload) = checked_fifo(frame)?;
+        let (lo, hi, payload) = checked_fifo(frame, SOP_TOKEN)?;
         self.rx_count = self.rx_count.saturating_add(1);
         if hi & 0x81 == 0x01 && lo & 0x1f == 1 && !payload.is_empty() {
             self.spr_count = self.spr_count.saturating_add(1);
@@ -325,7 +334,7 @@ impl PdSniff {
     }
 
     pub fn push(&mut self, frame: &[u8]) -> Result<(), BadFrame> {
-        let (lo, hi, payload) = checked_fifo(frame)?;
+        let (lo, hi, payload) = checked_fifo(frame, SOP_TOKEN)?;
         let kind = lo & 31;
         if hi & 0x80 == 0 && payload.is_empty() && kind == 1 {
             self.good_crc = self.good_crc.saturating_add(1);
@@ -499,7 +508,9 @@ pub(crate) struct Profiles {
     pub(crate) mode: u32,
     pub(crate) epr_counters: u32,
     pub(crate) sniff: Option<SniffWindow>,
-    // One retained warning bit for each of SPR, EPR and sniff capture.
+    pub(crate) cable: CableCapture,
+    pub(crate) cable_section: u8,
+    // One retained warning bit per capture mode.
     pub(crate) fifo_warnings: u32,
 }
 
@@ -512,7 +523,7 @@ impl Profiles {
                 _ => b"TIMER UNAVAILABLE",
             };
         }
-        let fifo_warning = mode < 3 && self.fifo_warnings & (1u32 << mode) != 0;
+        let fifo_warning = mode <= CABLE_MODE && self.fifo_warnings & (1u32 << mode) != 0;
         if self.mode != mode {
             if mode == 2 && self.sniff.is_some() {
                 return if fifo_warning {
@@ -521,7 +532,10 @@ impl Profiles {
                     b"STOPPED"
                 };
             }
-            return if mode == 0 && self.caps.is_some() || mode == 1 && self.epr.is_some() {
+            return if (mode == 0 && self.caps.is_some())
+                || (mode == 1 && self.epr.is_some())
+                || (mode == CABLE_MODE && self.cable.captured())
+            {
                 if mode == 1 && self.epr.is_some_and(|caps| !caps.complete) {
                     if fifo_warning {
                         b"PARTIAL WARN"
@@ -545,6 +559,7 @@ impl Profiles {
                 2 => return b"CAPTURE WARN",
                 3 if mode == 2 => return b"DONE WARN",
                 3 if mode == 1 => return b"NO EPR WARN",
+                3 if mode == CABLE_MODE => return b"NO ID WARN",
                 3 => return b"NO CAP WARN",
                 10 => return b"PARTIAL WARN",
                 _ => {}
@@ -556,6 +571,7 @@ impl Profiles {
             2 => b"CAPTURED",
             3 if mode == 1 => b"NO EPR CAPS",
             3 if mode == 2 => b"DONE",
+            3 if mode == CABLE_MODE => b"NO CABLE ID",
             3 => b"NO SOURCE CAPS",
             4 => b"CONFIG MISMATCH",
             5 => b"I2C ERROR",
@@ -582,6 +598,8 @@ mod tests {
             mode: 2,
             epr_counters: 0,
             sniff: None,
+            cable: CableCapture::new(),
+            cable_section: 0,
             fifo_warnings: 1 << 2,
         };
         assert_eq!(profiles.status(2), b"LISTEN WARN");
@@ -608,6 +626,84 @@ mod tests {
         }
         assert!(bytes.next().is_none());
         frame
+    }
+
+    #[test]
+    fn cable_identity_requires_a_crc_valid_sop_prime_cable_ack() {
+        let mut packets = include_str!("../tests/cable_identity.hex").lines();
+        let request = fixture::<11>(packets.next().unwrap());
+        let good_crc = fixture::<7>(packets.next().unwrap());
+        let reply = fixture::<27>(packets.next().unwrap());
+        let mut cable = CableCapture::new();
+        let mut sop = reply;
+        sop[0] = SOP_TOKEN << 5;
+        assert_eq!(cable.push(&sop), Ok(false));
+        assert_eq!(cable.sop_prime, 0);
+        assert_eq!(cable.push(&request), Ok(false));
+        assert_eq!(cable.push(&good_crc), Ok(false));
+        let mut corrupt = reply;
+        corrupt[26] ^= 1;
+        assert_eq!(cable.push(&corrupt), Err(BadFrame));
+        assert!(!cable.captured());
+
+        // Same bytes with the actual SOP' token and a valid CRC.
+        assert_eq!(cable.push(&reply), Ok(true));
+        assert_eq!(cable.sop_prime, 3);
+        let id = cable.identity.unwrap();
+        assert_eq!(id.header, 0x518f);
+        assert_eq!(
+            id.words(),
+            [0xff00_a841, 0x1c60_20c2, 0, 0x0a14_0310, 0x460a_2643]
+        );
+        assert!(!id.active());
+        let vdo = id.vdo().unwrap();
+        assert_eq!(
+            (vdo.speed, vdo.voltage, vdo.current, vdo.latency),
+            (3, 3, 2, 1)
+        );
+        assert!(vdo.epr);
+        assert_eq!((vdo.hardware, vdo.firmware, vdo.version), (4, 6, 0));
+        assert_eq!(cable.push(&reply), Ok(false));
+    }
+
+    #[test]
+    fn cable_identity_preserves_legacy_words_and_requires_active_vdo2() {
+        let mut reply = fixture::<27>(
+            include_str!("../tests/cable_identity.hex")
+                .lines()
+                .last()
+                .unwrap(),
+        );
+        reply[1] = 0x4f; // PD 2.0
+        reply[4] = 0x80; // SVDM 1.0
+        let crc = crc32(&reply[1..23]).to_le_bytes();
+        reply[23..].copy_from_slice(&crc);
+        let mut cable = CableCapture::new();
+        assert_eq!(cable.push(&reply), Ok(true));
+        assert_eq!(cable.identity.unwrap().words()[0], 0xff00_8041);
+        assert!(cable.identity.unwrap().vdo().is_none());
+
+        reply[1] = 0x8f;
+        reply[4] = 0xa8;
+        reply[10] = 0x20; // Active Cable product type
+        reply[19..23].copy_from_slice(&0x466a_365bu32.to_le_bytes());
+        let crc = crc32(&reply[1..23]).to_le_bytes();
+        reply[23..].copy_from_slice(&crc);
+        let mut cable = CableCapture::new();
+        assert_eq!(cable.push(&reply), Ok(false));
+
+        let mut active = [0; 31];
+        active[..23].copy_from_slice(&reply[..23]);
+        active[2] = 0x61;
+        active[23..27].copy_from_slice(&0x0040_0009u32.to_le_bytes());
+        let crc = crc32(&active[1..27]).to_le_bytes();
+        active[27..].copy_from_slice(&crc);
+        assert_eq!(cable.push(&active), Ok(true));
+        let id = cable.identity.unwrap();
+        assert!(id.active());
+        assert_eq!(id.words()[5], 0x0040_0009);
+        let vdo = id.vdo().unwrap();
+        assert!(vdo.vbus_through && vdo.sop2_present);
     }
 
     fn epr_frames() -> ([u8; 35], [u8; 27]) {

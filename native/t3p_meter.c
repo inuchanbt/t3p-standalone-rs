@@ -169,10 +169,10 @@ int t3p_pd_rx_read(struct t3p_meter_bus *b, uint8_t reg, uint8_t *data, unsigned
 
 int t3p_pd_rx_config(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
 {
-    /* Preserve both Rd bits. Allow only CC1 RX routing, power and RX flush. */
+    /* Preserve both Rd bits. Allow only CC1 RX routing, power, RX flush and SOP' RX. */
     if (!((reg == 0x02 && (value == 0x03 || value == 0x07)) ||
           (reg == 0x0b && (value == 0x01 || value == 0x07 || value == 0x09)) ||
-          (reg == 0x07 && value == 0x04)))
+          (reg == 0x07 && (value == 0x00 || value == 0x01 || value == 0x04))))
         return -1;
     int error = start(b) || write_byte(b, 0x44) || write_byte(b, reg) || write_byte(b, value);
     stop(b);

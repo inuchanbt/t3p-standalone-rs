@@ -23,8 +23,8 @@ mod settings {
 }
 
 use energy::{Totals, Tracker};
-pub use pd::{EprCaps, EprCapture, EprEvent, PdSniff, SourceCaps};
-use pd::{PROFILES_PAGE, Profiles};
+use pd::{CABLE_SECTIONS, PD_PAGE_COUNT, PROFILES_PAGE, Profiles};
+pub use pd::{CableCapture, EprCaps, EprCapture, EprEvent, PdSniff, SourceCaps};
 use power_history::{GraphTrace, GraphWindow, History, Sample};
 use settings::TimerMode;
 
@@ -103,6 +103,8 @@ impl Overview {
             mode: 0,
             epr_counters: 0,
             sniff: None,
+            cable: CableCapture::new(),
+            cable_section: 0,
             fifo_warnings: 0,
         });
     }
@@ -132,8 +134,20 @@ impl Overview {
         }
     }
 
+    pub fn set_pd_cable(&mut self, capture: CableCapture, section: u8) {
+        if let Some(ref mut profiles) = self.pd_profiles {
+            profiles.cable = capture;
+            profiles.cable_section = section.min(CABLE_SECTIONS - 1);
+        }
+    }
+
     pub fn set_page(&mut self, page: u32) {
-        self.page = page % (PROFILES_PAGE + 3 * u32::from(self.pd_profiles.is_some()));
+        self.page = page
+            % if self.pd_profiles.is_some() {
+                PD_PAGE_COUNT
+            } else {
+                PROFILES_PAGE
+            };
     }
 
     pub fn set_graph_window(&mut self, window: u32) {

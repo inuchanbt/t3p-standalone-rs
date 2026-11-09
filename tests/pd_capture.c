@@ -5,6 +5,7 @@
 
 struct fake_phy {
     uint8_t registers[0x43];
+    uint8_t token;
     unsigned writes, consumed, queued, status_reads;
 };
 
@@ -13,6 +14,7 @@ static struct fake_phy reset_phy(void)
     return (struct fake_phy){
         .registers = {[0x01] = 0x91, [0x02] = 0x03, [0x08] = 0x02, [0x09] = 0x06,
                       [0x0b] = 0x01, [0x41] = 0x28},
+        .token = 0xe0,
     };
 }
 
@@ -24,6 +26,7 @@ int t3p_pd_rx_read(struct t3p_meter_bus *bus, uint8_t reg, uint8_t *out, unsigne
     if (reg == 0x43) {
         assert(phy->consumed + count <= sizeof(offer));
         memcpy(out, offer + phy->consumed, count);
+        if (!phy->consumed) out[0] = phy->token;
         phy->consumed += count;
         if (phy->consumed == sizeof(offer)) {
             if (phy->queued > 1) {
@@ -49,12 +52,14 @@ int t3p_pd_rx_config(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
 {
     struct fake_phy *phy = bus->context;
     ++phy->writes;
-    if (reg == 0x07) {
-        assert(value == 4 && phy->registers[0x0b] == 9);
+    if (reg == 0x07 && value == 4) {
+        assert(phy->registers[0x0b] == 9);
         phy->registers[0x41] = 0x28;
+        phy->registers[0x07] = 0;
         return 0;
     }
-    assert(reg == 0x0b || (reg == 0x02 && (value == 3 || value == 7)));
+    assert(reg == 0x0b || (reg == 0x02 && (value == 3 || value == 7)) ||
+           (reg == 0x07 && value <= 1));
     phy->registers[reg] = value;
     return 0;
 }
@@ -63,8 +68,9 @@ static unsigned records;
 static int32_t record_result = 1;
 int32_t meter_pd_record(const uint8_t *frame, uint32_t count, uint32_t mode, uint32_t now)
 {
-    (void)mode; (void)now;
-    assert(count == sizeof(offer) && !memcmp(frame, offer, count));
+    (void)now;
+    assert(count == sizeof(offer) && !memcmp(frame + 1, offer + 1, count - 1));
+    assert(frame[0] == 0xe0 || (mode == T3P_PD_CABLE && frame[0] == 0xc0));
     ++records;
     return record_result;
 }
@@ -234,5 +240,30 @@ int main(void)
     before = records;
     t3p_pd_poll_capture(&pd, &bus, 77000);
     assert(pd.state == T3P_PD_LISTENING && records == before + 1 && !pd.catch_up);
+
+    t3p_pd_start_capture(&pd, &bus, 78000, T3P_PD_CABLE);
+    assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_CABLE);
+    assert(phy.registers[0x07] == 1 && phy.registers[0x02] == 7);
+    phy.consumed = 0;
+    phy.token = 0xc0;
+    phy.registers[0x41] = 0x08;
+    phy.registers[0x42] = 0x10;
+    record_result = 1;
+    before = records;
+    t3p_pd_poll_capture(&pd, &bus, 78001);
+    assert(pd.state == T3P_PD_CAPTURED && records == before + 1);
+    assert(phy.registers[0x07] == 0 && phy.registers[0x02] == 3 && phy.registers[0x0b] == 1);
+
+    t3p_pd_start_capture(&pd, &bus, 79000, T3P_PD_CABLE);
+    t3p_pd_poll_capture(&pd, &bus, 109000);
+    assert(pd.state == T3P_PD_TIMEOUT && phy.registers[0x07] == 0);
+    t3p_pd_start_capture(&pd, &bus, 110000, T3P_PD_CABLE);
+    t3p_pd_start_capture(&pd, &bus, 111000, T3P_PD_SNIFF);
+    assert(pd.state == T3P_PD_LISTENING && pd.mode == T3P_PD_SNIFF && phy.registers[0x07] == 0);
+    phy.consumed = 0;
+    phy.registers[0x41] = 0x08;
+    phy.registers[0x42] = 0x10;
+    t3p_pd_poll_capture(&pd, &bus, 111001);
+    assert(pd.state == T3P_PD_BAD_FRAME && records == before + 1);
     return 0;
 }

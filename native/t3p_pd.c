@@ -3,6 +3,8 @@
 
 #define SWITCHES0 0x02
 #define CONTROL1 0x07
+#define ENSOP1 0x01
+#define RX_FLUSH 0x04
 #define POWER 0x0b
 #define INTERRUPTA 0x3e
 #define STATUS1 0x41
@@ -13,6 +15,8 @@
 #define TX_IDLE_MASK 0x0f
 #define TX_IDLE 0x08
 #define RX_BURST_LIMIT 4u
+#define SOP_TOKEN 7u
+#define SOP1_TOKEN 6u
 
 /* 1: complete, 2: partial EPR, 3: first EPR chunk, 0: ignored, -1: bad frame. */
 int32_t meter_pd_record(const uint8_t *, uint32_t, uint32_t, uint32_t);
@@ -20,7 +24,7 @@ int32_t meter_pd_record(const uint8_t *, uint32_t, uint32_t, uint32_t);
 static int configured(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
 {
     uint8_t actual;
-    uint8_t expected = reg == CONTROL1 ? 0 : value; /* RX_FLUSH self clears */
+    uint8_t expected = reg == CONTROL1 ? value & ~RX_FLUSH : value;
     return !t3p_pd_rx_config(bus, reg, value) &&
            !t3p_pd_rx_read(bus, reg, &actual, 1) && actual == expected;
 }
@@ -28,7 +32,8 @@ static int configured(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
 static void stop_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus,
                          enum t3p_pd_state state)
 {
-    if (!configured(bus, POWER, 0x01) || !configured(bus, SWITCHES0, 0x03))
+    if (!configured(bus, POWER, 0x01) || !configured(bus, SWITCHES0, 0x03) ||
+        (capture->mode == T3P_PD_CABLE && !configured(bus, CONTROL1, 0)))
         state = T3P_PD_BUS_ERROR;
     capture->state = state;
 }
@@ -67,7 +72,7 @@ void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *
     /* Flush with the oscillator on and the receiver off, then select one CC.
      * Once a write or readback fails, leave further configuration to a reboot. */
     uint8_t fifo_status;
-    if (!configured(bus, POWER, 0x09) || !configured(bus, CONTROL1, 0x04) ||
+    if (!configured(bus, POWER, 0x09) || !configured(bus, CONTROL1, RX_FLUSH) ||
         t3p_pd_rx_read(bus, STATUS1, &fifo_status, 1))
         return;
     if ((fifo_status & 0x3f) != (RX_EMPTY | TX_IDLE)) {
@@ -75,6 +80,7 @@ void t3p_pd_start_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *
         return;
     }
     if (!configured(bus, SWITCHES0, 0x07) ||
+        (mode == T3P_PD_CABLE && !configured(bus, CONTROL1, ENSOP1)) ||
         !configured(bus, POWER, 0x07))
         return;
 
@@ -138,7 +144,8 @@ static int poll_one(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, u
         return 0;
     }
     unsigned body = 4u + 4u * ((frame[2] >> 4) & 7u);
-    if ((frame[0] >> 5) != 7) {
+    unsigned token = frame[0] >> 5;
+    if (token != SOP_TOKEN && !(capture->mode == T3P_PD_CABLE && token == SOP1_TOKEN)) {
         stop_capture(capture, bus, T3P_PD_BAD_FRAME);
         return 0;
     }
@@ -158,8 +165,8 @@ static int poll_one(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, u
 
 void t3p_pd_poll_capture(struct t3p_pd_capture *capture, struct t3p_meter_bus *bus, uint32_t now)
 {
-    /* Catch up on queued EPR or sniff traffic without a display strip or sleep
-     * between records. Bound work so other tasks still run regularly. */
+    /* Catch up on queued traffic without a display strip or sleep between
+     * records. Bound work so other tasks still run regularly. */
     unsigned consumed = 0;
     capture->catch_up = 0;
     for (unsigned i = 0; i < RX_BURST_LIMIT; ++i) {

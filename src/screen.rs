@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-use crate::pd::{EPR_PAGE, PROFILES_PAGE, Pdo, Profiles, SNIFF_PAGE};
+mod cable;
+
+use crate::pd::{
+    CABLE_PAGE, CABLE_SECTIONS, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, Pdo, Profiles, SNIFF_PAGE,
+};
 use crate::{Overview, SIDE, STRIP_ROWS};
 
 const BG: u16 = 0x0000;
@@ -217,21 +221,24 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         PROFILES_PAGE => (b"PD PROFILES", WATTS),
         EPR_PAGE => (b"EPR OFFER", PURPLE),
         SNIFF_PAGE => (b"PD SNIFF", AMPS),
+        CABLE_PAGE => (b"CABLE", AMPS),
         _ => (b"GRAPH", WATTS),
     };
     p.text(8, 8, title, 2, color);
-    let tabs = if view.pd_profiles.is_some() { 8 } else { 5 };
+    let pd_tabs = view.pd_profiles.is_some();
+    let tabs = if pd_tabs {
+        PD_PAGE_COUNT
+    } else {
+        PROFILES_PAGE
+    };
+    let (stride, width) = if pd_tabs { (7, 5) } else { (10, 6) };
     for index in 0..tabs {
         p.rect(
-            120 + index * if tabs == 8 { 7 } else { 10 },
+            120 + index as usize * stride,
             10,
-            if tabs == 8 { 5 } else { 6 },
+            width,
             10,
-            if view.page as usize == index {
-                color
-            } else {
-                GRID
-            },
+            if view.page == index { color } else { GRID },
         );
     }
     p.text(
@@ -260,6 +267,14 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
                 b"TAP OLDER 2X CAP HOLD EXIT"
             }
             SNIFF_PAGE => b"TAP NEXT 2X CAP HOLD EXIT",
+            CABLE_PAGE
+                if view.pd_profiles.is_some_and(|pd| {
+                    pd.cable.captured() && pd.cable_section + 1 < CABLE_SECTIONS
+                }) =>
+            {
+                b"TAP MORE 2X CAP HOLD EXIT"
+            }
+            CABLE_PAGE => b"TAP NEXT 2X CAP HOLD EXIT",
             PROFILES_PAGE | EPR_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
             2..PROFILES_PAGE => b"TAP NEXT 2X RANGE HOLD RESET",
             _ => b"TAP NEXT  HOLD RESET",
@@ -843,6 +858,11 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
         SNIFF_PAGE => {
             if let Some(pd) = view.pd_profiles {
                 pd_sniff(&mut p, pd);
+            }
+        }
+        CABLE_PAGE => {
+            if let Some(pd) = view.pd_profiles {
+                cable::render(&mut p, pd);
             }
         }
         _ => graph(&mut p, view),

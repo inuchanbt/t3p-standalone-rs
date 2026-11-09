@@ -5,8 +5,8 @@ use std::{
     io::{self, BufWriter, Write},
 };
 use t3p_standalone::{
-    EprCapture, EprEvent, Meter, Overview, PdSniff, Reading, SIDE, STRIP_ROWS, SourceCaps,
-    demo_reading, render_demo_strip,
+    CableCapture, EprCapture, EprEvent, Meter, Overview, PdSniff, Reading, SIDE, STRIP_ROWS,
+    SourceCaps, demo_reading, render_demo_strip,
 };
 
 fn main() -> io::Result<()> {
@@ -29,6 +29,17 @@ fn main() -> io::Result<()> {
     let sniff_log = flags.iter().any(|x| x == "--sniff-log");
     let sniff_old = flags.iter().any(|x| x == "--sniff-old");
     let sniff_alert = flags.iter().any(|x| x == "--sniff-alert");
+    let cable_view = flags.iter().find_map(|flag| {
+        Some(match flag.to_str()? {
+            "--cable-page" => (0, 0),
+            "--cable-listening" => (1, 0),
+            "--cable-summary" => (2, 0),
+            "--cable-raw" => (2, 1),
+            "--cable-flags" => (2, 2),
+            "--cable-timeout" => (3, 0),
+            _ => return None,
+        })
+    });
     let energy = flags.iter().any(|x| x == "--energy");
     let power = flags.iter().any(|x| x == "--power");
     let voltage = flags.iter().any(|x| x == "--voltage");
@@ -156,7 +167,25 @@ fn main() -> io::Result<()> {
         view.set_pd_warnings(if sniff_alert { 1 << 2 } else { 0 });
         view.set_pd_sniff(Some(&sniff), if sniff_old { 8 } else { 0 });
     }
-    view.set_page(if sniff_page || sniff_log || sniff_old || sniff_alert {
+    if let Some((state, section)) = cable_view {
+        let mut cable = CableCapture::new();
+        if state == 2 {
+            for line in include_str!("../../tests/cable_identity.hex").lines() {
+                let frame: Vec<_> = line
+                    .split_whitespace()
+                    .map(|hex| u8::from_str_radix(hex, 16).unwrap())
+                    .collect();
+                cable.push(&frame).unwrap();
+            }
+            assert!(cable.captured());
+        }
+        view.set_pd_profiles(state, u32::from(state != 0), None);
+        view.set_epr_profiles(3, None);
+        view.set_pd_cable(cable, section);
+    }
+    view.set_page(if cable_view.is_some() {
+        8
+    } else if sniff_page || sniff_log || sniff_old || sniff_alert {
         7
     } else if epr_page || epr_timeout || epr_offer || epr_partial || epr_diag {
         6

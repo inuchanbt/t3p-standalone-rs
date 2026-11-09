@@ -148,6 +148,8 @@ int main(void)
     assert(t3p_pd_rx_config(&b, 0x02, 0x04)); /* would drop both Rd */
     assert(t3p_pd_rx_config(&b, 0x02, 0x0b)); /* unsupported CC2 receive */
     assert(t3p_pd_rx_config(&b, 0x03, 0x04)); /* automatic GoodCRC */
+    assert(t3p_pd_rx_config(&b, 0x07, 0x02)); /* SOP'' receive */
+    assert(t3p_pd_rx_config(&b, 0x07, 0x10)); /* BIST Mode 2 transmission */
     assert(t3p_pd_rx_config(&b, 0x43, 0xa1)); /* transmit token */
     assert(f.clocks == 0);
     f.reads[f.count++] = 1;

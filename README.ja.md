@@ -10,7 +10,7 @@ ATORCH T3P USB 電力計向けの実験的な Rust ファームウェアです�
 
 ENERGY 画面の時間は起動時または積算リセット後の経過時間です。測定値が取得できない間や電流ゼロの間も進みます。旧画面の実機で時間が進み Ah・Wh とともにリセットされることを確認しました。表示は `99:59:59` で止まり（実機未確認）、積算値と時間は再起動後に復元されません。PD 診断版では OVERVIEW の PROTOCOL 欄に生の診断値を表示します。
 
-KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認しました。最大値は電源断で消えます。左ボタンの短押し・離す操作で、OVERVIEW、ENERGY、電力・電圧・電流の各グラフを順に切り替えます。グラフ画面ではダブル押しで1・2・5・10分を切り替えます。OVERVIEW と ENERGY ではダブル押しも1ページ進みます。約1秒の長押しで Ah・Wh・経過時間と最大値をリセットします。ただし PD SNIFF では長押しで履歴を抜けます。短押しはダブル押し判定のため約350 ms 後に確定します。電流グラフは絶対値を表示します。グラフ履歴は画面間で共有し、リセットしても消えません。各最大値は異なる時点の値になり得るため、最大電圧と最大電流の積が最大電力と一致するとは限りません。
+KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認しました。最大値は電源断で消えます。左ボタンの短押し・離す操作で、OVERVIEW、ENERGY、電力・電圧・電流の各グラフを順に切り替えます。グラフ画面ではダブル押しで1・2・5・10分を切り替えます。OVERVIEW と ENERGY ではダブル押しも1ページ進みます。約1秒の長押しで Ah・Wh・経過時間と最大値をリセットします。PD SNIFF と CABLE では長押しで OVERVIEW に戻ります。短押しはダブル押し判定のため約350 ms 後に確定します。電流グラフは絶対値を表示します。グラフ履歴は画面間で共有し、リセットしても消えません。各最大値は異なる時点の値になり得るため、最大電圧と最大電流の積が最大電力と一致するとは限りません。
 
 正方形向けの目盛り付き折れ線グラフは実機確認済みです。各期間を60点にまとめ、それぞれ1・2・5・10秒の平均を表示します。一部に欠測がある区間は孤立した点、全て欠測の区間は空白にします。縦軸はゼロと、単位付きの上限を表示します。上限は表示範囲の平均値の最大に合わせて 1・2・2.5・5 の段階に切り上げ、最小 1 W／V／A とします。上限が変わると線全体の高さも変わります。
 
@@ -24,7 +24,7 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 
 ## PD SNIFF 試験版
 
-次の **PD SNIFF** 画面では、ダブル押しから30秒間、CC1 で CRC が一致した SOP メッセージを記録します。同じ画面で再度ダブル押しすると CC1 で新しい記録を始め、それまでの履歴は消えます。履歴は RAM のみに最大192行を保持します。まず新しい8件を古い順に表示し、短押しで8件ずつ過去に戻り、最も古いページでもう一度短押しすると OVERVIEW に進みます。約1秒長押しすると積算値をリセットせずにすぐ抜けられます。たとえば `R:185-192/192` は保持中の192件のうち表示している範囲です。満杯になると古い記録から上書きされます。受信中は新着により表示範囲がずれるため、古い履歴は `DONE` 後の確認を推奨します。`SRC` / `SNK` は各メッセージの電源ロールビットに基づく表示であり、物理的な送信元を独立に確認したものではありません。Source Capabilities、Request、Accept、PS_RDY、EPR などの主な種類を名前で示し、未対応の種類は `CTRL`・`DATA`・`EXT` と種類番号 `T` で表示します。複数ページの履歴を実機で確認しました。192件を超えたときの上書きと長押しでの終了は実機未確認です。
+次の **PD SNIFF** 画面では、ダブル押しから30秒間、CC1 で CRC が一致した SOP メッセージを記録します。同じ画面で再度ダブル押しすると CC1 で新しい記録を始め、それまでの履歴は消えます。履歴は RAM のみに最大192行を保持します。まず新しい8件を古い順に表示し、短押しで8件ずつ過去に戻り、最も古いページでもう一度短押しすると CABLE に進みます。約1秒長押しすると積算値をリセットせずにすぐ抜けられます。たとえば `R:185-192/192` は保持中の192件のうち表示している範囲です。満杯になると古い記録から上書きされます。受信中は新着により表示範囲がずれるため、古い履歴は `DONE` 後の確認を推奨します。`SRC` / `SNK` は各メッセージの電源ロールビットに基づく表示であり、物理的な送信元を独立に確認したものではありません。Source Capabilities、Request、Accept、PS_RDY、EPR などの主な種類を名前で示し、未対応の種類は `CTRL`・`DATA`・`EXT` と種類番号 `T` で表示します。複数ページの履歴を実機で確認しました。192件を超えたときの上書きと長押しでの終了は実機未確認です。
 
 データオブジェクトが1つの EPR_Mode は `EPR_ENTER`、`EPR_ACK`、`EPR_OK`、`EPR_FAIL`、`EPR_EXIT` に分けます。未知のアクションは `EPR_Axx`、`Ixx` はメッセージ ID、`Dxx` はアクションに付随するデータの生値を16進数で表示します。Enter のデータはシンクの Operational PDP、Enter Failed では `D00` が原因不明、`D01` がケーブルの EPR 非対応、`D02` が VCONN 失敗、`D03` が RDO の EPR 対応ビットなし、`D04` が電源側の一時的な失敗、`D05` が PDO の EPR 対応ビットなしを表します。その他の値は生値のままです。個々のメッセージを解読するもので、やり取り全体や実際の電圧を確定するものではありません。Enter・Ack・OK・Exit は実機表示と CY4500 の記録が一致しました。Fail と未知のアクションは実機未確認です。 [EPRMDO 定義](https://chromium.googlesource.com/chromiumos/platform/ec/+/6e6e567deac5b5ab8fbe0d706cd82ebeb21e35b4/include/usb_pd.h)
 
@@ -32,9 +32,17 @@ KWS 風の画面、ダブル押し、長い期間のグラフを実機で確認�
 
 行末の `N` はデータオブジェクト数、`P` は要求した PDO の位置、`C` は拡張メッセージのチャンク、`Q` はチャンク要求、`I` はメッセージ ID です。`DONE` は待機時間の終了を表し、全パケットの受信や契約成立を保証しません。EPR と SNIFF の受信処理は通常最短1 ms間隔で確認し、溜まった記録は1回の処理で最大4件まで続けて読み出します。1件以上受信した直後は通常の待機を1回省いて再確認し、追加の受信がなければ通常の待機に戻ります。実際の間隔は I²C や画面描画にも左右されます。読み出しで消える FIFO アラートは受信を継続しつつ `WARN` として保持します。FUSB302B 互換ならこのアラートは RX または TX の満杯を示しますが、それだけで必ずパケットが失われたとは断定できません。RX 満杯の状態を実際に読み取った場合は `FIFO FULL` で停止します。不正なフレームやリンクリセットでも停止して状態を表示します。特に短い間隔の通信は取りこぼす可能性があり、契約電圧や電流の推定は行いません。CC プルダウンの設定は上記と同じです。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
-警告は SPR・EPR・SNIFF の結果ごとに RAM 内で保持し、同じ種類の新しい取得を始めるか電源を切ると消えます。
+警告は SPR・EPR・SNIFF・CABLE の結果ごとに RAM 内で保持し、同じ種類の新しい取得を始めるか電源を切ると消えます。
 
-現行の受信優先試験版では、EPR OFFER または PD SNIFF の取得中、受信以外の処理を減らすため画面の定期更新を止めます。途中で別画面に移った場合も、取得終了まで表示はその時点のままです。ボタン操作時と取得終了時は再描画し、電圧・電流のサンプリングと積算は継続します。比較試験では `LISTENING` 画面が落ち着いてから接続し、取得終了までボタンを押さずに待ってください。SPR の取得中は従来どおり定期更新します。この画面更新停止を導入した前版 `PD_RX_PRIORITY` は下記の実機試験で使われましたが、定期更新停止そのものは別途確認できていません。通信の取りこぼしがなくなる保証はありません。
+現行の受信優先試験版では、EPR OFFER・PD SNIFF・CABLE の取得中、受信以外の処理を減らすため画面の定期更新を止めます。途中で別画面に移った場合も、取得終了まで表示はその時点のままです。ボタン操作時と取得終了時は再描画し、電圧・電流のサンプリングと積算は継続します。比較試験では `LISTENING` 画面が落ち着いてから接続し、取得終了までボタンを押さずに待ってください。SPR の取得中は従来どおり定期更新します。この画面更新停止を導入した前版 `PD_RX_PRIORITY` は下記の実機試験で使われましたが、定期更新停止そのものは別途確認できていません。通信の取りこぼしがなくなる保証はありません。
+
+## CABLE 試験版
+
+PD SNIFF の次にある **CABLE** で左ボタンをダブル押しすると、CC1 で最大30秒間待機します。HID 給電を続けたまま `LISTENING` を確認し、5 V の試験構成で e-marker 付きのケーブルを使って電源をつなぎ直します。電源側が VCONN を供給してケーブルに問い合わせます。T3P はパッシブまたはアクティブケーブルからの、CRC が一致した最初の SOP′ Discover Identity ACK を取得します。`SOP1 RX` は要求や GoodCRC も含む CRC 一致の SOP′ 受信件数で、上限は255件です。
+
+`CAPTURED` が出たら、短押しで **SUMMARY**（概要）、**RAW**（生データ）、**FLAGS**（ビットフィールド）の順に進み、最後に OVERVIEW に戻ります。概要はケーブルの種別、申告された USB 速度と電力定格、遅延からの長さの推定、VID/PID と XID を表示します。USB PD 3.x / SVDM 2.x のパッシブ Cable VDO 1.0 とアクティブ Cable VDO 1.3 を解読します。ほかの形式では識別情報と生データを確認できます。ダブル押しで取得し直し、長押しで OVERVIEW に戻ります。取得結果は RAM に保持します。
+
+住友ケーブルを使った CY4500-EPR 記録の Discover Identity を再生し、パッシブ、USB4 Gen 3、50 V / 5 A EPR、VID/PID `20C2/0A14` と表示できることを確認しました。T3P 実機での SOP′ 受信は検証待ちです。 [USB Power Delivery 仕様](https://www.usb.org/document-library/usb-power-delivery) · [KWS-X1 の CABLE メニュー](https://github.com/kralonur/kws-x1-standalone-rs#16-cable)
 
 ## 実機での検証
 
@@ -111,9 +119,9 @@ python check_pi32.py --sim PI32V2_ISAのパス
 
 PD 診断版は `python build.py --pd-diagnostic` でビルドします。上記7枚の実測比較画像を `build/pd-diagnostic` に生成し、共有の `build/demo-graph.ppm` と、`cargo run --offline --bin preview -- build/pd-diagnostic/preview-pd.ppm --measurement --missing --pd` で診断表示を生成して、`python check_pi32.py --build-dir build/pd-diagnostic --measurement --pd-diagnostic --sim PI32V2_ISAのパス` で照合します。表示される5バイトは順に 0x01、0x02、0x08、0x0B、0x40 レジスターの値です。
 
-PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm`、`preview-profiles-listening.ppm`、`preview-profiles-offer.ppm` は `--measurement` にそれぞれ `--profiles-page`、`--profiles-listening`、`--profiles-offer` を加えて生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-timeout.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-timeout`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`preview-sniff-ready.ppm`、`preview-sniff-log.ppm`、`preview-sniff-old.ppm`、`preview-sniff-alert.ppm` は `--measurement` にそれぞれ `--sniff-page`、`--sniff-log`、`--sniff-old`、`--sniff-alert` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
+PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします。`build/pd-profiles` に上記の実測比較画像と共有画像2枚（`preview.ppm` と `demo-graph.ppm`）を生成し、それぞれプレビューコマンドに `--profiles-ui` を加えます。`preview-profiles-ready.ppm`、`preview-profiles-listening.ppm`、`preview-profiles-offer.ppm` は `--measurement` にそれぞれ `--profiles-page`、`--profiles-listening`、`--profiles-offer` を加えて生成します。EPR の比較画像 `preview-epr-ready.ppm`、`preview-epr-timeout.ppm`、`preview-epr-offer.ppm`、`preview-epr-partial.ppm`、`preview-epr-diag.ppm` は `--measurement` にそれぞれ `--epr-page`、`--epr-timeout`、`--epr-offer`、`--epr-partial`、`--epr-diag` を加えて生成します。`preview-sniff-ready.ppm`、`preview-sniff-log.ppm`、`preview-sniff-old.ppm`、`preview-sniff-alert.ppm` は `--measurement` にそれぞれ `--sniff-page`、`--sniff-log`、`--sniff-old`、`--sniff-alert` を加えて生成します。`preview-cable-ready.ppm`、`preview-cable-listening.ppm`、`preview-cable-summary.ppm`、`preview-cable-raw.ppm`、`preview-cable-flags.ppm`、`preview-cable-timeout.ppm` は `--measurement` にそれぞれ `--cable-page`、`--cable-listening`、`--cable-summary`、`--cable-raw`、`--cable-flags`、`--cable-timeout` を加えて生成します。`python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PI32V2_ISAのパス` で照合します。
 
-`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_KEEPALIVE_3.0.3.bin` でローカルの更新ファイルを作ります。
+`python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin` でローカルの更新ファイルを作ります。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 

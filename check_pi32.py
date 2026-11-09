@@ -210,8 +210,9 @@ def main():
             cpu.call(symbols["meter_pd_status"], [0, 0, 0])
             cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_snapshot"], [])
-            if render() != (out / "preview-measurement.ppm").read_bytes():
+            if render() != (out / "preview-cable-ready.ppm").read_bytes():
                 raise ValueError("Pi32v2 did not advance after the oldest sniff page")
+            cpu.call(symbols["meter_next_page"], [])
             for _ in range(7):
                 cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_next_page"], [])
@@ -224,8 +225,9 @@ def main():
             cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_pd_status"], [0, 0, 0])
             cpu.call(symbols["meter_snapshot"], [])
-            if render() != (out / "preview-measurement.ppm").read_bytes():
+            if render() != (out / "preview-cable-ready.ppm").read_bytes():
                 raise ValueError("Pi32v2 sniff recapture did not reset the history cursor")
+            cpu.call(symbols["meter_next_page"], [])
             for _ in range(7):
                 cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_long_press"], [])
@@ -233,7 +235,45 @@ def main():
             if render() != (out / "preview-measurement.ppm").read_bytes():
                 raise ValueError("Pi32v2 PD sniff long press did not exit without resetting readings")
             print("Pi32v2 PD sniff EPR actions, keepalive counts, older history and long-press exit match")
+
+            def check_cable(page):
+                cpu.call(symbols["meter_snapshot"], [])
+                if render() != (out / f"preview-cable-{page}.ppm").read_bytes():
+                    raise ValueError(f"Pi32v2 cable {page} frame differs from host preview")
+
+            for _ in range(8):
+                cpu.call(symbols["meter_next_page"], [])
+            if cpu.call(symbols["meter_double_press"], [])[0] != 4:
+                raise ValueError("Pi32v2 cable double press did not request capture")
+            cpu.call(symbols["meter_pd_status"], [1, 1, 3])
+            check_cable("listening")
+            cable_packets = [
+                bytes.fromhex(line)
+                for line in (ROOT / "tests/cable_identity.hex").read_text(encoding="ascii").splitlines()
+            ]
+            for packet, expected_result in zip([frame] + cable_packets, (0, 0, 0, 1)):
+                cpu.mem.write(strip, packet)
+                if cpu.call(symbols["meter_pd_record"], [strip, len(packet), 3, 0])[0] != expected_result:
+                    raise ValueError("Pi32v2 misclassified a cable capture packet")
+            cpu.call(symbols["meter_pd_status"], [2, 1, 3])
+            check_cable("summary")
+            cpu.call(symbols["meter_next_page"], [])
+            check_cable("raw")
+            cpu.call(symbols["meter_next_page"], [])
+            check_cable("flags")
+            if cpu.call(symbols["meter_double_press"], [])[0] != 4:
+                raise ValueError("Pi32v2 cable recapture was not available in the flags view")
+            cpu.call(symbols["meter_pd_status"], [1, 1, 3])
+            check_cable("listening")
+            cpu.call(symbols["meter_pd_status"], [3, 1, 3])
+            check_cable("timeout")
+            cpu.call(symbols["meter_long_press"], [])
+            # Compare the overview with the same protocol status as its host reference.
             cpu.call(symbols["meter_pd_status"], [0, 0, 0])
+            cpu.call(symbols["meter_snapshot"], [])
+            if render() != (out / "preview-measurement.ppm").read_bytes():
+                raise ValueError("Pi32v2 cable long press did not exit without resetting readings")
+            print("Pi32v2 SOP' Identity replay, cable views, recapture and exit match")
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():

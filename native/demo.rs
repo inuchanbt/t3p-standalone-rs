@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-use crate::pd::{EPR_PAGE, PROFILES_PAGE, SNIFF_PAGE};
+#[cfg(feature = "pd-profiles")]
+use crate::pd::{CABLE_MODE, CABLE_SECTIONS};
+use crate::pd::{CABLE_PAGE, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, SNIFF_PAGE};
 use crate::{Meter, Overview, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
 
-const PAGE_COUNT: u32 = PROFILES_PAGE + 3 * cfg!(feature = "pd-profiles") as u32;
+const PAGE_COUNT: u32 = if cfg!(feature = "pd-profiles") {
+    PD_PAGE_COUNT
+} else {
+    PROFILES_PAGE
+};
 
 unsafe extern "C" {
     fn t3p_signal_failure(stage: u32) -> !;
@@ -44,6 +50,10 @@ static mut PD_SNIFF: crate::PdSniff = crate::PdSniff::new();
 static mut PD_SNIFF_PRESENT: bool = false;
 #[cfg(feature = "pd-profiles")]
 static mut PD_SNIFF_OFFSET: u8 = 0;
+#[cfg(feature = "pd-profiles")]
+static mut PD_CABLE: crate::CableCapture = crate::CableCapture::new();
+#[cfg(feature = "pd-profiles")]
+static mut PD_CABLE_SECTION: u8 = 0;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_demo_sample(tick: u32) {
@@ -84,8 +94,9 @@ unsafe extern "C" fn meter_pd_diagnostic(valid: u32, first_four: u32, last: u32)
 unsafe extern "C" fn meter_long_press() {
     unsafe {
         #[cfg(feature = "pd-profiles")]
-        if *(&raw const PAGE) == SNIFF_PAGE {
+        if matches!(*(&raw const PAGE), SNIFF_PAGE | CABLE_PAGE) {
             *(&raw mut PD_SNIFF_OFFSET) = 0;
+            *(&raw mut PD_CABLE_SECTION) = 0;
             *(&raw mut PAGE) = 0;
             return;
         }
@@ -108,6 +119,15 @@ unsafe extern "C" fn meter_next_page() {
             }
             *(&raw mut PD_SNIFF_OFFSET) = 0;
         }
+        #[cfg(feature = "pd-profiles")]
+        if *(&raw const PAGE) == CABLE_PAGE {
+            let section = &mut *(&raw mut PD_CABLE_SECTION);
+            if (&*(&raw const PD_CABLE)).captured() && *section + 1 < CABLE_SECTIONS {
+                *section += 1;
+                return;
+            }
+            *section = 0;
+        }
         *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % PAGE_COUNT;
     }
 }
@@ -116,14 +136,14 @@ unsafe extern "C" fn meter_next_page() {
 unsafe extern "C" fn meter_double_press() -> u32 {
     unsafe {
         let page = *(&raw const PAGE);
-        if cfg!(feature = "pd-profiles") && page == PROFILES_PAGE {
-            return 1;
-        }
-        if cfg!(feature = "pd-profiles") && page == EPR_PAGE {
-            return 2;
-        }
-        if cfg!(feature = "pd-profiles") && page == SNIFF_PAGE {
-            return 3;
+        if cfg!(feature = "pd-profiles") {
+            match page {
+                PROFILES_PAGE => return 1,
+                EPR_PAGE => return 2,
+                SNIFF_PAGE => return 3,
+                CABLE_PAGE => return 4,
+                _ => {}
+            }
         }
         if page >= 2 {
             *(&raw mut GRAPH_WINDOW) = (*(&raw const GRAPH_WINDOW) + 1) % 4;
@@ -139,7 +159,7 @@ unsafe extern "C" fn meter_double_press() -> u32 {
 unsafe extern "C" fn meter_pd_warning(warning: u32) {
     unsafe {
         let mode = *(&raw const PD_MODE);
-        if mode < 3 {
+        if mode <= CABLE_MODE {
             let bit = 1u32 << mode;
             let warnings = &mut *(&raw mut PD_WARNINGS);
             if warning != 0 {
@@ -168,6 +188,9 @@ unsafe extern "C" fn meter_pd_status(state: u32, cc: u32, mode: u32) {
                 *(&raw mut PD_SNIFF) = crate::PdSniff::new();
                 *(&raw mut PD_SNIFF_PRESENT) = true;
                 *(&raw mut PD_SNIFF_OFFSET) = 0;
+            } else if mode == CABLE_MODE {
+                *(&raw mut PD_CABLE) = crate::CableCapture::new();
+                *(&raw mut PD_CABLE_SECTION) = 0;
             }
         }
     }
@@ -181,6 +204,12 @@ unsafe extern "C" fn meter_pd_record(frame: *const u8, length: u32, mode: u32, n
         return -1;
     }
     let bytes = unsafe { core::slice::from_raw_parts(frame, length as usize) };
+    if mode == CABLE_MODE {
+        return match unsafe { (&mut *(&raw mut PD_CABLE)).push(bytes) } {
+            Ok(captured) => i32::from(captured),
+            Err(_) => -1,
+        };
+    }
     if mode == 2 {
         return if unsafe { (&mut *(&raw mut PD_SNIFF)).push(bytes) }.is_ok() {
             0
@@ -241,6 +270,8 @@ unsafe extern "C" fn meter_snapshot() {
             },
             *(&raw const PD_SNIFF_OFFSET),
         );
+        #[cfg(feature = "pd-profiles")]
+        view.set_pd_cable(*(&raw const PD_CABLE), *(&raw const PD_CABLE_SECTION));
         view.set_page(*(&raw const PAGE));
         view.set_graph_window(*(&raw const GRAPH_WINDOW));
         (&*(&raw const METER)).overview(view);
