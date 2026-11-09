@@ -6,6 +6,9 @@
 #ifdef T3P_PD_PROFILES
 #include "../native/t3p_pd.h"
 #endif
+#ifdef T3P_PD_RD_TEST
+#include "../native/t3p_rd_test.h"
+#endif
 
 struct fake {
     int reads[128];
@@ -163,6 +166,24 @@ int main(void)
         assert(f.clock_data[1 + i] == pd_write[i]);
         assert(f.clock_data[10 + i] == register_two[i]);
         assert(f.clock_data[19 + i] == select_cc1[i]);
+    }
+#endif
+#ifdef T3P_PD_RD_TEST
+    f = (struct fake){0};
+    assert(t3p_pd_set_rd(&b, 0x25)); /* VCONN */
+    assert(f.clocks == 0);
+    f.reads[f.count++] = 1;
+    f.reads[f.count++] = 0;
+    f.reads[f.count++] = 0;
+    f.reads[f.count++] = 0;
+    answer_byte(&f, T3P_RD_CC1_ON);
+    assert(!t3p_pd_set_rd(&b, T3P_RD_CC1_ON));
+    assert(f.cursor == f.count && f.sda && f.scl);
+    static const int cc1_rd_on[] = {0,0,0,0,0,1,0,1};
+    for (unsigned i = 0; i < 8; ++i) {
+        assert(f.clock_data[1 + i] == pd_write[i]);
+        assert(f.clock_data[10 + i] == register_two[i]);
+        assert(f.clock_data[19 + i] == cc1_rd_on[i]);
     }
 #endif
     return 0;

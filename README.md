@@ -46,6 +46,12 @@ The test fixture reproduces the Discover Identity exchange from the CY4500-EPR c
 
 The CC1 hardware trial showed the same identity on the T3P. The photographed PD header `518F` and all five VDOs match the first SOP′ Discover Identity ACK in the CY4500-EPR recording, at about 5.005 V on VBUS. `SOP1 RX:003` agrees with the request, its GoodCRC and the identity response. `CAPTURE WARN` indicates a FIFO alert during a capture that successfully decoded the identity with a matching CRC.
 
+## CC1 Rd attach test
+
+Build with `python build.py --pd-rd-test` and tap past the current graph to open **RD TEST**. Power the T3P through HID and start with both measurement ports unplugged. Double press to arm `RD OFF`. While it is displayed, plug a known USB-C source into the T3P receptacle in the working CC1 orientation. Leave the other measurement port empty. Wait two seconds, then double press to enable Rd. Compare the two saved VBUS readings. `5V SEEN` means VBUS was below 4 V with Rd off and then measured 4.5–5.5 V on three consecutive samples with Rd on.
+
+The first step times out after 30 seconds and the second after 3 seconds. Hold to cancel or tap to leave. The test checks the startup configuration and writes only `SWITCHES0` (`04` then `05`), restoring `03` when the test ends. For `VBUS PRESENT`, unplug the source and start again. For `RESTORE ERROR`, unplug the source and power-cycle the T3P. The test uses the meter's uncalibrated VBUS reading. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+
 ## Hardware bring-up
 
 In a sustained EPR test on CC1 with `PD_KEEPALIVE`, the T3P showed `DONE`, `MSG:117 GCRC:117` and `EPR KEEPALIVE:045 ACK:045`. All 27 history rows across four pages matched the CY4500 trace in order. The counts match the trace from its first SOP packet through the GoodCRC after the 45th KeepAlive ACK, at 27.47 seconds. VBUS measured about 5 V in that interval.
@@ -124,6 +130,8 @@ For the optional PD diagnostic, build with `python build.py --pd-diagnostic`. Ge
 Build the PD profiles trial with `python build.py --pd-profiles`. In `build/pd-profiles`, generate the measurement references above and the two shared images (`preview.ppm` and `demo-graph.ppm`), adding `--profiles-ui` to each preview command. Generate `preview-profiles-ready.ppm`, `preview-profiles-listening.ppm` and `preview-profiles-offer.ppm` with `--measurement` and respectively `--profiles-page`, `--profiles-listening` and `--profiles-offer`. Generate the EPR references `preview-epr-ready.ppm`, `preview-epr-timeout.ppm`, `preview-epr-offer.ppm`, `preview-epr-partial.ppm` and `preview-epr-diag.ppm` with `--measurement` and respectively `--epr-page`, `--epr-timeout`, `--epr-offer`, `--epr-partial` and `--epr-diag`. Generate `preview-sniff-ready.ppm`, `preview-sniff-log.ppm`, `preview-sniff-old.ppm` and `preview-sniff-alert.ppm` with `--measurement` and respectively `--sniff-page`, `--sniff-log`, `--sniff-old` and `--sniff-alert`. Generate `preview-cable-ready.ppm`, `preview-cable-listening.ppm`, `preview-cable-summary.ppm`, `preview-cable-raw.ppm`, `preview-cable-flags.ppm` and `preview-cable-timeout.ppm` with `--measurement` and respectively `--cable-page`, `--cable-listening`, `--cable-summary`, `--cable-raw`, `--cable-flags` and `--cable-timeout`. Run `python check_pi32.py --build-dir build/pd-profiles --measurement --pd-profiles --sim PATH_TO_PI32V2_ISA`.
 
 Package the PD and CABLE trial locally with `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin`.
+
+For **RD TEST**, generate the seven measurement references under `build/pd-rd-test`. Generate `preview-rd-off.ppm` and `preview-rd-5v.ppm` with `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` or `--rd-5v` for the respective reference. Package with `python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_3.0.3.bin`.
 
 The simulator check requires the pinned [pi32v2-isa revision](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f). The output ELF is for offline evaluation. `pack_demo.py` currently depends on the separate local `doom_on_t3p` research workspace, unpacked stock firmware, and its packing tools. Manufacturer firmware and update binaries are not distributed here.
 

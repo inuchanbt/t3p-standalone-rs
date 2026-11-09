@@ -218,6 +218,18 @@ fn main() -> io::Result<()> {
     if pd {
         view.set_pd_diagnostic(Some((0x04030291, 0x05)));
     }
+    #[cfg(feature = "pd-rd-test")]
+    if let Some((state, on_mv)) = flags.iter().find_map(|flag| match flag.to_str()? {
+        "--rd-off" => Some((1, u16::MAX)),
+        "--rd-5v" => Some((3, 5094)),
+        _ => None,
+    }) {
+        view.set_rd_test(Some(t3p_standalone::RdTest {
+            state,
+            off_mv: 3010,
+            on_mv,
+        }));
+    }
     let mut pixels = [0; SIDE * STRIP_ROWS];
     write!(output, "P6\n{SIDE} {SIDE}\n255\n")?;
     for top in (0..SIDE).step_by(STRIP_ROWS) {

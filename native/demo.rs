@@ -6,6 +6,8 @@ use crate::{Meter, Overview, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
 
 const PAGE_COUNT: u32 = if cfg!(feature = "pd-profiles") {
     PD_PAGE_COUNT
+} else if cfg!(feature = "pd-rd-test") {
+    PROFILES_PAGE + 1
 } else {
     PROFILES_PAGE
 };
@@ -30,6 +32,12 @@ static mut PD_FIRST: u32 = 0;
 static mut PD_LAST: u8 = 0;
 static mut PAGE: u32 = 0;
 static mut GRAPH_WINDOW: u32 = 0;
+#[cfg(feature = "pd-rd-test")]
+static mut RD_TEST: crate::RdTest = crate::RdTest {
+    state: 0,
+    off_mv: u16::MAX,
+    on_mv: u16::MAX,
+};
 #[cfg(feature = "pd-profiles")]
 static mut PD_STATE: u32 = 0;
 #[cfg(feature = "pd-profiles")]
@@ -90,9 +98,25 @@ unsafe extern "C" fn meter_pd_diagnostic(valid: u32, first_four: u32, last: u32)
     }
 }
 
+#[cfg(feature = "pd-rd-test")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_rd_test(state: u32, off_mv: u32, on_mv: u32) {
+    unsafe {
+        *(&raw mut RD_TEST) = crate::RdTest {
+            state: state as u8,
+            off_mv: off_mv as u16,
+            on_mv: on_mv as u16,
+        };
+    }
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_long_press() {
     unsafe {
+        #[cfg(feature = "pd-rd-test")]
+        if *(&raw const PAGE) == PROFILES_PAGE {
+            return;
+        }
         #[cfg(feature = "pd-profiles")]
         if matches!(*(&raw const PAGE), SNIFF_PAGE | CABLE_PAGE) {
             *(&raw mut PD_SNIFF_OFFSET) = 0;
@@ -136,6 +160,10 @@ unsafe extern "C" fn meter_next_page() {
 unsafe extern "C" fn meter_double_press() -> u32 {
     unsafe {
         let page = *(&raw const PAGE);
+        #[cfg(feature = "pd-rd-test")]
+        if page == PROFILES_PAGE {
+            return 5;
+        }
         if cfg!(feature = "pd-profiles") {
             match page {
                 PROFILES_PAGE => return 1,
@@ -249,6 +277,8 @@ unsafe extern "C" fn meter_pd_record(frame: *const u8, length: u32, mode: u32, n
 unsafe extern "C" fn meter_snapshot() {
     unsafe {
         let view = &mut *(&raw mut VIEW);
+        #[cfg(feature = "pd-rd-test")]
+        view.set_rd_test((*(&raw const PAGE) == PROFILES_PAGE).then_some(*(&raw const RD_TEST)));
         #[cfg(feature = "pd-profiles")]
         view.set_pd_profiles(
             *(&raw const PD_STATE),

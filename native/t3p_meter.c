@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "t3p_meter.h"
+#ifdef T3P_PD_RD_TEST
+#include "t3p_rd_test.h"
+#endif
 
 #define PB 0xfd3100u
 #define TIMER_COUNT 0xfd0604u
@@ -161,6 +164,14 @@ int t3p_pd_read_register(struct t3p_meter_bus *b, uint8_t reg, uint8_t *out)
     *out = value;
     return 0;
 }
+#if defined(T3P_PD_PROFILES) || defined(T3P_PD_RD_TEST)
+static int pd_write_register(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
+{
+    int error = start(b) || write_byte(b, 0x44) || write_byte(b, reg) || write_byte(b, value);
+    stop(b);
+    return error ? -1 : 0;
+}
+#endif
 #ifdef T3P_PD_PROFILES
 int t3p_pd_rx_read(struct t3p_meter_bus *b, uint8_t reg, uint8_t *data, unsigned count)
 {
@@ -174,9 +185,31 @@ int t3p_pd_rx_config(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
           (reg == 0x0b && (value == 0x01 || value == 0x07 || value == 0x09)) ||
           (reg == 0x07 && (value == 0x00 || value == 0x01 || value == 0x04))))
         return -1;
-    int error = start(b) || write_byte(b, 0x44) || write_byte(b, reg) || write_byte(b, value);
-    stop(b);
-    return error ? -1 : 0;
+    return pd_write_register(b, reg, value);
+}
+#endif
+#ifdef T3P_PD_RD_TEST
+int t3p_pd_rd_baseline(struct t3p_meter_bus *b)
+{
+    uint8_t registers[9], power, status1;
+    if (read_register(b, 0x44, 0x01, registers, sizeof(registers)) ||
+        read_register(b, 0x44, 0x0b, &power, 1) ||
+        read_register(b, 0x44, 0x41, &status1, 1))
+        return -1;
+
+    /* Require the observed startup configuration with TX and auto GoodCRC off. */
+    return registers[0] != 0x91 || registers[1] != T3P_RD_DEFAULT || (registers[2] & 7) ||
+           (registers[5] & 3) || registers[6] || registers[7] != 0x02 || registers[8] != 0x06 ||
+           power != 0x01 || (status1 & 0x0f) != 0x08;
+}
+
+int t3p_pd_set_rd(struct t3p_meter_bus *b, uint8_t switches)
+{
+    uint8_t actual;
+    if (switches != T3P_RD_DEFAULT && switches != T3P_RD_CC1_OFF && switches != T3P_RD_CC1_ON)
+        return -1;
+    return pd_write_register(b, 0x02, switches) ||
+           t3p_pd_read_register(b, 0x02, &actual) || actual != switches ? -1 : 0;
 }
 #endif
 int t3p_meter_identify(struct t3p_meter_bus *b)

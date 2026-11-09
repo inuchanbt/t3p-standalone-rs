@@ -9,6 +9,10 @@
 #ifdef T3P_PD_PROFILES
 #include "t3p_pd.h"
 #endif
+#ifdef T3P_PD_RD_TEST
+#include "t3p_rd_test.h"
+void meter_rd_test(uint32_t state, uint32_t off_mv, uint32_t on_mv);
+#endif
 
 #define PA_BASE 0xfd3000u
 #define PA11 (1u << 11)
@@ -48,22 +52,33 @@ static unsigned key_pressed(void)
 }
 
 enum redraw_request {
-    REDRAW = 1u, START_CAPTURE = 2u, START_EPR = 4u, START_SNIFF = 8u, START_CABLE = 16u
+    REDRAW = 1u, START_CAPTURE = 2u, START_EPR = 4u, START_SNIFF = 8u, START_CABLE = 16u,
+    RD_STEP = 32u, RD_CANCEL = 64u
 };
 
 static unsigned poll_key(uint32_t now)
 {
     enum t3p_button_event event = t3p_button_poll(&button, now, key_pressed());
-    if (event == T3P_BUTTON_SHORT) { meter_next_page(); return REDRAW; }
+    if (event == T3P_BUTTON_SHORT || event == T3P_BUTTON_LONG) {
+        if (event == T3P_BUTTON_SHORT) meter_next_page();
+        else meter_long_press();
+#ifdef T3P_PD_RD_TEST
+        return REDRAW | RD_CANCEL;
+#else
+        return REDRAW;
+#endif
+    }
     if (event == T3P_BUTTON_DOUBLE) {
         uint32_t action = meter_double_press();
         if (action == 1) return START_CAPTURE;
         if (action == 2) return START_EPR;
         if (action == 3) return START_SNIFF;
         if (action == 4) return START_CABLE;
+#ifdef T3P_PD_RD_TEST
+        if (action == 5) return RD_STEP;
+#endif
         return REDRAW;
     }
-    if (event == T3P_BUTTON_LONG) { meter_long_press(); return REDRAW; }
     return 0;
 }
 
@@ -109,12 +124,22 @@ void t3p_board_start(void)
 #ifdef T3P_PD_DIAGNOSTIC
     uint32_t pd_at = start - 2000;
 #endif
+#ifdef T3P_PD_RD_TEST
+    struct t3p_rd_test rd = { .off_mv = UINT16_MAX, .on_mv = UINT16_MAX };
+#endif
 #endif
     t3p_button_init(&button, start, key_pressed());
     unsigned redraw = 0;
     for (;;) {
         uint32_t now = t3p_bsp_millis(&board);
         redraw |= poll_key(now);
+#ifdef T3P_PD_RD_TEST
+        enum t3p_rd_state before = rd.state;
+        if (redraw & RD_CANCEL) t3p_rd_test_cancel(&rd, &meter_bus);
+        else if (redraw & RD_STEP) t3p_rd_test_double_press(&rd, &meter_bus, now);
+        t3p_rd_test_poll(&rd, &meter_bus, now);
+        if (rd.state != before) redraw |= REDRAW;
+#endif
 #ifdef T3P_PD_PROFILES
         if (redraw & (START_CAPTURE | START_EPR | START_SNIFF | START_CABLE)) {
             enum t3p_pd_mode mode = (redraw & START_CABLE) ? T3P_PD_CABLE :
@@ -172,12 +197,18 @@ void t3p_board_start(void)
             refresh_due = 0;
 #endif
         if (refresh_due) {
+#ifdef T3P_PD_RD_TEST
+            meter_rd_test(rd.state, rd.off_mv, rd.on_mv);
+#endif
             meter_snapshot();
             redraw = 0;
             for (uint32_t top = 0; top < PANEL_SIDE; top += STRIP_ROWS) {
                 meter_demo_render(top, strip);
                 if (t3p_bsp_rectangle(&board, 0, PANEL_SIDE - 1, top, top + STRIP_ROWS - 1,
                                       strip, PANEL_SIDE * STRIP_ROWS)) {
+#ifdef T3P_PD_RD_TEST
+                    t3p_rd_test_cancel(&rd, &meter_bus);
+#endif
                     t3p_signal_failure(4);
                 }
                 uint32_t between_strips = t3p_bsp_millis(&board);
@@ -193,6 +224,11 @@ void t3p_board_start(void)
 #ifdef T3P_PD_PROFILES
         if (pd.state == T3P_PD_LISTENING) pause_ms = pd.catch_up ? 0 : 1;
 #endif
-        if (pause_ms && t3p_bsp_delay(&board, pause_ms)) t3p_signal_failure(5);
+        if (pause_ms && t3p_bsp_delay(&board, pause_ms)) {
+#ifdef T3P_PD_RD_TEST
+            t3p_rd_test_cancel(&rd, &meter_bus);
+#endif
+            t3p_signal_failure(5);
+        }
     }
 }

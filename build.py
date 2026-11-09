@@ -107,8 +107,9 @@ def main():
     pd_mode = parser.add_mutually_exclusive_group()
     pd_mode.add_argument("--pd-diagnostic", action="store_true", help="Add read-only CC-controller diagnostics")
     pd_mode.add_argument("--pd-profiles", action="store_true", help="Build the receive-only PD profiles candidate")
+    pd_mode.add_argument("--pd-rd-test", action="store_true", help="Build the CC1 Rd attach test candidate")
     args = parser.parse_args()
-    if args.pd_diagnostic or args.pd_profiles:
+    if args.pd_diagnostic or args.pd_profiles or args.pd_rd_test:
         args.measurement = True
     variant = ""
     if args.measurement:
@@ -117,6 +118,8 @@ def main():
         variant = "pd-diagnostic"
     if args.pd_profiles:
         variant = "pd-profiles"
+    if args.pd_rd_test:
+        variant = "pd-rd-test"
     out = ROOT / "build" / variant
     out.mkdir(parents=True, exist_ok=True)
 
@@ -135,6 +138,8 @@ def main():
     rust_features = ["--cfg", 'feature="board"']
     if args.pd_profiles:
         rust_features += ["--cfg", 'feature="pd-profiles"']
+    if args.pd_rd_test:
+        rust_features += ["--cfg", 'feature="pd-rd-test"']
     run(args.rustc, "--edition=2024", "--crate-type=staticlib", *rust_features,
         "--target=thumbv7em-none-eabihf", "-C", "opt-level=s", "-C", "panic=abort",
         "-C", "lto=fat", "--emit=llvm-ir", "-o", rust_ir, ROOT / "src/lib.rs")
@@ -151,6 +156,8 @@ def main():
         sources.append(bsp / "t3p_meter.c")
     if args.pd_profiles:
         sources.append(bsp / "t3p_pd.c")
+    if args.pd_rd_test:
+        sources.append(bsp / "t3p_rd_test.c")
     for source in sources:
         obj = out / (source.name + ".o")
         if source.name == "runtime_start.S":
@@ -164,6 +171,8 @@ def main():
                 flags.append("-DT3P_PD_DIAGNOSTIC")
             if args.pd_profiles:
                 flags.append("-DT3P_PD_PROFILES")
+            if args.pd_rd_test:
+                flags.append("-DT3P_PD_RD_TEST")
             run(clang, *common, "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
                 "-ffunction-sections", "-fdata-sections", *flags, "-I", bsp, "-c", source, "-o", obj)
         objects.append(obj)
@@ -184,6 +193,8 @@ def main():
         report["status"] += "; read-only PD diagnostic"
     if args.pd_profiles:
         report["status"] += "; receive-only PD profiles candidate"
+    if args.pd_rd_test:
+        report["status"] += "; CC1 Rd attach test"
     report["rust"] = RUST_VERSION
     report["llvm"] = LLVM_VERSION
     report["elf_sha256"] = hashlib.sha256(elf.read_bytes()).hexdigest()

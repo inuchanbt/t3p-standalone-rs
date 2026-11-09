@@ -31,6 +31,14 @@ use settings::TimerMode;
 pub const SIDE: usize = 240;
 pub const STRIP_ROWS: usize = 8;
 
+#[cfg(feature = "pd-rd-test")]
+#[derive(Clone, Copy)]
+pub struct RdTest {
+    pub state: u8,
+    pub off_mv: u16,
+    pub on_mv: u16,
+}
+
 #[derive(Clone, Copy)]
 pub struct Reading {
     pub mv: u16,
@@ -48,6 +56,8 @@ pub struct Overview {
     uncalibrated: bool,
     pd_diagnostic: Option<Option<(u32, u8)>>,
     pd_profiles: Option<Profiles>,
+    #[cfg(feature = "pd-rd-test")]
+    rd_test: Option<RdTest>,
     mah: u64,
     mwh: u64,
     elapsed_seconds: u32,
@@ -73,6 +83,8 @@ impl Overview {
             uncalibrated: false,
             pd_diagnostic: None,
             pd_profiles: None,
+            #[cfg(feature = "pd-rd-test")]
+            rd_test: None,
             mah: 0,
             mwh: 0,
             elapsed_seconds: 0,
@@ -92,6 +104,11 @@ impl Overview {
 
     pub fn set_pd_diagnostic(&mut self, registers: Option<(u32, u8)>) {
         self.pd_diagnostic = Some(registers);
+    }
+
+    #[cfg(feature = "pd-rd-test")]
+    pub fn set_rd_test(&mut self, test: Option<RdTest>) {
+        self.rd_test = test;
     }
 
     pub fn set_pd_profiles(&mut self, state: u32, cc: u32, caps: Option<SourceCaps>) {

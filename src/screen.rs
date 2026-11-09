@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 mod cable;
+#[cfg(feature = "pd-rd-test")]
+mod rd_test;
 
 use crate::pd::{
     CABLE_PAGE, CABLE_SECTIONS, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, Pdo, Profiles, SNIFF_PAGE,
@@ -841,6 +843,11 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
     assert!(top < SIDE && top % STRIP_ROWS == 0);
     pixels.fill(BG);
     let mut p = Strip { pixels, top };
+    #[cfg(feature = "pd-rd-test")]
+    if let Some(test) = view.rd_test {
+        rd_test::render(&mut p, test);
+        return;
+    }
     header(&mut p, view);
     match view.page {
         0 => overview(&mut p, view),
