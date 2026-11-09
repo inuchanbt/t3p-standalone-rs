@@ -22,7 +22,7 @@ struct t3p_rd_test {
 
 int t3p_pd_rd_baseline(struct t3p_meter_bus *);
 int t3p_pd_set_rd(struct t3p_meter_bus *, uint8_t switches);
-void t3p_rd_test_double_press(struct t3p_rd_test *, struct t3p_meter_bus *, uint32_t now);
+void t3p_rd_test_step(struct t3p_rd_test *, struct t3p_meter_bus *, uint32_t now);
 void t3p_rd_test_cancel(struct t3p_rd_test *, struct t3p_meter_bus *);
 void t3p_rd_test_poll(struct t3p_rd_test *, struct t3p_meter_bus *, uint32_t now);
 #endif

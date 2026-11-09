@@ -9,7 +9,7 @@ pub(super) fn render(p: &mut Strip<'_>, test: RdTest) {
     // State codes from native/t3p_rd_test.h.
     let (status, hint, color): (&[u8], &[u8], u16) = match test.state {
         0 => (b"READY", b"HID ONLY. UNPLUG SRC AND LOAD.", AMPS),
-        1 => (b"RD OFF", b"CONNECT SRC. WAIT 2S. 2X RD ON.", AMPS),
+        1 => (b"RD OFF", b"CONNECT SRC. WAIT 2S.", AMPS),
         2 => (b"RD ON", b"WAITING FOR 5V", AMPS),
         3 => (b"5V SEEN", b"DEFAULT RD RESTORED", WATTS),
         4 => (b"NO 5V", b"DEFAULT RD RESTORED", VOLTS),
@@ -40,5 +40,12 @@ pub(super) fn render(p: &mut Strip<'_>, test: RdTest) {
         );
     }
     p.rect(8, 219, 224, 1, GRID);
-    p.text(8, 226, b"TAP EXIT   2X STEP   HOLD CANCEL", 1, MUTED);
+    let controls: &[u8] = match test.state {
+        0 => b"TAP EXIT   2X ARM",
+        1 => b"TAP RD ON   HOLD CANCEL",
+        2 => b"HOLD CANCEL",
+        10 => b"HOLD EXIT",
+        _ => b"2X RETRY   HOLD EXIT",
+    };
+    p.text(8, 226, controls, 1, MUTED);
 }

@@ -100,6 +100,12 @@ unsafe extern "C" fn meter_pd_diagnostic(valid: u32, first_four: u32, last: u32)
 
 #[cfg(feature = "pd-rd-test")]
 #[unsafe(no_mangle)]
+unsafe extern "C" fn meter_on_rd_test_page() -> u32 {
+    u32::from(unsafe { *(&raw const PAGE) } == PROFILES_PAGE)
+}
+
+#[cfg(feature = "pd-rd-test")]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn meter_rd_test(state: u32, off_mv: u32, on_mv: u32) {
     unsafe {
         *(&raw mut RD_TEST) = crate::RdTest {
@@ -113,10 +119,6 @@ unsafe extern "C" fn meter_rd_test(state: u32, off_mv: u32, on_mv: u32) {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_long_press() {
     unsafe {
-        #[cfg(feature = "pd-rd-test")]
-        if *(&raw const PAGE) == PROFILES_PAGE {
-            return;
-        }
         #[cfg(feature = "pd-profiles")]
         if matches!(*(&raw const PAGE), SNIFF_PAGE | CABLE_PAGE) {
             *(&raw mut PD_SNIFF_OFFSET) = 0;
@@ -160,10 +162,6 @@ unsafe extern "C" fn meter_next_page() {
 unsafe extern "C" fn meter_double_press() -> u32 {
     unsafe {
         let page = *(&raw const PAGE);
-        #[cfg(feature = "pd-rd-test")]
-        if page == PROFILES_PAGE {
-            return 5;
-        }
         if cfg!(feature = "pd-profiles") {
             match page {
                 PROFILES_PAGE => return 1,
@@ -278,7 +276,7 @@ unsafe extern "C" fn meter_snapshot() {
     unsafe {
         let view = &mut *(&raw mut VIEW);
         #[cfg(feature = "pd-rd-test")]
-        view.set_rd_test((*(&raw const PAGE) == PROFILES_PAGE).then_some(*(&raw const RD_TEST)));
+        view.set_rd_test((meter_on_rd_test_page() != 0).then_some(*(&raw const RD_TEST)));
         #[cfg(feature = "pd-profiles")]
         view.set_pd_profiles(
             *(&raw const PD_STATE),

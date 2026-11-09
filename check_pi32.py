@@ -114,14 +114,16 @@ def main():
                 raise ValueError(f"Pi32v2 {name} graph differs from host preview")
         cpu.call(symbols["meter_next_page"], [])
         if args.pd_rd_test:
-            if cpu.call(symbols["meter_double_press"], [])[0] != 5:
-                raise ValueError("Pi32v2 RD TEST double press did not request an Rd step")
+            if cpu.call(symbols["meter_on_rd_test_page"], [])[0] != 1:
+                raise ValueError("Pi32v2 did not enter RD TEST")
             for name, state, on_mv in (("off", 1, 65535), ("5v", 3, 5094)):
                 cpu.call(symbols["meter_rd_test"], [state, 3010, on_mv])
                 cpu.call(symbols["meter_snapshot"], [])
                 if render() != (out / f"preview-rd-{name}.ppm").read_bytes():
                     raise ValueError(f"Pi32v2 RD TEST {name} frame differs from host preview")
             cpu.call(symbols["meter_next_page"], [])
+            if cpu.call(symbols["meter_on_rd_test_page"], [])[0] != 0:
+                raise ValueError("Pi32v2 did not exit RD TEST")
             print("Pi32v2 RD TEST navigation and both result frames match")
         if args.pd_profiles:
             cpu.call(symbols["meter_snapshot"], [])

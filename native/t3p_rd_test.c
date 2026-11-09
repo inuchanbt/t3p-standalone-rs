@@ -22,7 +22,7 @@ void t3p_rd_test_cancel(struct t3p_rd_test *test, struct t3p_meter_bus *bus)
         finish(test, bus, T3P_RD_CANCELLED);
 }
 
-void t3p_rd_test_double_press(struct t3p_rd_test *test, struct t3p_meter_bus *bus, uint32_t now)
+void t3p_rd_test_step(struct t3p_rd_test *test, struct t3p_meter_bus *bus, uint32_t now)
 {
     if (test->state == T3P_RD_ON || test->state == T3P_RD_RESTORE_FAILED) return;
 

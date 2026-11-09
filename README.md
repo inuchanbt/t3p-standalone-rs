@@ -48,9 +48,9 @@ The CC1 hardware trial showed the same identity on the T3P. The photographed PD 
 
 ## CC1 Rd attach test
 
-Build with `python build.py --pd-rd-test` and tap past the current graph to open **RD TEST**. Power the T3P through HID and start with both measurement ports unplugged. Double press to arm `RD OFF`. While it is displayed, plug a known USB-C source into the T3P receptacle in the working CC1 orientation. Leave the other measurement port empty. Wait two seconds, then double press to enable Rd. Compare the two saved VBUS readings. `5V SEEN` means VBUS was below 4 V with Rd off and then measured 4.5–5.5 V on three consecutive samples with Rd on.
+Build with `python build.py --pd-rd-test` and tap past the current graph to open **RD TEST**. Power the T3P through HID and start with both measurement ports unplugged. Double press to arm `RD OFF`. While it is displayed, plug a known USB-C source into the T3P receptacle in the working CC1 orientation. Leave the other measurement port empty. Wait two seconds, then tap once to enable Rd. Compare the two saved VBUS readings. `5V SEEN` means VBUS was below 4 V with Rd off and then measured 4.5–5.5 V on three consecutive samples with Rd on.
 
-The first step times out after 30 seconds and the second after 3 seconds. Hold to cancel or tap to leave. The test checks the startup configuration and writes only `SWITCHES0` (`04` then `05`), restoring `03` when the test ends. For `VBUS PRESENT`, unplug the source and start again. For `RESTORE ERROR`, unplug the source and power-cycle the T3P. The test uses the meter's uncalibrated VBUS reading. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+The first step times out after 30 seconds and the second after 3 seconds. Hold during the test to cancel. Hold on the result to exit, or unplug the source and double press to retry. The test checks the startup configuration and writes only `SWITCHES0` (`04` then `05`), restoring `03` when the test ends. For `RESTORE ERROR`, unplug the source and power-cycle the T3P. The test uses the meter's uncalibrated VBUS reading. [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
 ## Hardware bring-up
 
@@ -131,7 +131,7 @@ Build the PD profiles trial with `python build.py --pd-profiles`. In `build/pd-p
 
 Package the PD and CABLE trial locally with `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin`.
 
-For **RD TEST**, generate the seven measurement references under `build/pd-rd-test`. Generate `preview-rd-off.ppm` and `preview-rd-5v.ppm` with `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` or `--rd-5v` for the respective reference. Package with `python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_3.0.3.bin`.
+For **RD TEST**, generate the seven measurement references under `build/pd-rd-test`. Generate `preview-rd-off.ppm` and `preview-rd-5v.ppm` with `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` or `--rd-5v` for the respective reference. Package with `python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin`.
 
 The simulator check requires the pinned [pi32v2-isa revision](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f). The output ELF is for offline evaluation. `pack_demo.py` currently depends on the separate local `doom_on_t3p` research workspace, unpacked stock firmware, and its packing tools. Manufacturer firmware and update binaries are not distributed here.
 

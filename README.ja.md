@@ -48,9 +48,9 @@ CC1 の実機試験でも、T3P に同じ識別情報が表示されました。
 
 ## CC1 の Rd 接続試験
 
-`python build.py --pd-rd-test` でビルドし、電流グラフの次にある **RD TEST** を開きます。HID で給電し、測定用の両端子を空けて始めます。左ボタンをダブル押しして `RD OFF` を表示させてから、動作実績のある USB-C 電源を CC1 の向きで T3P のメス端子につなぎます。反対側の測定端子は空けておきます。約2秒待ってから再度ダブル押しして Rd を入れ、保存された前後の VBUS を比べます。`5V SEEN` は、Rd を切ったときは4 V未満で、Rd を入れた後は3回連続で4.5〜5.5 Vだったことを示します。
+`python build.py --pd-rd-test` でビルドし、電流グラフの次にある **RD TEST** を開きます。HID で給電し、測定用の両端子を空けて始めます。左ボタンをダブル押しして `RD OFF` を表示させてから、動作実績のある USB-C 電源を CC1 の向きで T3P のメス端子につなぎます。反対側の測定端子は空けておきます。約2秒待ってから左ボタンを1回短押しして Rd を入れ、保存された前後の VBUS を比べます。`5V SEEN` は、Rd を切ったときは4 V未満で、Rd を入れた後は3回連続で4.5〜5.5 Vだったことを示します。
 
-待機は Rd OFF が30秒、Rd ON が3秒です。長押しで中止、短押しで画面を抜けます。起動時の設定を確認し、`SWITCHES0` だけに `04`、`05` の順で書き込み、試験終了時に `03` に戻します。`VBUS PRESENT` なら電源を外して再試行します。`RESTORE ERROR` なら電源を外し、T3P の電源を入れ直します。VBUS は未校正のメーターの読み値です。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
+待機は Rd OFF が30秒、Rd ON が3秒です。試験中に長押しすると中止し、結果画面で長押しするとメニューに戻ります。再試行するときは電源を外してダブル押しします。起動時の設定を確認し、`SWITCHES0` だけに `04`、`05` の順で書き込み、試験終了時に `03` に戻します。`RESTORE ERROR` なら電源を外し、T3P の電源を入れ直します。VBUS は未校正のメーターの読み値です。 [FUSB302B データシート](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
 ## 実機での検証
 
@@ -131,7 +131,7 @@ PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします�
 
 `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin` でローカルの更新ファイルを作ります。
 
-**RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_3.0.3.bin` で更新ファイルを作ります。
+**RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
 
 シミュレーター検査には固定版の [pi32v2-isa](https://github.com/jvitkauskas/pi32v2-isa/tree/66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f) が必要です。ビルド結果の ELF はオフライン検証用です。`pack_demo.py` は現時点で別のローカル `doom_on_t3p` 調査環境、展開済み純正ファーム、梱包ツールにも依存します。純正ファームと更新バイナリは本リポジトリでは配布していません。
 
