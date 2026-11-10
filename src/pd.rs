@@ -2,12 +2,16 @@
 
 pub(crate) mod cable;
 pub use cable::CableCapture;
+#[cfg(feature = "pd-charger")]
+pub mod charger;
 
 pub(crate) const PROFILES_PAGE: u32 = 5;
 pub(crate) const EPR_PAGE: u32 = 6;
 pub(crate) const SNIFF_PAGE: u32 = 7;
 pub(crate) const CABLE_PAGE: u32 = 8;
-pub(crate) const PD_PAGE_COUNT: u32 = CABLE_PAGE + 1;
+#[cfg(feature = "pd-charger")]
+pub const CHARGER_PAGE: u32 = CABLE_PAGE + 1;
+pub(crate) const PD_PAGE_COUNT: u32 = CABLE_PAGE + 1 + cfg!(feature = "pd-charger") as u32;
 pub(crate) const CABLE_MODE: u32 = 3;
 const SOP_TOKEN: u8 = 7;
 const SOP1_TOKEN: u8 = 6;
@@ -40,6 +44,10 @@ impl SourceCaps {
     /// A well-formed packet of another type is ignored.
     pub fn from_fifo(frame: &[u8]) -> Result<Option<Self>, BadFrame> {
         let (lo, hi, payload) = checked_fifo(frame, SOP_TOKEN)?;
+        Self::from_message(lo, hi, payload)
+    }
+
+    fn from_message(lo: u8, hi: u8, payload: &[u8]) -> Result<Option<Self>, BadFrame> {
         let count = payload.len() / 4;
         // Non-extended Source_Capabilities from the source on SOP.
         if hi & 0x81 != 0x01 || lo & 0x1f != 1 || count == 0 {

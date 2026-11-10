@@ -23,6 +23,8 @@ mod settings {
 }
 
 use energy::{Totals, Tracker};
+#[cfg(feature = "pd-charger")]
+pub use pd::{CHARGER_PAGE, charger::ChargerCapture};
 pub use pd::{CableCapture, EprCaps, EprCapture, EprEvent, PdSniff, SourceCaps};
 use pd::{PD_PAGE_COUNT, PROFILES_PAGE, Profiles};
 use power_history::{GraphTrace, GraphWindow, History, Sample};
@@ -60,6 +62,10 @@ pub struct Overview {
     uncalibrated: bool,
     pd_diagnostic: Option<Option<(u32, u8)>>,
     pd_profiles: Option<Profiles>,
+    #[cfg(feature = "pd-charger")]
+    charger: ChargerCapture,
+    #[cfg(feature = "pd-charger")]
+    charger_offer: bool,
     #[cfg(feature = "pd-rd-test")]
     rd_test: Option<RdTest>,
     mah: u64,
@@ -87,6 +93,10 @@ impl Overview {
             uncalibrated: false,
             pd_diagnostic: None,
             pd_profiles: None,
+            #[cfg(feature = "pd-charger")]
+            charger: ChargerCapture::new(),
+            #[cfg(feature = "pd-charger")]
+            charger_offer: false,
             #[cfg(feature = "pd-rd-test")]
             rd_test: None,
             mah: 0,
@@ -160,6 +170,12 @@ impl Overview {
             profiles.cable = *capture;
             profiles.cable_section = section.min(capture.sections() - 1);
         }
+    }
+
+    #[cfg(feature = "pd-charger")]
+    pub fn set_charger(&mut self, capture: ChargerCapture, offer: bool) {
+        self.charger = capture;
+        self.charger_offer = offer && capture.has_offer();
     }
 
     pub fn set_page(&mut self, page: u32) {

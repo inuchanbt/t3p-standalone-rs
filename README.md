@@ -62,6 +62,12 @@ V3 uses the Identity response to choose the remaining queries:
 
 The T3P read a Sumitomo passive cable (`20C2/0A14`) in standalone mode. The SVID list contained `1E4E` and `8087`. Both Discover Modes queries received `ACK`, with mode VDOs `9031011C` and `00030001`, respectively. Manufacturer Info returned `1E4E/0903` and `eEver`, shown as `EEVER` on screen. The status page showed `PASSIVE` for SOP′ and `NOT PRESENT` / `NOT QUERIED` for SOP″. Get Status on an active cable and the SOP″ exchange have been tested in simulation and still await hardware verification.
 
+## CHARGER scan at 5 V
+
+The experimental `--pd-charger` build adds **CHARGER** after **CABLE**. Power the T3P from its side HID port and leave both measurement connectors open. Double press the left button on **CHARGER** to arm the scan. When `RD OFF` appears, connect the USB-C source to the T3P measurement receptacle in the CC1 orientation. Leave the measurement plug open and tap once within 30 seconds. Hold while armed to cancel.
+
+The scan requests fixed 5 V from PDO 1, with a request current capped at 0.5 A. The result shows the T3P's VBUS reading and whether the source sent Accept and PS_RDY. When a PD 3.x source returns its Extended Source Capabilities, `SOURCE EXT CAP OK` shows the source's VID/PID, XID, FW/HW revisions and advertised SPR/EPR PDP. A PD 2.0 contract shows `5V CONTRACT OK`. Once the initial offer is captured, tap to see **SPR OFFER**, even if the extended query fails or is skipped. Unplug the source before double pressing to retry. Hardware validation of this scan is pending.
+
 ## CC1 Rd attach test
 
 Build with `python build.py --pd-rd-test` and tap past the current graph to open **RD TEST**. Power the T3P through HID and start with both measurement ports unplugged. Double press to arm `RD OFF`. While it is displayed, plug a known USB-C source into the T3P receptacle in the working CC1 orientation. Leave the other measurement port empty. Wait two seconds, then tap once to enable Rd. Compare the two saved VBUS readings. `5V SEEN` means VBUS was below 4 V with Rd off and then measured 4.5–5.5 V on three consecutive samples with Rd on.
@@ -158,6 +164,8 @@ Build the PD profiles trial with `python build.py --pd-profiles`. In `build/pd-p
 Package the PD and CABLE trial locally with `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin`.
 
 For the active cable reader, build with `python build.py --pd-cable-read`. Generate the same references under `build/pd-cable-read` using `cargo run --offline --features pd-cable-read --bin preview`. Add `preview-cable-vbus.ppm` and `preview-cable-no-ra.ppm` with `--measurement --profiles-ui` and `--cable-vbus` or `--cable-no-ra` respectively. With the same two shared flags, use `--cable-scan=N` to generate `preview-cable-scan-N.ppm` for `N` equal to `0`, `6` and `8`. The fixture combines the hardware Identity reply with synthetic follow-up replies. Package with `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_V3_3.0.3.bin`.
+
+For **CHARGER**, build with `python build.py --pd-charger`. Generate the same references as for the active cable reader under `build/pd-charger` with `--features pd-charger`. Use `--measurement --profiles-ui` with `--charger-ready`, `--charger-armed`, `--charger-result`, `--charger-offer` or `--charger-no-ext` to generate the corresponding `preview-charger-*.ppm` references. Package with `python pack_demo.py --build-dir build/pd-charger --output-name T3P_RUST_METER_PD_CHARGER_V1_3.0.3.bin`.
 
 For **RD TEST**, generate the seven measurement references under `build/pd-rd-test`. Generate `preview-rd-off.ppm` and `preview-rd-5v.ppm` with `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` or `--rd-5v` for the respective reference. Package with `python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin`.
 

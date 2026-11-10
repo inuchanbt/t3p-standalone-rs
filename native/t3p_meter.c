@@ -3,7 +3,7 @@
 #ifdef T3P_PD_CABLE_READ
 #include "t3p_pd.h"
 #endif
-#ifdef T3P_PD_RD_TEST
+#if defined(T3P_PD_RD_TEST) || defined(T3P_PD_CHARGER)
 #include "t3p_rd_test.h"
 #endif
 
@@ -188,12 +188,12 @@ int t3p_pd_cable_write(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
     return pd_write_register(b, reg, value);
 }
 
-int t3p_pd_cable_tx(struct t3p_meter_bus *b, unsigned second, uint16_t header,
-                   const uint8_t *payload, unsigned length)
+static int pd_tx(struct t3p_meter_bus *b, const uint8_t sop[4], uint16_t header,
+                 const uint8_t *payload, unsigned length)
 {
     if (length > 28 || length != 4u * ((header >> 12) & 7u)) return -1;
     const uint8_t prefix[] = {
-        0x12, second ? 0x1b : 0x12, second ? 0x12 : 0x1b, 0x1b, /* SOP' or SOP'' */
+        sop[0], sop[1], sop[2], sop[3],
         0x80 | (2 + length), (uint8_t)header, (uint8_t)(header >> 8), /* PACKSYM and header */
     };
     static const uint8_t suffix[] = {0xff, 0x14, 0xfe, 0xa1}; /* JAMCRC, EOP, TXOFF, TXON */
@@ -204,6 +204,22 @@ int t3p_pd_cable_tx(struct t3p_meter_bus *b, unsigned second, uint16_t header,
     stop(b);
     return error ? -1 : 0;
 }
+
+int t3p_pd_cable_tx(struct t3p_meter_bus *b, unsigned second, uint16_t header,
+                   const uint8_t *payload, unsigned length)
+{
+    static const uint8_t sop1[] = {0x12, 0x12, 0x1b, 0x1b};
+    static const uint8_t sop2[] = {0x12, 0x1b, 0x12, 0x1b};
+    return pd_tx(b, second ? sop2 : sop1, header, payload, length);
+}
+
+#ifdef T3P_PD_CHARGER
+int t3p_pd_sop_tx(struct t3p_meter_bus *b, uint16_t header, const uint8_t *payload, unsigned length)
+{
+    static const uint8_t sop[] = {0x12, 0x12, 0x12, 0x13};
+    return pd_tx(b, sop, header, payload, length);
+}
+#endif
 #endif
 
 #ifdef T3P_PD_PROFILES
@@ -217,7 +233,7 @@ int t3p_pd_rx_config(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
     return pd_write_register(b, reg, value);
 }
 #endif
-#ifdef T3P_PD_RD_TEST
+#if defined(T3P_PD_RD_TEST) || defined(T3P_PD_CHARGER)
 int t3p_pd_rd_baseline(struct t3p_meter_bus *b)
 {
     uint8_t registers[9], power, status1;
@@ -241,7 +257,7 @@ int t3p_pd_set_rd(struct t3p_meter_bus *b, uint8_t switches)
            t3p_pd_read_register(b, 0x02, &actual) || actual != switches ? -1 : 0;
 }
 #endif
-#ifdef T3P_PD_ACK_TEST
+#if defined(T3P_PD_ACK_TEST) || defined(T3P_PD_CHARGER)
 #define ACK_SWITCHES0 0x02
 #define ACK_SWITCHES1 0x03
 #define ACK_CONTROL1 0x07

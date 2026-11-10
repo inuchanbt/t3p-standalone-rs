@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 mod cable;
+#[cfg(feature = "pd-charger")]
+mod charger;
 #[cfg(feature = "pd-rd-test")]
 mod rd_test;
 
-use crate::pd::{CABLE_PAGE, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, Pdo, Profiles, SNIFF_PAGE};
+#[cfg(feature = "pd-charger")]
+use crate::pd::CHARGER_PAGE;
+use crate::pd::{
+    CABLE_PAGE, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, Pdo, Profiles, SNIFF_PAGE, SourceCaps,
+};
 use crate::{Overview, SIDE, STRIP_ROWS};
 
 const BG: u16 = 0x0000;
@@ -222,6 +228,8 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         EPR_PAGE => (b"EPR OFFER", PURPLE),
         SNIFF_PAGE => (b"PD SNIFF", AMPS),
         CABLE_PAGE => (b"CABLE", AMPS),
+        #[cfg(feature = "pd-charger")]
+        CHARGER_PAGE => (b"CHARGER", VOLTS),
         _ => (b"GRAPH", WATTS),
     };
     p.text(8, 8, title, 2, color);
@@ -231,7 +239,13 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
     } else {
         PROFILES_PAGE
     };
-    let (stride, width) = if pd_tabs { (7, 5) } else { (10, 6) };
+    let (stride, width) = if pd_tabs && cfg!(feature = "pd-charger") {
+        (6, 4)
+    } else if pd_tabs {
+        (7, 5)
+    } else {
+        (10, 6)
+    };
     for index in 0..tabs {
         p.rect(
             120 + index as usize * stride,
@@ -282,6 +296,8 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
             }
             CABLE_PAGE if cfg!(feature = "pd-cable-read") => b"TAP NEXT 2X READ HOLD EXIT",
             CABLE_PAGE => b"TAP NEXT 2X CAP HOLD EXIT",
+            #[cfg(feature = "pd-charger")]
+            CHARGER_PAGE => charger::controls(view),
             PROFILES_PAGE | EPR_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
             2..PROFILES_PAGE => b"TAP NEXT 2X RANGE HOLD RESET",
             _ => b"TAP NEXT  HOLD RESET",
@@ -444,6 +460,10 @@ fn profiles(p: &mut Strip<'_>, pd: &Profiles) {
         p.text(18, 129, hint, 1, MUTED);
         return;
     };
+    spr_rows(p, &caps);
+}
+
+fn spr_rows(p: &mut Strip<'_>, caps: &SourceCaps) {
     let mut has_avs = false;
     for (index, &word) in caps.rows().iter().enumerate() {
         let top = 54 + index * 21;
@@ -877,6 +897,8 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
                 cable::render(&mut p, pd);
             }
         }
+        #[cfg(feature = "pd-charger")]
+        CHARGER_PAGE => charger::render(&mut p, view),
         _ => graph(&mut p, view),
     }
 }

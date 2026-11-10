@@ -27,7 +27,7 @@ struct t3p_rd_test {
 
 int t3p_pd_rd_baseline(struct t3p_meter_bus *);
 int t3p_pd_set_rd(struct t3p_meter_bus *, uint8_t switches);
-#ifdef T3P_PD_ACK_TEST
+#if defined(T3P_PD_ACK_TEST) || defined(T3P_PD_CHARGER)
 int t3p_pd_arm_ack(struct t3p_meter_bus *, uint8_t *, unsigned *);
 int t3p_pd_disarm_ack(struct t3p_meter_bus *, uint8_t);
 #endif

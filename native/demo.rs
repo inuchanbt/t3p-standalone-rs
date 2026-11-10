@@ -2,6 +2,8 @@
 #[cfg(feature = "pd-profiles")]
 use crate::pd::CABLE_MODE;
 use crate::pd::{CABLE_PAGE, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, SNIFF_PAGE};
+#[cfg(feature = "pd-charger")]
+use crate::{CHARGER_PAGE, ChargerCapture};
 use crate::{Meter, Overview, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
 
 const PAGE_COUNT: u32 = if cfg!(feature = "pd-profiles") {
@@ -32,6 +34,10 @@ static mut PD_FIRST: u32 = 0;
 static mut PD_LAST: u8 = 0;
 static mut PAGE: u32 = 0;
 static mut GRAPH_WINDOW: u32 = 0;
+#[cfg(feature = "pd-charger")]
+static mut CHARGER: ChargerCapture = ChargerCapture::new();
+#[cfg(feature = "pd-charger")]
+static mut CHARGER_OFFER: bool = false;
 #[cfg(feature = "pd-rd-test")]
 static mut RD_TEST: crate::RdTest = crate::RdTest {
     state: 0,
@@ -147,6 +153,12 @@ unsafe extern "C" fn meter_pd_ack_pdo_count(frame: *const u8, len: u32) -> i32 {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_long_press() {
     unsafe {
+        #[cfg(feature = "pd-charger")]
+        if *(&raw const PAGE) == CHARGER_PAGE {
+            *(&raw mut CHARGER_OFFER) = false;
+            *(&raw mut PAGE) = 0;
+            return;
+        }
         #[cfg(feature = "pd-profiles")]
         if matches!(*(&raw const PAGE), SNIFF_PAGE | CABLE_PAGE) {
             *(&raw mut PD_SNIFF_OFFSET) = 0;
@@ -182,6 +194,14 @@ unsafe extern "C" fn meter_next_page() {
             }
             *section = 0;
         }
+        #[cfg(feature = "pd-charger")]
+        if *(&raw const PAGE) == CHARGER_PAGE {
+            if !*(&raw const CHARGER_OFFER) && (&*(&raw const CHARGER)).has_offer() {
+                *(&raw mut CHARGER_OFFER) = true;
+                return;
+            }
+            *(&raw mut CHARGER_OFFER) = false;
+        }
         *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % PAGE_COUNT;
     }
 }
@@ -196,6 +216,8 @@ unsafe extern "C" fn meter_double_press() -> u32 {
                 EPR_PAGE => return 2,
                 SNIFF_PAGE => return 3,
                 CABLE_PAGE => return 4,
+                #[cfg(feature = "pd-charger")]
+                CHARGER_PAGE => return 5,
                 _ => {}
             }
         }
@@ -206,6 +228,45 @@ unsafe extern "C" fn meter_double_press() -> u32 {
         }
     }
     0
+}
+
+#[cfg(feature = "pd-charger")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_charger_clear() {
+    unsafe {
+        *(&raw mut CHARGER) = ChargerCapture::new();
+        *(&raw mut CHARGER_OFFER) = false;
+    }
+}
+
+#[cfg(feature = "pd-charger")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_charger_status(state: u32) {
+    unsafe { (&mut *(&raw mut CHARGER)).set_state(state) };
+}
+
+#[cfg(feature = "pd-charger")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_charger_vbus(mv: u32) {
+    unsafe { (&mut *(&raw mut CHARGER)).set_vbus(mv as u16) };
+}
+
+#[cfg(feature = "pd-charger")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_charger_request() -> u32 {
+    let scan = unsafe { &*(&raw const CHARGER) };
+    u32::from(scan.revision | scan.request_current)
+}
+
+#[cfg(feature = "pd-charger")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_charger_frame(frame: *const u8, len: u32, phase: u32) -> u32 {
+    if frame.is_null() || !(7..=35).contains(&len) {
+        return 6;
+    }
+    // The native FIFO reader owns the initialized record until this call returns.
+    let record = unsafe { core::slice::from_raw_parts(frame, len as usize) };
+    unsafe { (&mut *(&raw mut CHARGER)).record(record, phase) }
 }
 
 #[cfg(feature = "pd-profiles")]
@@ -375,6 +436,8 @@ unsafe extern "C" fn meter_snapshot() {
         );
         #[cfg(feature = "pd-profiles")]
         view.set_pd_cable(&*(&raw const PD_CABLE), *(&raw const PD_CABLE_SECTION));
+        #[cfg(feature = "pd-charger")]
+        view.set_charger(*(&raw const CHARGER), *(&raw const CHARGER_OFFER));
         view.set_page(*(&raw const PAGE));
         view.set_graph_window(*(&raw const GRAPH_WINDOW));
         (&*(&raw const METER)).overview(view);

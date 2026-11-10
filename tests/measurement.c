@@ -116,21 +116,41 @@ static void test_pd_ack_reset(void)
 #ifdef T3P_PD_CABLE_READ
 static void test_sop_prime_identity_tx(void)
 {
+    const uint8_t identity[] = {0x01, 0xa0, 0x00, 0xff};
     const uint8_t bytes[] = {
         0x44, 0x43, 0x12, 0x12, 0x1b, 0x1b, 0x86, 0x8f, 0x10,
         0x01, 0xa0, 0x00, 0xff, 0xff, 0x14, 0xfe, 0xa1,
     };
     struct fake f = { .reads = {1}, .count = 1 + sizeof(bytes) };
     struct t3p_meter_bus b = bus(&f);
-    assert(!t3p_pd_send_identity(&b));
+    assert(!t3p_pd_cable_tx(&b, 0, 0x108f, identity, sizeof(identity)));
     assert(f.cursor == f.count && f.scl && f.sda);
     for (unsigned i = 0; i < sizeof(bytes); ++i)
         for (unsigned bit = 0; bit < 8; ++bit)
             assert(f.clock_data[1 + i * 9 + bit] == ((bytes[i] >> (7 - bit)) & 1));
 
     f = (struct fake){ .reads = {1, 0, 0, 1}, .count = 4 };
-    assert(t3p_pd_send_identity(&b)); /* NACK on the first token must prevent TXON. */
+    assert(t3p_pd_cable_tx(&b, 0, 0x108f, identity, sizeof(identity))); /* NACK before TXON */
     assert(f.cursor == f.count && f.scl && f.sda);
+}
+#endif
+#ifdef T3P_PD_CHARGER
+static void test_sop_request_tx(void)
+{
+    const uint8_t rdo[] = {0x32, 0xc8, 0x00, 0x11};
+    const uint8_t bytes[] = {
+        0x44, 0x43, 0x12, 0x12, 0x12, 0x13, 0x86, 0x82, 0x10,
+        0x32, 0xc8, 0x00, 0x11, 0xff, 0x14, 0xfe, 0xa1,
+    };
+    struct fake f = {.reads = {1}, .count = 1 + sizeof(bytes)};
+    struct t3p_meter_bus b = bus(&f);
+    assert(t3p_pd_sop_tx(&b, 0x1082, rdo, 0));
+    assert(!f.clocks);
+    assert(!t3p_pd_sop_tx(&b, 0x1082, rdo, sizeof(rdo)));
+    assert(f.cursor == f.count && f.scl && f.sda);
+    for (unsigned i = 0; i < sizeof(bytes); ++i)
+        for (unsigned bit = 0; bit < 8; ++bit)
+            assert(f.clock_data[1 + i * 9 + bit] == ((bytes[i] >> (7 - bit)) & 1));
 }
 #endif
 int main(void)
@@ -248,6 +268,9 @@ int main(void)
 #endif
 #ifdef T3P_PD_CABLE_READ
     test_sop_prime_identity_tx();
+#endif
+#ifdef T3P_PD_CHARGER
+    test_sop_request_tx();
 #endif
     return 0;
 }

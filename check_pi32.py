@@ -26,9 +26,12 @@ def main():
     parser.add_argument("--pd-diagnostic", action="store_true")
     parser.add_argument("--pd-profiles", action="store_true")
     parser.add_argument("--pd-cable-read", action="store_true")
+    parser.add_argument("--pd-charger", action="store_true")
     parser.add_argument("--pd-rd-test", action="store_true")
     parser.add_argument("--pd-ack-test", action="store_true")
     args = parser.parse_args()
+    if args.pd_charger:
+        args.pd_cable_read = True
     if args.pd_cable_read:
         args.pd_profiles = args.measurement = True
     sys.path.insert(0, str(args.sim / "tools/llvm"))
@@ -241,8 +244,7 @@ def main():
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-cable-ready.ppm").read_bytes():
                 raise ValueError("Pi32v2 did not advance after the oldest sniff page")
-            cpu.call(symbols["meter_next_page"], [])
-            for _ in range(7):
+            for _ in range(8 + int(args.pd_charger)):
                 cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_next_page"], [])
             if cpu.call(symbols["meter_double_press"], [])[0] != 3:
@@ -256,8 +258,7 @@ def main():
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-cable-ready.ppm").read_bytes():
                 raise ValueError("Pi32v2 sniff recapture did not reset the history cursor")
-            cpu.call(symbols["meter_next_page"], [])
-            for _ in range(7):
+            for _ in range(8 + int(args.pd_charger)):
                 cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_long_press"], [])
             cpu.call(symbols["meter_snapshot"], [])
@@ -336,6 +337,57 @@ def main():
             if render() != (out / "preview-measurement.ppm").read_bytes():
                 raise ValueError("Pi32v2 cable long press did not exit without resetting readings")
             print("Pi32v2 SOP' Identity replay, cable views, recapture and exit match")
+            if args.pd_charger:
+                def check_charger(page):
+                    cpu.call(symbols["meter_snapshot"], [])
+                    if render() != (out / f"preview-charger-{page}.ppm").read_bytes():
+                        raise ValueError(f"Pi32v2 charger {page} frame differs from host preview")
+
+                def charger_frame(packet, phase, expected=1):
+                    cpu.mem.write(strip, packet)
+                    result = cpu.call(symbols["meter_charger_frame"], [strip, len(packet), phase])[0]
+                    if result != expected:
+                        raise ValueError(f"Pi32v2 misclassified charger frame in phase {phase}")
+
+                cpu.call(symbols["meter_pd_status"], [1, 1, 2])
+                cpu.call(symbols["meter_pd_status"], [1, 1, 3])
+                cpu.call(symbols["meter_pd_status"], [0, 0, 0])
+                for _ in range(9):
+                    cpu.call(symbols["meter_next_page"], [])
+                check_charger("ready")
+                if cpu.call(symbols["meter_double_press"], [])[0] != 5:
+                    raise ValueError("Pi32v2 CHARGER double press did not arm a scan")
+                cpu.call(symbols["meter_charger_clear"], [])
+                cpu.call(symbols["meter_charger_status"], [1])
+                check_charger("armed")
+                replies = [bytes.fromhex(line) for line in
+                           (ROOT / "tests/charger_scan.hex").read_text(encoding="ascii").splitlines()]
+                charger_frame(frame[:-1] + bytes([frame[-1] ^ 1]), 0, 6)
+                charger_frame(frame, 0)
+                if cpu.call(symbols["meter_charger_request"], [])[0] != 0xb2:
+                    raise ValueError("Pi32v2 selected the wrong charger revision or current")
+                charger_frame(replies[0], 1)
+                charger_frame(replies[1], 2)
+                cpu.call(symbols["meter_charger_vbus"], [5085])
+                cpu.call(symbols["meter_charger_status"], [5])
+                check_charger("no-ext")
+                cpu.call(symbols["meter_next_page"], [])
+                check_charger("offer")
+                cpu.call(symbols["meter_charger_clear"], [])
+                check_charger("ready")
+                charger_frame(frame, 0)
+                for phase, reply in enumerate(replies, 1):
+                    charger_frame(reply, phase)
+                cpu.call(symbols["meter_charger_vbus"], [5085])
+                cpu.call(symbols["meter_charger_status"], [2])
+                check_charger("result")
+                cpu.call(symbols["meter_next_page"], [])
+                check_charger("offer")
+                cpu.call(symbols["meter_long_press"], [])
+                cpu.call(symbols["meter_snapshot"], [])
+                if render() != (out / "preview-measurement.ppm").read_bytes():
+                    raise ValueError("Pi32v2 CHARGER long press did not exit without resetting readings")
+                print("Pi32v2 CHARGER scan, offer fallback, recapture and exit match")
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():

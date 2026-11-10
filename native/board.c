@@ -9,6 +9,10 @@
 #ifdef T3P_PD_PROFILES
 #include "t3p_pd.h"
 #endif
+#ifdef T3P_PD_CHARGER
+#include "t3p_charger.h"
+static enum t3p_charger_state charger_state;
+#endif
 #ifdef T3P_PD_RD_TEST
 #include "t3p_rd_test.h"
 uint32_t meter_on_rd_test_page(void);
@@ -58,12 +62,20 @@ static unsigned key_pressed(void)
 
 enum redraw_request {
     REDRAW = 1u, START_CAPTURE = 2u, START_EPR = 4u, START_SNIFF = 8u, START_CABLE = 16u,
-    RD_STEP = 32u, RD_CANCEL = 64u
+    RD_STEP = 32u, RD_CANCEL = 64u, CHARGER_ARM = 128u, CHARGER_SCAN = 256u,
+    CHARGER_CANCEL = 512u
 };
 
 static unsigned poll_key(uint32_t now)
 {
     enum t3p_button_event event = t3p_button_poll(&button, now, key_pressed());
+#ifdef T3P_PD_CHARGER
+    if (charger_state == CHARGER_ARMED) {
+        if (event == T3P_BUTTON_SHORT) return CHARGER_SCAN;
+        if (event == T3P_BUTTON_LONG) return CHARGER_CANCEL;
+        return 0;
+    }
+#endif
 #ifdef T3P_PD_RD_TEST
     if (event != T3P_BUTTON_NONE && meter_on_rd_test_page()) {
         if (event == T3P_BUTTON_DOUBLE) return RD_STEP;
@@ -85,6 +97,7 @@ static unsigned poll_key(uint32_t now)
         if (action == 2) return START_EPR;
         if (action == 3) return START_SNIFF;
         if (action == 4) return START_CABLE;
+        if (action == 5) return CHARGER_ARM;
         return REDRAW;
     }
     return 0;
@@ -129,6 +142,9 @@ void t3p_board_start(void)
     if (t3p_meter_fast_bus(&board, &fast_bus)) pd.state = T3P_PD_TIMER_ERROR;
     meter_pd_status(pd.state, 0, pd.mode);
 #endif
+#ifdef T3P_PD_CHARGER
+    uint32_t charger_armed_at = 0;
+#endif
 #ifdef T3P_PD_RD_TEST
     struct t3p_meter_bus *rd_bus = &meter_bus;
 #ifdef T3P_PD_ACK_TEST
@@ -146,6 +162,28 @@ void t3p_board_start(void)
     for (;;) {
         uint32_t now = t3p_bsp_millis(&board);
         redraw |= poll_key(now);
+#ifdef T3P_PD_CHARGER
+        if (redraw & CHARGER_ARM) {
+            meter_charger_clear();
+            if (charger_state == CHARGER_RESTORE || pd.state == T3P_PD_CABLE_RESTORE)
+                charger_state = CHARGER_RESTORE;
+            else if (pd.state == T3P_PD_TIMER_ERROR) charger_state = CHARGER_TIMER;
+            else if (pd.state == T3P_PD_LISTENING) charger_state = CHARGER_BUSY;
+            else charger_state = t3p_charger_arm(&fast_bus);
+            now = charger_armed_at = t3p_bsp_millis(&board);
+            redraw = REDRAW;
+        } else if (charger_state == CHARGER_ARMED) {
+            if (redraw & CHARGER_CANCEL)
+                charger_state = t3p_charger_cancel(&fast_bus, CHARGER_CANCELLED);
+            else if (now - charger_armed_at >= CHARGER_ARM_MS)
+                charger_state = t3p_charger_cancel(&fast_bus, CHARGER_EXPIRED);
+            else if (redraw & CHARGER_SCAN) {
+                charger_state = t3p_charger_scan(&board, &fast_bus);
+                now = t3p_bsp_millis(&board);
+            }
+            if (charger_state != CHARGER_ARMED) redraw = REDRAW;
+        }
+#endif
 #ifdef T3P_PD_RD_TEST
         enum t3p_rd_state before = rd_test.state;
         if (redraw & RD_CANCEL) t3p_rd_test_cancel(&rd_test, rd_bus);
@@ -220,6 +258,9 @@ void t3p_board_start(void)
         if (!redraw && rd_test.state == T3P_RD_ON) refresh_due = 0;
 #endif
         if (refresh_due) {
+#ifdef T3P_PD_CHARGER
+            meter_charger_status(charger_state);
+#endif
 #ifdef T3P_PD_RD_TEST
             meter_rd_test(rd_test.state, rd_test.off_mv, rd_test.on_mv);
 #endif
@@ -232,6 +273,10 @@ void t3p_board_start(void)
                 meter_demo_render(top, strip);
                 if (t3p_bsp_rectangle(&board, 0, PANEL_SIDE - 1, top, top + STRIP_ROWS - 1,
                                       strip, PANEL_SIDE * STRIP_ROWS)) {
+#ifdef T3P_PD_CHARGER
+                    if (charger_state == CHARGER_ARMED)
+                        t3p_charger_cancel(&fast_bus, CHARGER_CANCELLED);
+#endif
 #ifdef T3P_PD_RD_TEST
                     t3p_rd_test_cancel(&rd_test, rd_bus);
 #endif
@@ -260,6 +305,10 @@ void t3p_board_start(void)
         if (rd_test.state == T3P_RD_ON) pause_ms = 1;
 #endif
         if (pause_ms && t3p_bsp_delay(&board, pause_ms)) {
+#ifdef T3P_PD_CHARGER
+            if (charger_state == CHARGER_ARMED)
+                t3p_charger_cancel(&fast_bus, CHARGER_TIMER);
+#endif
 #ifdef T3P_PD_RD_TEST
             t3p_rd_test_cancel(&rd_test, rd_bus);
 #endif

@@ -140,7 +140,7 @@ fn hex_digit(value: u32) -> u8 {
     b"0123456789ABCDEF"[(value & 15) as usize]
 }
 
-fn hex<const N: usize>(value: u32) -> [u8; N] {
+pub(super) fn hex<const N: usize>(value: u32) -> [u8; N] {
     let mut out = [0; N];
     for (i, digit) in out.iter_mut().rev().enumerate() {
         *digit = hex_digit(value >> (i * 4));

@@ -4,6 +4,8 @@ use std::{
     fs::File,
     io::{self, BufWriter, Write},
 };
+#[cfg(feature = "pd-charger")]
+use t3p_standalone::{CHARGER_PAGE, ChargerCapture};
 use t3p_standalone::{
     CableCapture, EprCapture, EprEvent, Meter, Overview, PdSniff, Reading, SIDE, STRIP_ROWS,
     SourceCaps, demo_reading, render_demo_strip,
@@ -237,6 +239,41 @@ fn main() -> io::Result<()> {
     } else {
         0
     });
+    #[cfg(feature = "pd-charger")]
+    if let Some((state, offer)) = flags.iter().find_map(|flag| match flag.to_str()? {
+        "--charger-ready" => Some((0, false)),
+        "--charger-armed" => Some((1, false)),
+        "--charger-result" => Some((2, false)),
+        "--charger-offer" => Some((2, true)),
+        "--charger-no-ext" => Some((5, false)),
+        _ => None,
+    }) {
+        let mut scan = ChargerCapture::new();
+        if state >= 2 {
+            let parse = |line: &str| -> Vec<u8> {
+                line.split_whitespace()
+                    .map(|hex| u8::from_str_radix(hex, 16).unwrap())
+                    .collect()
+            };
+            assert_eq!(
+                scan.record(&parse(include_str!("../../tests/pd_offer.hex")), 0),
+                1
+            );
+            let replies = if state == 5 { 2 } else { 3 };
+            for (index, line) in include_str!("../../tests/charger_scan.hex")
+                .lines()
+                .take(replies)
+                .enumerate()
+            {
+                assert_eq!(scan.record(&parse(line), index as u32 + 1), 1);
+            }
+            scan.set_vbus(5085);
+        }
+        scan.set_state(state);
+        view.set_pd_profiles(0, 0, None);
+        view.set_page(CHARGER_PAGE);
+        view.set_charger(scan, offer);
+    }
     view.set_graph_window(if flags.iter().any(|x| x == "--window2") {
         1
     } else if flags.iter().any(|x| x == "--window5") {

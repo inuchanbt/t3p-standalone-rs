@@ -62,6 +62,12 @@ V3 は Identity の応答に応じて追加の問い合わせを行います。
 
 T3P 実機で住友のパッシブケーブル単体（`20C2/0A14`）を読み取れました。SVID 一覧の `1E4E` と `8087` はどちらも Discover Modes に `ACK` を返し、モード VDO はそれぞれ `9031011C`、`00030001` でした。Manufacturer Info の応答は `1E4E/0903` と `eEver`（画面表示は `EEVER`）でした。状態画面では SOP′ が `PASSIVE`、SOP″ が `NOT PRESENT` / `NOT QUERIED` と表示されました。アクティブケーブルの Get Status と SOP″ 通信はシミュレーターで検証済みで、実機確認が残っています。
 
+## CHARGER の 5 V スキャン
+
+試験用の `--pd-charger` 版では **CABLE** の次に **CHARGER** が出ます。側面の HID ポートで給電し、測定用の両端子を空けた状態で **CHARGER** の左ボタンをダブル押しします。`RD OFF` が出たら電源を CC1 の向きで T3P のメス端子につなぎます。オス端子は空けたまま、30秒以内に1回短押しします。待機中は長押しで中止できます。
+
+PDO 1 に固定 5 V を要求します。要求電流は最大 0.5 A です。結果には T3P が測った VBUS と、電源から Accept・PS_RDY を受け取れたかを表示します。PD 3.x 電源が拡張能力を返すと `SOURCE EXT CAP OK` が出て、電源の VID/PID、XID、FW/HW、提示された SPR/EPR の PDP が見られます。PD 2.0 の契約成立時は `5V CONTRACT OK` と表示します。最初の提示を取得できていれば、拡張照会をスキップした場合や失敗した場合も短押しで **SPR OFFER** を開けます。再試行は電源を抜いてダブル押しします。このスキャンは実機確認待ちです。
+
 ## CC1 の Rd 接続試験
 
 `python build.py --pd-rd-test` でビルドし、電流グラフの次にある **RD TEST** を開きます。HID で給電し、測定用の両端子を空けて始めます。左ボタンをダブル押しして `RD OFF` を表示させてから、動作実績のある USB-C 電源を CC1 の向きで T3P のメス端子につなぎます。反対側の測定端子は空けておきます。約2秒待ってから左ボタンを1回短押しして Rd を入れ、保存された前後の VBUS を比べます。`5V SEEN` は、Rd を切ったときは4 V未満で、Rd を入れた後は3回連続で4.5〜5.5 Vだったことを示します。
@@ -158,6 +164,8 @@ PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします�
 `python pack_demo.py --build-dir build/pd-profiles --output-name T3P_RUST_METER_PD_CABLE_3.0.3.bin` でローカルの更新ファイルを作ります。
 
 ケーブル単体の能動読取版は `python build.py --pd-cable-read` でビルドします。同じ比較画像を `cargo run --offline --features pd-cable-read --bin preview` で `build/pd-cable-read` に生成します。`--measurement --profiles-ui` に `--cable-vbus` または `--cable-no-ra` を加え、それぞれ `preview-cable-vbus.ppm` と `preview-cable-no-ra.ppm` を追加します。同じ共通オプションに `--cable-scan=N` を加え、`N` を `0`・`6`・`8` として `preview-cable-scan-N.ppm` を作ります。この比較には実機の Identity 応答と合成した追加応答を使います。更新ファイルは `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_V3_3.0.3.bin` で作ります。
+
+**CHARGER** は `python build.py --pd-charger` でビルドします。`--features pd-charger` で能動読取版と同じ比較画像を `build/pd-charger` に生成します。`--measurement --profiles-ui` に `--charger-ready`、`--charger-armed`、`--charger-result`、`--charger-offer` または `--charger-no-ext` を加えて、それぞれの `preview-charger-*.ppm` を作ります。更新ファイルは `python pack_demo.py --build-dir build/pd-charger --output-name T3P_RUST_METER_PD_CHARGER_V1_3.0.3.bin` で作ります。
 
 **RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
 
