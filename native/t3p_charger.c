@@ -47,7 +47,7 @@
 
 enum { IRQ_A, IRQ_B, LIVE0, LIVE1, IRQ, STATUS_COUNT };
 enum { OFFER, ACCEPT, PS_RDY, EXTENDED };
-enum { IGNORE, MATCH, REJECT, WAIT, UNSUPPORTED, LINK_RESET, INVALID };
+enum { IGNORE, MATCH, REJECT, WAIT, UNSUPPORTED, LINK_RESET, INVALID, QUERY_ACK };
 
 uint32_t meter_charger_frame(const uint8_t *, uint32_t, uint32_t phase);
 uint32_t meter_charger_request(void);
@@ -102,11 +102,12 @@ enum t3p_charger_state t3p_charger_arm(struct t3p_meter_bus *bus)
     return CHARGER_ARMED;
 }
 
-static enum t3p_charger_state read_status(struct t3p_meter_bus *bus, uint8_t status[STATUS_COUNT])
+static enum t3p_charger_state read_status(struct t3p_meter_bus *bus, uint8_t status[STATUS_COUNT],
+                                          unsigned stop_on_retry_fail)
 {
     if (t3p_pd_rx_read(bus, INTERRUPTA, status, STATUS_COUNT)) return CHARGER_IO;
     if (status[IRQ_A] & I_HARDRST) return CHARGER_RESET;
-    if (status[IRQ_A] & I_RETRYFAIL) return CHARGER_NO_GOODCRC;
+    if (stop_on_retry_fail && (status[IRQ_A] & I_RETRYFAIL)) return CHARGER_NO_GOODCRC;
     if (status[IRQ] & I_COLLISION) return CHARGER_BUSY;
     if (status[LIVE1] & RX_FULL) return CHARGER_RX_ERROR;
     return CHARGER_READY;
@@ -121,7 +122,7 @@ static enum t3p_charger_state receive(struct t3p_bsp *board, struct t3p_meter_bu
     unsigned matched = 0, rx_acked = 0, ignored = 0;
     do {
         uint8_t status[STATUS_COUNT];
-        enum t3p_charger_state state = read_status(bus, status);
+        enum t3p_charger_state state = read_status(bus, status, phase != EXTENDED);
         if (state != CHARGER_READY) return state;
         link->tx_acked |= status[IRQ_A] & I_TXSENT;
         rx_acked |= status[IRQ_B] & I_GCRCSENT;
@@ -134,7 +135,9 @@ static enum t3p_charger_state receive(struct t3p_bsp *board, struct t3p_meter_bu
             if (frame[0] >> 5 != SOP_TOKEN) return CHARGER_RX_ERROR;
             unsigned body = 4u + 4u * ((frame[2] >> 4) & 7u);
             if (t3p_pd_rx_read(bus, FIFO, frame + 3, body)) return CHARGER_IO;
-            switch (meter_charger_frame(frame, 3 + body, phase)) {
+            uint32_t result = meter_charger_frame(frame, 3 + body, phase);
+            if (result == QUERY_ACK) link->tx_acked = 1;
+            switch (result) {
             case MATCH: matched = 1; break;
             case REJECT: return CHARGER_REJECTED;
             case WAIT: return CHARGER_WAIT;
@@ -147,7 +150,8 @@ static enum t3p_charger_state receive(struct t3p_bsp *board, struct t3p_meter_bu
                 continue;
             }
         }
-        if (matched && (phase != OFFER || rx_acked) && (!needs_ack || link->tx_acked))
+        /* A validated reply completes the final query even without TXSENT. */
+        if (matched && (phase != OFFER || rx_acked) && (phase != ACCEPT || link->tx_acked))
             return CHARGER_READY;
         if (t3p_bsp_delay(board, 1)) return CHARGER_TIMER;
     } while (t3p_bsp_millis(board) - start < timeout);
@@ -164,7 +168,7 @@ static enum t3p_charger_state wait_sink_tx_ok(struct t3p_bsp *board, struct t3p_
         enum t3p_charger_state state = check_vbus(bus, 1);
         if (state != CHARGER_READY) return state;
         uint8_t status[STATUS_COUNT];
-        state = read_status(bus, status);
+        state = read_status(bus, status, 1);
         if (state != CHARGER_READY) return state;
         if ((status[LIVE0] & (ACTIVITY | 3)) == SINK_TX_OK &&
             (status[LIVE1] & (RX_EMPTY | TX_EMPTY)) == (RX_EMPTY | TX_EMPTY))

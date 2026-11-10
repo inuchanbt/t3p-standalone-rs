@@ -92,13 +92,17 @@ impl ChargerCapture {
         let (lo, hi, payload) = checked_fifo(frame, SOP_TOKEN)?;
         let kind = lo & 0x1f;
         let control = hi & 0x80 == 0 && payload.is_empty();
-        if hi & 1 == 0 || (control && kind == 1) {
-            return Ok(0); // Sink records and GoodCRC do not advance the source MessageID.
+        let id = (hi >> 1) & 7;
+        if hi & 1 == 0 {
+            return Ok(0);
+        }
+        if control && kind == 1 {
+            // GoodCRC echoes the query's MessageID and leaves the source sequence alone.
+            return Ok(if phase == 3 && self.ps_rdy && id == 1 { 7 } else { 0 });
         }
         if control && kind == 13 {
             return Ok(5); // Soft Reset invalidates the short transaction.
         }
-        let id = (hi >> 1) & 7;
         if self.last_source_id == Some(id) {
             return Ok(0);
         }

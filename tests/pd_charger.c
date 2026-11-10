@@ -5,7 +5,10 @@
 #include "../native/t3p_pd.h"
 #include "../native/t3p_rd_test.h"
 
-enum scenario { COMPLETE, NO_EXT, NO_INITIAL_ACK, VBUS_PRESENT, VBUS_DROP, SINK_TX_NG };
+enum scenario {
+    COMPLETE, NO_EXT, EXT_REPLY_ONLY, EXT_RETRYFAIL, EXT_ACK_ONLY, EXT_WRONG_ACK,
+    NO_INITIAL_ACK, VBUS_PRESENT, VBUS_DROP, SINK_TX_NG,
+};
 
 static const uint8_t stock[0x44] = {
     [0x02] = T3P_RD_DEFAULT, [0x03] = 0x20, [0x06] = 0x04,
@@ -18,10 +21,8 @@ static const uint8_t contract[] = {
     0xe0, 0xa3, 0x03, 0, 0, 0, 0, /* Accept */
     0xe0, 0xa6, 0x05, 0, 0, 0, 0, /* PS_RDY */
 };
-static const uint8_t extended[] = {
-    0xe0, 0xa1, 0x03, 0, 0, 0, 0, /* GoodCRC */
-    0xe0, 0xa1, 0x8f, 0, 0, 0, 0, /* Extended response */
-};
+static const uint8_t query_ack[] = {0xe0, 0xa1, 0x03, 0, 0, 0, 0};
+static const uint8_t extended[35] = {0xe0, 0xa1, 0xf7, 0x19, 0x80};
 
 struct fixture {
     struct t3p_bsp board;
@@ -129,7 +130,9 @@ int t3p_pd_rx_read(struct t3p_meter_bus *bus, uint8_t reg, uint8_t *out, unsigne
             out[2] = 0x02; /* SinkTxNG after PS_RDY */
         out[3] = 0x28; /* RX and TX empty */
         if (f->left && ++f->polls == 1) {
-            if (f->sent) out[0] = 0x04; /* GoodCRC for our transmission */
+            if (f->sent == 1 || (f->sent == 2 && (f->scenario == COMPLETE || f->scenario == NO_EXT)))
+                out[0] = 0x04; /* TXSENT */
+            if (f->sent == 2 && f->scenario == EXT_RETRYFAIL) out[0] = 0x10;
             if (f->scenario != NO_INITIAL_ACK) out[1] = 0x01;
             out[4] = 0x10; /* RX event precedes RX_EMPTY clearing */
         }
@@ -152,7 +155,12 @@ int t3p_pd_sop_tx(struct t3p_meter_bus *bus, uint16_t header, const uint8_t *pay
         queue(f, contract, sizeof(contract));
     } else {
         assert(phase_seen == 3 && f->sent == 2 && header == 0x0291 && !length);
-        queue(f, extended, f->scenario == NO_EXT ? 7 : sizeof(extended));
+        switch (f->scenario) {
+        case NO_EXT:
+        case EXT_WRONG_ACK: queue(f, contract, sizeof(query_ack)); break;
+        case EXT_ACK_ONLY: queue(f, query_ack, sizeof(query_ack)); break;
+        default: queue(f, extended, sizeof(extended)); break;
+        }
     }
     return 0;
 }
@@ -160,8 +168,12 @@ int t3p_pd_sop_tx(struct t3p_meter_bus *bus, uint16_t header, const uint8_t *pay
 uint32_t meter_charger_frame(const uint8_t *frame, uint32_t length, uint32_t phase)
 {
     static const uint8_t expected[] = {0xa1, 0xa3, 0xa6, 0xa1};
-    assert(frame[0] == 0xe0 && phase <= 3 && length == (phase == 0 ? 11 : 7));
-    if (phase && frame[1] == 0xa1 && !(frame[2] & 0x80)) return 0; /* GoodCRC */
+    assert(frame[0] == 0xe0 && phase <= 3);
+    if (phase && frame[1] == 0xa1 && !(frame[2] & 0x80)) {
+        assert(length == sizeof(query_ack));
+        return phase == 3 && frame[2] == 0x03 ? 7 : 0;
+    }
+    assert(length == (phase == 0 ? sizeof(offer) : phase == 3 ? sizeof(extended) : 7));
     assert(frame[1] == expected[phase] && phase == phase_seen);
     ++phase_seen;
     return 1;
@@ -183,11 +195,24 @@ int main(void)
         assert(phase_seen == 4 && f.sent == 2 && vbus == 5085);
         assert(!t3p_pd_rd_baseline(&bus));
     }
-    phase_seen = f.sent = 0;
-    f.scenario = NO_EXT;
-    assert(t3p_charger_arm(&bus) == CHARGER_ARMED);
-    assert(t3p_charger_scan(&f.board, &bus) == CHARGER_NO_EXT);
-    assert(phase_seen == 3 && f.sent == 2 && !t3p_pd_rd_baseline(&bus));
+    static const struct {
+        enum scenario scenario;
+        enum t3p_charger_state state;
+        unsigned phases;
+    } query_cases[] = {
+        {EXT_REPLY_ONLY, CHARGER_COMPLETE, 4},
+        {EXT_RETRYFAIL, CHARGER_COMPLETE, 4},
+        {EXT_ACK_ONLY, CHARGER_NO_EXT, 3},
+        {EXT_WRONG_ACK, CHARGER_NO_GOODCRC, 3},
+        {NO_EXT, CHARGER_NO_EXT, 3},
+    };
+    for (unsigned i = 0; i < sizeof(query_cases) / sizeof(query_cases[0]); ++i) {
+        phase_seen = f.sent = 0;
+        f.scenario = query_cases[i].scenario;
+        assert(t3p_charger_arm(&bus) == CHARGER_ARMED);
+        assert(t3p_charger_scan(&f.board, &bus) == query_cases[i].state);
+        assert(phase_seen == query_cases[i].phases && f.sent == 2 && !t3p_pd_rd_baseline(&bus));
+    }
 
     phase_seen = f.sent = 0;
     f.scenario = VBUS_DROP;

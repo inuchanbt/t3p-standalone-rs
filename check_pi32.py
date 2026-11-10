@@ -377,6 +377,12 @@ def main():
                 check_charger("ready")
                 charger_frame(frame, 0)
                 for phase, reply in enumerate(replies, 1):
+                    if phase == 3:
+                        # Only the source's GoodCRC for our query (ID 1) counts.
+                        charger_frame(bytes.fromhex("e0 a1 07 f4 0a a1 68"), phase, 0)
+                        charger_frame(bytes.fromhex("e0 81 02 d9 da 4f 8d"), phase, 0)
+                        charger_frame(bytes.fromhex("e0 a1 03 ed ce cc 6e"), phase, 6)
+                        charger_frame(bytes.fromhex("e0 a1 03 ed ce cc 6f"), phase, 7)
                     charger_frame(reply, phase)
                 cpu.call(symbols["meter_charger_vbus"], [5085])
                 cpu.call(symbols["meter_charger_status"], [2])
