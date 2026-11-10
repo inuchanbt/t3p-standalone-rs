@@ -160,10 +160,12 @@ static enum t3p_charger_state wait_sink_tx_ok(struct t3p_bsp *board, struct t3p_
 {
     uint32_t start = t3p_bsp_millis(board);
     do {
-        uint8_t status[STATUS_COUNT];
-        enum t3p_charger_state state = read_status(bus, status);
+        /* Use the same VBUS measurement as the rest of the 5 V scan. */
+        enum t3p_charger_state state = check_vbus(bus, 1);
         if (state != CHARGER_READY) return state;
-        if (!(status[LIVE0] & VBUSOK)) return CHARGER_VBUS_RANGE;
+        uint8_t status[STATUS_COUNT];
+        state = read_status(bus, status);
+        if (state != CHARGER_READY) return state;
         if ((status[LIVE0] & (ACTIVITY | 3)) == SINK_TX_OK &&
             (status[LIVE1] & (RX_EMPTY | TX_EMPTY)) == (RX_EMPTY | TX_EMPTY))
             return CHARGER_READY;
@@ -193,9 +195,10 @@ static enum t3p_charger_state exchange(struct t3p_bsp *board, struct t3p_meter_b
     if (state != CHARGER_READY) return state;
     state = receive(board, bus, &link, PS_RDY, PS_RDY_MS, CHARGER_NO_PS_RDY);
     if (state != CHARGER_READY) return state;
-    state = check_vbus(bus, 1);
-    if (state != CHARGER_READY) return state;
-    if (revision != 0x80) return CHARGER_PD2;
+    if (revision != 0x80) {
+        state = check_vbus(bus, 1);
+        return state == CHARGER_READY ? CHARGER_PD2 : state;
+    }
 
     state = wait_sink_tx_ok(board, bus);
     if (state != CHARGER_READY) return state;

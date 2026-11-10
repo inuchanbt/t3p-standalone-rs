@@ -5,7 +5,7 @@
 #include "../native/t3p_pd.h"
 #include "../native/t3p_rd_test.h"
 
-enum scenario { COMPLETE, NO_EXT, NO_INITIAL_ACK, VBUS_PRESENT };
+enum scenario { COMPLETE, NO_EXT, NO_INITIAL_ACK, VBUS_PRESENT, VBUS_DROP, SINK_TX_NG };
 
 static const uint8_t stock[0x44] = {
     [0x02] = T3P_RD_DEFAULT, [0x03] = 0x20, [0x06] = 0x04,
@@ -28,7 +28,7 @@ struct fixture {
     enum scenario scenario;
     uint8_t regs[sizeof(stock)];
     const uint8_t *fifo;
-    unsigned left, polls, sent, detached_at;
+    unsigned left, polls, sent, detached_at, post_contract_samples;
 };
 
 static unsigned phase_seen, vbus;
@@ -49,6 +49,8 @@ int t3p_meter_sample(struct t3p_meter_bus *bus, uint16_t *mv, int16_t *ma)
 {
     struct fixture *f = bus->context;
     *mv = f->scenario == VBUS_PRESENT || f->regs[0x02] == T3P_RD_CC1_ON ? 5085 : 3000;
+    if (f->scenario == VBUS_DROP && phase_seen == 3 && f->post_contract_samples++)
+        *mv = 3500;
     *ma = 0;
     return 0;
 }
@@ -122,7 +124,9 @@ int t3p_pd_rx_read(struct t3p_meter_bus *bus, uint8_t reg, uint8_t *out, unsigne
     } else if (reg == 0x3e) {
         assert(length == 5);
         memset(out, 0, length);
-        out[2] = 0x83; /* VBUSOK, SinkTxOK */
+        out[2] = 0x03; /* SinkTxOK with the PHY's VBUSOK bit clear. */
+        if (phase_seen == 3 && (f->scenario == SINK_TX_NG || f->scenario == VBUS_DROP))
+            out[2] = 0x02; /* SinkTxNG after PS_RDY */
         out[3] = 0x28; /* RX and TX empty */
         if (f->left && ++f->polls == 1) {
             if (f->sent) out[0] = 0x04; /* GoodCRC for our transmission */
@@ -184,6 +188,20 @@ int main(void)
     assert(t3p_charger_arm(&bus) == CHARGER_ARMED);
     assert(t3p_charger_scan(&f.board, &bus) == CHARGER_NO_EXT);
     assert(phase_seen == 3 && f.sent == 2 && !t3p_pd_rd_baseline(&bus));
+
+    phase_seen = f.sent = 0;
+    f.scenario = VBUS_DROP;
+    assert(t3p_charger_arm(&bus) == CHARGER_ARMED);
+    assert(t3p_charger_scan(&f.board, &bus) == CHARGER_VBUS_RANGE);
+    assert(phase_seen == 3 && f.sent == 1 && vbus == 3500);
+    assert(!t3p_pd_rd_baseline(&bus));
+
+    phase_seen = f.sent = 0;
+    f.scenario = SINK_TX_NG;
+    assert(t3p_charger_arm(&bus) == CHARGER_ARMED);
+    assert(t3p_charger_scan(&f.board, &bus) == CHARGER_EXT_SKIPPED);
+    assert(phase_seen == 3 && f.sent == 1 && vbus == 5085);
+    assert(!t3p_pd_rd_baseline(&bus));
 
     phase_seen = f.sent = 0;
     f.scenario = NO_INITIAL_ACK;
