@@ -68,7 +68,9 @@ The experimental `--pd-charger` build adds **CHARGER** after **CABLE**. Power th
 
 The scan requests fixed 5 V from PDO 1, with a request current capped at 0.5 A. The result shows the T3P's VBUS reading and whether the source sent Accept and PS_RDY. When a PD 3.x source returns its Extended Source Capabilities, `SOURCE EXT CAP OK` shows the source's VID/PID, XID, FW/HW revisions and advertised SPR/EPR PDP. A PD 2.0 contract shows `5V CONTRACT OK`. Once the initial offer is captured, tap to see **SPR OFFER**, even if the extended query fails or is skipped. Unplug the source before double pressing to retry.
 
-Hardware testing confirmed Accept and PS_RDY for a 5 V, 0.500 A request, with the T3P reading 5.085 V. The scan uses the meter reading to check the 4.5–5.5 V range while waiting to send the extended query. V2 displayed the correct VID/PID and PDP values from the extended reply under a false `NO GOODCRC` status. The CY4500-EPR recorded the reply and the source's GoodCRC. V3 accepts a validated extended reply independently of the PHY's transmit status and also recognizes the query's matching GoodCRC in the receive FIFO. The V3 display still needs hardware verification.
+Hardware testing confirmed Accept and PS_RDY for a 5 V, 0.500 A request. The scan uses the meter reading to check the 4.5–5.5 V range while waiting to send the extended query. V2 displayed the correct VID/PID and PDP values from the extended reply under a false `NO GOODCRC` status. The CY4500-EPR recorded the reply and the source's GoodCRC. V3 accepts a validated extended reply independently of the PHY's transmit status and also recognizes the query's matching GoodCRC in the receive FIFO.
+
+In the V3 hardware trial, the T3P displayed `SOURCE EXT CAP OK` and measured 5.085 V. The inline CY4500-EPR recorded GoodCRC for both the query (message ID 1) and the reply (message ID 3). The 25-byte reply matched the displayed VID/PID `32AC/0022` and advertised PDP of 100 W for SPR and 240 W for EPR.
 
 ## CC1 Rd attach test
 
