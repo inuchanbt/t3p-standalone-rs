@@ -7,7 +7,7 @@ use crate::{CHARGER_PAGE, ChargerCapture};
 use crate::{Meter, Overview, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
 
 const PAGE_COUNT: u32 = if cfg!(feature = "pd-profiles") {
-    PD_PAGE_COUNT
+    PD_PAGE_COUNT + cfg!(feature = "system") as u32
 } else if cfg!(feature = "pd-rd-test") {
     PROFILES_PAGE + 1
 } else {
@@ -34,6 +34,10 @@ static mut PD_FIRST: u32 = 0;
 static mut PD_LAST: u8 = 0;
 static mut PAGE: u32 = 0;
 static mut GRAPH_WINDOW: u32 = 0;
+#[cfg(feature = "system")]
+static mut SYSTEM: Option<crate::SystemStats> = None;
+#[cfg(feature = "system")]
+static mut SYSTEM_SECTION: u8 = 0;
 #[cfg(feature = "pd-charger")]
 static mut CHARGER: ChargerCapture = ChargerCapture::new();
 #[cfg(feature = "pd-charger")]
@@ -153,6 +157,12 @@ unsafe extern "C" fn meter_pd_ack_pdo_count(frame: *const u8, len: u32) -> i32 {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_long_press() {
     unsafe {
+        #[cfg(feature = "system")]
+        if *(&raw const PAGE) == crate::SYSTEM_PAGE {
+            *(&raw mut SYSTEM_SECTION) = 0;
+            *(&raw mut PAGE) = 0;
+            return;
+        }
         #[cfg(feature = "pd-charger")]
         if *(&raw const PAGE) == CHARGER_PAGE {
             *(&raw mut CHARGER_SECTION) = 0;
@@ -173,6 +183,15 @@ unsafe extern "C" fn meter_long_press() {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_next_page() {
     unsafe {
+        #[cfg(feature = "system")]
+        if *(&raw const PAGE) == crate::SYSTEM_PAGE {
+            let section = &mut *(&raw mut SYSTEM_SECTION);
+            if *section + 1 < crate::system::SYSTEM_SECTIONS {
+                *section += 1;
+                return;
+            }
+            *section = 0;
+        }
         #[cfg(feature = "pd-profiles")]
         if *(&raw const PAGE) == SNIFF_PAGE {
             if *(&raw const PD_SNIFF_PRESENT) {
@@ -212,6 +231,12 @@ unsafe extern "C" fn meter_next_page() {
 unsafe extern "C" fn meter_double_press() -> u32 {
     unsafe {
         let page = *(&raw const PAGE);
+        #[cfg(feature = "system")]
+        if page == crate::SYSTEM_PAGE {
+            *(&raw mut SYSTEM_SECTION) =
+                (*(&raw const SYSTEM_SECTION) + 1) % crate::system::SYSTEM_SECTIONS;
+            return 0;
+        }
         if cfg!(feature = "pd-profiles") {
             match page {
                 PROFILES_PAGE => return 1,
@@ -415,10 +440,26 @@ unsafe extern "C" fn meter_pd_record(frame: *const u8, length: u32, mode: u32, n
     }
 }
 
+#[cfg(feature = "system")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_on_system_page() -> u32 {
+    u32::from(unsafe { *(&raw const PAGE) } == crate::SYSTEM_PAGE)
+}
+
+#[cfg(feature = "system")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_system_status(stats: *const crate::SystemStats) {
+    if !stats.is_null() {
+        unsafe { *(&raw mut SYSTEM) = Some(*stats) };
+    }
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_snapshot() {
     unsafe {
         let view = &mut *(&raw mut VIEW);
+        #[cfg(feature = "system")]
+        view.set_system(*(&raw const SYSTEM), *(&raw const SYSTEM_SECTION));
         #[cfg(feature = "pd-rd-test")]
         view.set_rd_test((meter_on_rd_test_page() != 0).then_some(*(&raw const RD_TEST)));
         #[cfg(feature = "pd-profiles")]

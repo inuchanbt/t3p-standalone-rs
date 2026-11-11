@@ -79,7 +79,8 @@ void t3p_meter_gpio_init(struct t3p_bsp *b, struct t3p_meter_bus *bus)
         else value &= ~LINES;
         b->io.write32(b->io.context, address, value);
     }
-    *bus = (struct t3p_meter_bus){b, scl, sda, read_scl, read_sda, delay};
+    *bus = (struct t3p_meter_bus){.context = b, .scl = scl, .sda = sda,
+        .read_scl = read_scl, .read_sda = read_sda, .delay = delay};
 }
 
 static int clock_high(struct t3p_meter_bus *b)
@@ -143,17 +144,36 @@ static int read_register(struct t3p_meter_bus *b, uint8_t address, uint8_t reg,
 {
     if (!b || !data || !b->scl || !b->sda || !b->read_scl || !b->read_sda || !b->delay)
         return -1;
+#ifdef T3P_SYSTEM
+    if (b->system) t3p_system_count(&b->system->reads);
+#endif
     int error = start(b) || write_byte(b, address) || write_byte(b, reg) ||
                 start(b) || write_byte(b, address | 1);
     for (unsigned i = 0; i < count && !error; ++i)
         error = read_byte(b, &data[i], i + 1 < count);
     stop(b);
+#ifdef T3P_SYSTEM
+    if (error && b->system) t3p_system_count(&b->system->read_errors);
+#endif
     return error ? -1 : 0;
 }
 int t3p_meter_read_register(struct t3p_meter_bus *b, uint8_t reg, uint16_t *out)
 {
     uint8_t data[2];
-    if (!out || read_register(b, 0x80, reg, data, sizeof(data))) return -1;
+    int error = !out || read_register(b, 0x80, reg, data, sizeof(data));
+#ifdef T3P_SYSTEM
+    if (b && b->system && (reg == 0xff || reg == 0x00)) {
+        uint32_t flag = reg == 0xff ? 1u : 2u;
+        b->system->meter_flags &= ~flag;
+        if (!error) {
+            uint16_t value = (uint16_t)((uint16_t)data[0] << 8 | data[1]);
+            if (reg == 0xff) b->system->meter_id = value;
+            else b->system->meter_config = value;
+            b->system->meter_flags |= flag;
+        }
+    }
+#endif
+    if (error) return -1;
     *out = (uint16_t)((uint16_t)data[0] << 8 | data[1]);
     return 0;
 }
@@ -170,8 +190,14 @@ int t3p_pd_read_register(struct t3p_meter_bus *b, uint8_t reg, uint8_t *out)
 #if defined(T3P_PD_PROFILES) || defined(T3P_PD_RD_TEST)
 static int pd_write_register(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
 {
+#ifdef T3P_SYSTEM
+    if (b->system) t3p_system_count(&b->system->writes);
+#endif
     int error = start(b) || write_byte(b, 0x44) || write_byte(b, reg) || write_byte(b, value);
     stop(b);
+#ifdef T3P_SYSTEM
+    if (error && b->system) t3p_system_count(&b->system->write_errors);
+#endif
     return error ? -1 : 0;
 }
 #endif
@@ -197,11 +223,17 @@ static int pd_tx(struct t3p_meter_bus *b, const uint8_t sop[4], uint16_t header,
         0x80 | (2 + length), (uint8_t)header, (uint8_t)(header >> 8), /* PACKSYM and header */
     };
     static const uint8_t suffix[] = {0xff, 0x14, 0xfe, 0xa1}; /* JAMCRC, EOP, TXOFF, TXON */
+#ifdef T3P_SYSTEM
+    if (b->system) t3p_system_count(&b->system->writes);
+#endif
     int error = start(b) || write_byte(b, 0x44) || write_byte(b, 0x43);
     for (unsigned i = 0; i < sizeof(prefix) && !error; ++i) error = write_byte(b, prefix[i]);
     for (unsigned i = 0; i < length && !error; ++i) error = write_byte(b, payload[i]);
     for (unsigned i = 0; i < sizeof(suffix) && !error; ++i) error = write_byte(b, suffix[i]);
     stop(b);
+#ifdef T3P_SYSTEM
+    if (error && b->system) t3p_system_count(&b->system->write_errors);
+#endif
     return error ? -1 : 0;
 }
 
@@ -310,18 +342,32 @@ int t3p_pd_disarm_ack(struct t3p_meter_bus *bus, uint8_t saved_switches1)
 int t3p_meter_identify(struct t3p_meter_bus *b)
 {
     uint16_t id, config;
+#ifdef T3P_SYSTEM
+    if (b && b->system) b->system->meter_flags = 0;
+#endif
     /* Stock 3.0.3 checks die ID 0x2260 before starting measurements. */
-    if (t3p_meter_read_register(b, 0xff, &id) || id != 0x2260 ||
-        t3p_meter_read_register(b, 0x00, &config) || (config & 7u) != 7u)
-        return -1;
-    return 0;
+    int error = t3p_meter_read_register(b, 0xff, &id) || id != 0x2260 ||
+        t3p_meter_read_register(b, 0x00, &config) || (config & 7u) != 7u;
+#ifdef T3P_SYSTEM
+    if (b && b->system) b->system->meter_state = error ? 2u : 1u;
+#endif
+    return error ? -1 : 0;
 }
 int t3p_meter_sample(struct t3p_meter_bus *b, uint16_t *mv, int16_t *ma)
 {
     uint16_t voltage, shunt;
-    if (!mv || !ma || t3p_meter_read_register(b, 0x02, &voltage) ||
-        t3p_meter_read_register(b, 0x01, &shunt) || voltage > 0x7fffu)
-        return -1;
+#ifdef T3P_SYSTEM
+    if (b && b->system) t3p_system_count(&b->system->samples);
+#endif
+    int error = !mv || !ma || t3p_meter_read_register(b, 0x02, &voltage) ||
+        t3p_meter_read_register(b, 0x01, &shunt) || voltage > 0x7fffu;
+#ifdef T3P_SYSTEM
+    if (b && b->system) {
+        b->system->meter_state = error ? 3u : 1u;
+        if (error) t3p_system_count(&b->system->sample_errors);
+    }
+#endif
+    if (error) return -1;
     /* Stock nominal factors, before per-device calibration. */
     *mv = (uint16_t)((uint32_t)voltage * 16123u / 10000u);
     *ma = (int16_t)((int32_t)(int16_t)shunt / 2);

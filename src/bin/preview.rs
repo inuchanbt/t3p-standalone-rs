@@ -329,6 +329,53 @@ fn main() -> io::Result<()> {
         }));
     }
     let mut pixels = [0; SIDE * STRIP_ROWS];
+    #[cfg(feature = "system")]
+    if let Some((section, mode)) = flags.iter().find_map(|flag| match flag.to_str()? {
+        "--system-info" => Some((0, 0)),
+        "--system-io" => Some((1, 0)),
+        "--system-input" => Some((2, 0)),
+        "--system-missing-info" => Some((0, 1)),
+        "--system-missing-io" => Some((1, 1)),
+        "--system-missing-input" => Some((2, 1)),
+        "--system-fault" => Some((0, 2)),
+        "--system-max-io" => Some((1, 3)),
+        "--system-boot-io" => Some((1, 4)),
+        _ => None,
+    }) {
+        let words: Vec<u32> = include_str!("../../tests/system_stats.words")
+            .split_whitespace()
+            .map(|word| u32::from_str_radix(word, 16).unwrap())
+            .collect();
+        assert_eq!(
+            words.len() * 4,
+            core::mem::size_of::<t3p_standalone::SystemStats>()
+        );
+        // The fixture contains only u32 words; repr(C) matches the native ABI.
+        let mut stats = unsafe {
+            core::ptr::read_unaligned(words.as_ptr().cast::<t3p_standalone::SystemStats>())
+        };
+        if mode == 2 {
+            stats.meter_flags = 0;
+            stats.meter_state = 3;
+        }
+        if mode == 3 {
+            stats.reads = u32::MAX;
+            stats.read_errors = u32::MAX;
+            stats.writes = u32::MAX;
+            stats.write_errors = u32::MAX;
+            stats.samples = u32::MAX;
+            stats.sample_errors = u32::MAX;
+            stats.frames = u32::MAX;
+            stats.frame_ms = u32::MAX;
+            stats.frame_max_ms = u32::MAX;
+        }
+        if mode == 4 {
+            stats = Default::default();
+        }
+        view.set_pd_profiles(0, 0, None);
+        view.set_system(if mode == 1 { None } else { Some(stats) }, section);
+        view.set_page(t3p_standalone::SYSTEM_PAGE);
+    }
     write!(output, "P6\n{SIDE} {SIDE}\n255\n")?;
     for top in (0..SIDE).step_by(STRIP_ROWS) {
         render_demo_strip(&view, top, &mut pixels);

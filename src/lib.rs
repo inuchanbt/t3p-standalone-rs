@@ -11,6 +11,10 @@ mod pd;
 #[path = "../vendor/kws-x1/power_history.rs"]
 mod power_history;
 mod screen;
+#[cfg(feature = "system")]
+pub mod system;
+#[cfg(feature = "system")]
+pub use system::{SYSTEM_PAGE, SystemStats};
 
 // The imported energy module only needs this part of the KWS-X1 settings API.
 mod settings {
@@ -66,6 +70,10 @@ pub struct Overview {
     charger: ChargerCapture,
     #[cfg(feature = "pd-charger")]
     charger_section: u8,
+    #[cfg(feature = "system")]
+    system: Option<SystemStats>,
+    #[cfg(feature = "system")]
+    system_section: u8,
     #[cfg(feature = "pd-rd-test")]
     rd_test: Option<RdTest>,
     mah: u64,
@@ -97,6 +105,10 @@ impl Overview {
             charger: ChargerCapture::new(),
             #[cfg(feature = "pd-charger")]
             charger_section: 0,
+            #[cfg(feature = "system")]
+            system: None,
+            #[cfg(feature = "system")]
+            system_section: 0,
             #[cfg(feature = "pd-rd-test")]
             rd_test: None,
             mah: 0,
@@ -182,10 +194,16 @@ impl Overview {
         };
     }
 
+    #[cfg(feature = "system")]
+    pub fn set_system(&mut self, stats: Option<SystemStats>, section: u8) {
+        self.system = stats;
+        self.system_section = section.min(system::SYSTEM_SECTIONS - 1);
+    }
+
     pub fn set_page(&mut self, page: u32) {
         self.page = page
             % if self.pd_profiles.is_some() {
-                PD_PAGE_COUNT
+                PD_PAGE_COUNT + cfg!(feature = "system") as u32
             } else {
                 PROFILES_PAGE
             };

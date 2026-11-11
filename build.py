@@ -109,9 +109,12 @@ def main():
     pd_mode.add_argument("--pd-profiles", action="store_true", help="Build the receive-only PD profiles candidate")
     pd_mode.add_argument("--pd-cable-read", action="store_true", help="Build the active SOP' cable read candidate")
     pd_mode.add_argument("--pd-charger", action="store_true", help="Build the active CC1 charger scan candidate")
+    pd_mode.add_argument("--system", action="store_true", help="Add SYSTEM diagnostics to the charger build")
     pd_mode.add_argument("--pd-rd-test", action="store_true", help="Build the CC1 Rd attach test candidate")
     pd_mode.add_argument("--pd-ack-test", action="store_true", help="Build the CC1 GoodCRC test candidate")
     args = parser.parse_args()
+    if args.system:
+        args.pd_charger = True
     pd_cable_read = args.pd_cable_read or args.pd_charger
     pd_profiles = args.pd_profiles or pd_cable_read
     rd_test = args.pd_rd_test or args.pd_ack_test
@@ -128,6 +131,8 @@ def main():
         variant = "pd-charger"
     if rd_test:
         variant = "pd-ack-test" if args.pd_ack_test else "pd-rd-test"
+    if args.system:
+        variant = "system"
     out = ROOT / "build" / variant
     out.mkdir(parents=True, exist_ok=True)
 
@@ -144,6 +149,8 @@ def main():
 
     rust_ir = out / "meter-thumb.ll"
     rust_features = ["--cfg", 'feature="board"']
+    if args.system:
+        rust_features += ["--cfg", 'feature="system"']
     if pd_profiles:
         rust_features += ["--cfg", 'feature="pd-profiles"']
     if pd_cable_read:
@@ -193,6 +200,8 @@ def main():
                 flags.append("-DT3P_PD_CABLE_READ")
             if args.pd_charger:
                 flags.append("-DT3P_PD_CHARGER")
+            if args.system:
+                flags.append("-DT3P_SYSTEM")
             if rd_test:
                 flags.append("-DT3P_PD_RD_TEST")
             if args.pd_ack_test:
@@ -221,6 +230,8 @@ def main():
         report["status"] += "; CC1 active cable identity candidate"
     if args.pd_charger:
         report["status"] += "; CC1 active charger scan"
+    if args.system:
+        report["status"] += "; SYSTEM diagnostics"
     if args.pd_rd_test:
         report["status"] += "; CC1 Rd attach test"
     if args.pd_ack_test:

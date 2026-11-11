@@ -11,6 +11,17 @@ static uint32_t clock_ms, capture_at, requested_action;
 static unsigned capturing, finished, listening_snapshots, finished_snapshots;
 static unsigned measurement_samples, key_page_changes, pd_polls;
 static jmp_buf done;
+#ifdef T3P_SYSTEM
+static unsigned completed_strips, fail_frame;
+uint32_t meter_on_system_page(void) { return 1; }
+void meter_system_status(const struct t3p_system_stats *s)
+{
+    assert(s->frames == completed_strips / 30);
+    assert(s->uptime_high == 0 && s->uptime_low == clock_ms);
+    if (s->frames) assert(s->frame_ms == 30 && s->frame_max_ms == 30);
+    if (finished) assert(s->double_presses == 1 && s->short_presses == 1 && !s->long_presses);
+}
+#endif
 struct t3p_boot_snapshot t3p_boot_snapshot = { .valid = T3P_BOOT_MAGIC };
 
 static uint32_t read_pin(void *context, uint32_t address)
@@ -41,10 +52,19 @@ int t3p_bsp_rectangle(void *context, uint16_t xs, uint16_t xe, uint16_t ys, uint
 {
     (void)context; (void)xs; (void)xe; (void)ys; (void)ye; (void)pixels; (void)count;
     ++clock_ms;
+#ifdef T3P_SYSTEM
+    if (fail_frame) return -1;
+    ++completed_strips;
+#endif
     return 0;
 }
 void t3p_bsp_backlight(struct t3p_bsp *b, int enabled) { (void)b; (void)enabled; }
-void t3p_signal_failure(unsigned stage) { (void)stage; abort(); }
+void t3p_signal_failure(unsigned stage) {
+#ifdef T3P_SYSTEM
+    if (fail_frame && stage == 4) longjmp(done, 2);
+#endif
+    (void)stage; abort();
+}
 
 void t3p_meter_gpio_init(struct t3p_bsp *b, struct t3p_meter_bus *bus)
 { (void)b; *bus = (struct t3p_meter_bus){0}; }
@@ -98,6 +118,9 @@ static void verify_capture(unsigned action)
     capturing = finished = listening_snapshots = finished_snapshots = 0;
     measurement_samples = key_page_changes = pd_polls = 0;
     requested_action = action;
+#ifdef T3P_SYSTEM
+    completed_strips = 0;
+#endif
     if (!setjmp(done)) t3p_board_start();
     assert(finished_snapshots == 1);
     assert(key_page_changes == 1);  /* Manual navigation is still rendered. */
@@ -114,5 +137,12 @@ int main(void)
     verify_capture(2);
     verify_capture(3);
     verify_capture(4);
+#ifdef T3P_SYSTEM
+    clock_ms = completed_strips = 0;
+    capturing = finished = 0;
+    fail_frame = 1;
+    if (!setjmp(done)) t3p_board_start();
+    assert(system_stats.frames == 0); /* Failed transfers are not completed frames. */
+#endif
     return 0;
 }

@@ -3,6 +3,9 @@
 #define T3P_METER_H
 #include <stdint.h>
 #include "t3p_bsp.h"
+#ifdef T3P_SYSTEM
+#include "t3p_system.h"
+#endif
 
 struct t3p_meter_bus {
     void *context;
@@ -11,6 +14,9 @@ struct t3p_meter_bus {
     int (*read_scl)(void *);
     int (*read_sda)(void *);
     int (*delay)(void *);
+#ifdef T3P_SYSTEM
+    struct t3p_system_stats *system;
+#endif
 };
 
 void t3p_meter_gpio_init(struct t3p_bsp *, struct t3p_meter_bus *);

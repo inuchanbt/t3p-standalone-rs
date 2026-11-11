@@ -43,6 +43,10 @@ static struct t3p_bsp board;
 static uint16_t strip[PANEL_SIDE * STRIP_ROWS];
 static volatile uint32_t startup_cookie = 0x54335044u;
 static struct t3p_button button;
+#ifdef T3P_SYSTEM
+static struct t3p_system_stats system_stats;
+static uint32_t system_tick;
+#endif
 
 static void init_key(void)
 {
@@ -69,6 +73,16 @@ enum redraw_request {
 static unsigned poll_key(uint32_t now)
 {
     enum t3p_button_event event = t3p_button_poll(&button, now, key_pressed());
+#ifdef T3P_SYSTEM
+    t3p_system_tick(&system_stats, &system_tick, now);
+    if (event != T3P_BUTTON_NONE) {
+        if (event == T3P_BUTTON_SHORT) t3p_system_count(&system_stats.short_presses);
+        if (event == T3P_BUTTON_DOUBLE) t3p_system_count(&system_stats.double_presses);
+        if (event == T3P_BUTTON_LONG) t3p_system_count(&system_stats.long_presses);
+        system_stats.key_event = event;
+        system_stats.key_ms = now - button.changed;
+    }
+#endif
 #ifdef T3P_PD_CHARGER
     if (charger_state == CHARGER_ARMED) {
         if (event == T3P_BUTTON_SHORT) return CHARGER_SCAN;
@@ -125,6 +139,10 @@ void t3p_board_start(void)
     }
     t3p_bsp_native_io(&io);
     if (t3p_bsp_init(&board, &io)) t3p_signal_failure(2);
+#ifdef T3P_SYSTEM
+    system_stats = (struct t3p_system_stats){0};
+    system_tick = 0; /* TIMER0 milliseconds start at BSP initialization. */
+#endif
     if (t3p_bsp_lcd_init(&board)) t3p_signal_failure(3);
     init_key();
 
@@ -134,6 +152,9 @@ void t3p_board_start(void)
 #ifdef T3P_MEASURE
     struct t3p_meter_bus meter_bus;
     t3p_meter_gpio_init(&board, &meter_bus);
+#ifdef T3P_SYSTEM
+    meter_bus.system = &system_stats; /* Shared by slow and fast bus copies. */
+#endif
     int identified = 0;
     uint32_t identified_at = start - 1000;
 #ifdef T3P_PD_PROFILES
@@ -258,6 +279,12 @@ void t3p_board_start(void)
         if (!redraw && rd_test.state == T3P_RD_ON) refresh_due = 0;
 #endif
         if (refresh_due) {
+#ifdef T3P_SYSTEM
+            uint32_t frame_started = t3p_bsp_millis(&board);
+            t3p_system_tick(&system_stats, &system_tick, frame_started);
+            system_stats.dbi_ops = board.operations;
+            if (meter_on_system_page()) meter_system_status(&system_stats);
+#endif
 #ifdef T3P_PD_CHARGER
             meter_charger_status(charger_state);
 #endif
@@ -295,6 +322,14 @@ void t3p_board_start(void)
 #endif
             }
             t3p_bsp_backlight(&board, 1);
+#ifdef T3P_SYSTEM
+            uint32_t frame_finished = t3p_bsp_millis(&board);
+            t3p_system_tick(&system_stats, &system_tick, frame_finished);
+            system_stats.frame_ms = frame_finished - frame_started;
+            if (system_stats.frame_ms > system_stats.frame_max_ms)
+                system_stats.frame_max_ms = system_stats.frame_ms;
+            t3p_system_count(&system_stats.frames);
+#endif
             rendered = now;
         }
         uint32_t pause_ms = 5;

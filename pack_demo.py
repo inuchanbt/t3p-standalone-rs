@@ -46,7 +46,7 @@ def main():
     build_audit = json.loads((out / "audit.json").read_bytes())
     require(elf_sha == build_audit["elf_sha256"], "ELF does not match build audit")
     inspect_layout(elf)
-    check = [sys.executable, ROOT / "check_pi32.py", "--build-dir", out]
+    check = [sys.executable, "-u", ROOT / "check_pi32.py", "--build-dir", out]
     if "measurement candidate" in build_audit["status"]:
         check.append("--measurement")
     if "read-only PD diagnostic" in build_audit["status"]:
@@ -57,6 +57,8 @@ def main():
         check.append("--pd-cable-read")
     if "CC1 active charger scan" in build_audit["status"]:
         check.append("--pd-charger")
+    if "SYSTEM diagnostics" in build_audit["status"]:
+        check.append("--system")
     if "CC1 Rd attach test" in build_audit["status"]:
         check.append("--pd-rd-test")
     if "CC1 GoodCRC test" in build_audit["status"]:

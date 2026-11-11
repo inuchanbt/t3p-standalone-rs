@@ -78,7 +78,8 @@ static void accept_write(struct fake *f)
 #endif
 static struct t3p_meter_bus bus(struct fake *f)
 {
-    return (struct t3p_meter_bus){f, set_scl, set_sda, get_scl, get_sda, tick};
+    return (struct t3p_meter_bus){.context = f, .scl = set_scl, .sda = set_sda,
+        .read_scl = get_scl, .read_sda = get_sda, .delay = tick};
 }
 #ifdef T3P_PD_ACK_TEST
 static void test_pd_ack_reset(void)
@@ -153,8 +154,54 @@ static void test_sop_request_tx(void)
             assert(f.clock_data[1 + i * 9 + bit] == ((bytes[i] >> (7 - bit)) & 1));
 }
 #endif
+#ifdef T3P_SYSTEM
+static void test_system_counters(void)
+{
+    struct t3p_system_stats stats = {0};
+    struct fake f = {0};
+    struct t3p_meter_bus b = bus(&f);
+    b.system = &stats;
+    struct t3p_meter_bus fast = b;
+    answer(&f, 0x2260);
+    answer(&f, 0x4127);
+    assert(!t3p_meter_identify(&b));
+    assert(stats.reads == 2 && !stats.read_errors && stats.meter_flags == 3);
+    assert(stats.meter_id == 0x2260 && stats.meter_config == 0x4127 && stats.meter_state == 1);
+    /* The shared fast bus counts in the same snapshot, without extra reads. */
+    f = (struct fake){0};
+    answer(&f, 3101); answer(&f, 2000);
+    uint16_t mv;
+    int16_t ma;
+    assert(!t3p_meter_sample(&fast, &mv, &ma));
+    assert(stats.reads == 4 && stats.samples == 1 && !stats.sample_errors);
+    assert(f.cursor == f.count);
+    f = (struct fake){.stuck = 1};
+    assert(t3p_meter_sample(&b, &mv, &ma));
+    assert(stats.reads == 5 && stats.read_errors == 1);
+    assert(stats.samples == 2 && stats.sample_errors == 1 && stats.meter_state == 3);
+    assert(t3p_meter_identify(&b));
+    assert(stats.meter_flags == 0 && stats.meter_state == 2 && stats.read_errors == 2);
+    f = (struct fake){0};
+    accept_write(&f);
+    assert(!t3p_pd_cable_write(&fast, 0x09, 0x05));
+    assert(stats.writes == 1 && !stats.write_errors && f.cursor == f.count);
+    f = (struct fake){.stuck = 1};
+    assert(t3p_pd_cable_write(&b, 0x09, 0x05));
+    assert(stats.writes == 2 && stats.write_errors == 1);
+    const uint8_t rdo[] = {0x32, 0xc8, 0, 0x11};
+    assert(t3p_pd_sop_tx(&fast, 0x1082, rdo, sizeof(rdo)));
+    assert(stats.writes == 3 && stats.write_errors == 2);
+    stats.reads = stats.read_errors = UINT32_MAX;
+    assert(t3p_meter_read_register(&b, 2, &mv));
+    assert(stats.reads == UINT32_MAX && stats.read_errors == UINT32_MAX);
+}
+#endif
+
 int main(void)
 {
+#ifdef T3P_SYSTEM
+    test_system_counters();
+#endif
     struct gpio_fake gpio;
     for (unsigned i = 0; i < 16; ++i) gpio.regs[i] = 0xa5a5a5a5u;
     struct t3p_bsp board = { .io = { .context = &gpio, .read32 = gpio_read, .write32 = gpio_write } };

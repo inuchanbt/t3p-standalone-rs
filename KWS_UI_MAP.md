@@ -24,7 +24,7 @@ The captures stay in the user's local reference directory; they are not bundled 
 | `CHARGER21.BMP` | Capabilities, identity, peaks, inputs, batteries, source power/status/revision | V5: four active queries, nine pages described below; optional Not_Supported completes normally. Legacy protocol scans remain pending. / ４種類の能動照会と９ページ。任意照会への未対応通知も正常完了。 |
 | `CABLE22.BMP`, `CABLE22-2.BMP` | Identity, raw fields, SVIDs, modes, manufacturer, active/SOP″ status | Active cable scan and numbered detail pages. Only advertised optional queries are sent. / 能動読取と詳細ページ。対応を示すケーブルに追加照会。 |
 | `SETTINGS01.BMP` | Brightness, rotation, totals/timer policy, calibration | SETTINGS menu pending. Existing totals use elapsed time and RAM storage. / 設定画面は未実装。現在は経過時間・RAM 保存。 |
-| `SYSTEM23.BMP` | Versions, temperature, bus/frame/button/stack/reset/flash diagnostics | Selected as the next menu; implementation pending, with initial scope below. Build/audit reports are development artifacts, not live device readings. / 次のメニューに選定。初回の実装範囲は下記。実機画面は未実装。 |
+| `SYSTEM23.BMP` | Versions, temperature, bus/frame/button/stack/reset/flash diagnostics | SYSTEM V1: three pages of app/base versions, uptime, meter state, I²C/sample/frame/button diagnostics. Unavailable fields show N/A. / ３ページを実装。未取得値は N/A。実機確認待ち。 |
 
 ## CHARGER V5
 
@@ -49,18 +49,22 @@ No EPR entry or higher-voltage request is part of this CHARGER scan. The EPR OFF
 
 この CHARGER スキャンで EPR への移行や高電圧要求は行いません。EPR OFFER は引き続き外部 SNK が引き出す提示を受信します。能動的な電圧操作、旧規格の検出、ライン電圧やリップルの取得は、今後の実装・実機検証の対象です。
 
-## Next menu: SYSTEM / 次のメニュー
+## SYSTEM V1
 
-After reviewing all 24 captures, SYSTEM is selected next. Its first implementation will expose software information and values obtainable from the running T3P. LINES and RIPPLE need additional acquisition work; PPS, AVS and legacy scans need new protocol control. The SYSTEM screen itself is not included in CHARGER V5.
+The `--system` build retains CHARGER V5 and adds SYSTEM after it. The three pages are SYSTEM INFO, BUS AND FRAMES, and INPUT AND RUNTIME. Tap advances through them to OVERVIEW, double press cycles the three pages, and hold exits without resetting energy or diagnostics. Only existing meter/PD transactions are observed; no diagnostic I²C queries are added. SYSTEM V1 awaits hardware verification.
 
-全24枚の確認後、次は SYSTEM を選定しました。初回はソフトウェアの版情報と、稼働中の T3P から取得できる値を対象にします。LINES／RIPPLE は追加の取得処理、PPS／AVS／旧規格のスキャンは新たなプロトコル制御が必要です。CHARGER V5 に SYSTEM 画面は含まれません。
+`--system` 版は CHARGER V5 を含み、その次に SYSTEM を追加します。SYSTEM INFO・BUS AND FRAMES・INPUT AND RUNTIME の３ページを実装しました。短押しで順に進んで OVERVIEW へ戻り、ダブル押しで３ページを循環、長押しで積算・診断値をリセットせず終了します。既存のメーター・PD 通信を集計し、診断用の追加 I²C 照会は行いません。SYSTEM V1 は実機確認待ちです。
 
-| Initial item / 初回対象 | Owning source and implementation boundary / 取得元と条件 |
+| Implemented item / 実装項目 | Owning source and implementation boundary / 取得元と条件 |
 | --- | --- |
-| Software version / ソフトウェア版 | Package/build metadata, explicitly distinguished from the stock 3.0.3 update-container version. / 自作ソフトの版と純正コンテナーの版を区別する。 |
-| Uptime / 稼働時間 | `t3p_bsp_millis()` in `native/board.c`; independent of ENERGY reset, with clock wrap handled. / ENERGY のリセットと独立させ、時計の周回を処理する。 |
-| Meter and bus state / 測定・通信状態 | Actual identification/sample results in `native/board.c`; `t3p_meter_identify()` checks die ID `2260` and configuration, not a meter firmware version. Read/error counters need instrumentation before display. / 実際の識別・取得結果を使う。ID を FW 版と読み替えず、回数は計測処理を追加してから表示する。 |
-| Frame/button timing / 描画・ボタン診断 | Instrument completed redraws and button events in `native/board.c`. `board.operations` counts DBI operations, not frames. / 描画完了と入力イベントを計測する。DBI の操作回数をフレーム数に代用しない。 |
+| Software version / ソフトウェア版 | `src/system.rs`: app build label `T3P RS SYSTEM V1`, separate from `BASE IMAGE 3.0.3`. / 自作ソフトの版と純正コンテナーの版を別々に表示。 |
+| Uptime / 稼働時間 | `t3p_bsp_millis()` and `t3p_system_tick()` in `native/board.c`: 64-bit accumulation from BSP timer initialization, independent of ENERGY reset. / BSP タイマー開始から時計の周回をまたいで積算。ENERGY のリセットと独立。 |
+| Meter and bus state / 測定・通信状態 | `native/t3p_meter.c` records actual identification/sample outcomes, successful ID/config reads and I²C transaction/sample attempts/errors. Slow/fast bus copies share counters. ID `2260` is not a firmware version. / 実際の取得・通信を集計。高速・低速バスで共有し、ID を FW 版と読み替えない。 |
+| Frame/button timing / 描画・ボタン診断 | `native/board.c` counts completed redraws and recognized events, measures previous/max frame duration and delay from the last raw button transition. `board.operations` is shown separately as DBI OPS. / 描画完了・入力イベントと所要時間を計測。DBI 操作回数は独立項目。 |
+
+Boot counters saturate except the existing wrapping 32-bit DBI counter. Unknown snapshots/fields show N/A; known zero counters remain zero. Frame timing is N/A until a redraw completes. Input delay includes debounce and gesture recognition windows. Full semantics and reproducible checks are in the READMEs.
+
+追加カウンターは再起動まで積算して飽和させます。既存の32ビット DBI カウンターは周回します。未取得は N/A、取得済みのゼロはゼロ、初回描画前の所要時間は N/A です。入力時間にはデバウンスや操作判定の待ち時間を含みます。詳しい定義と検証手順は README を参照してください。
 
 Temperature, device serial, reset reason, live stack use and flash diagnostics remain unavailable until a verified acquisition path exists. Show `N/A` or omit those fields; never copy values from the KWS capture or static build audit into live diagnostics.
 

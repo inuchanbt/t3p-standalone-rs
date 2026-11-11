@@ -78,6 +78,18 @@ V3 の実機試験では `SOURCE EXT CAP OK` と 5.085 V が表示されまし�
 
 引き継いだ実機証拠では、Chicony A240AP03Q／Framework FRANDVCH00（`CHARGER_03.ccgx3`）は４種類とも応答しました。HKY A180C-PD240W-C14（`CHARGER_04.ccgx3`）と Delta ADP-240LB B／Lenovo OEM（`CHARGER_05.ccgx3`）は Status が `Not_Supported`、ほかはデータ応答でした。V5 はこの組み合わせを `CAP OK` とします。変更後の完了表示は実機未確認です。PC テストには、この応答パターンを作成パケットで追加しています。[リプレイ用データの説明](tests/README.md)で、作成したテストパケットとアナライザーの記録を区別しています。
 
+## SYSTEM 診断画面
+
+`--system` 版は CHARGER V5 の機能を含み、CHARGER の次に **SYSTEM** を追加します。短押しで **SYSTEM INFO → BUS AND FRAMES → INPUT AND RUNTIME → OVERVIEW** と進みます。ダブル押しは SYSTEM 内のページ切り替え、長押しは積算・MAX・診断値をリセットせず OVERVIEW へ戻る操作です。通常の画面更新に合わせて表示し、診断のための追加 I²C 照会は行いません。
+
+SPR 以外の取得中は、既存の受信優先処理に合わせて SYSTEM の定期描画も止まります。その間も稼働時間と診断カウンターは継続し、次の描画で最新の値を表示します。
+
+SYSTEM INFO は、自作ソフトの版（`T3P RS SYSTEM V1`）、純正の更新コンテナーの版（`BASE IMAGE 3.0.3`）、稼働時間、最後に正常取得したメーターの die ID・設定値、直近の識別・サンプル取得結果を表示します。die ID はメーターの FW 版とは区別します。稼働時間はアプリの BSP タイマー開始から数え、LCD の初期化時間を含みます。32ビットのミリ秒時計が周回しても継続し、ENERGY のリセットとは独立します。純正ブートローダーの起動時間は含みません。
+
+BUS AND FRAMES はメーターと PD コントローラーを合算した I²C 読み書きの試行・通信エラー、メーター取得の試行・失敗、完了した画面描画の回数を表示します。FIFO への書き込みも I²C 書き込み１件であり、PD パケットの個数ではありません。取得回数には既存の CABLE／CHARGER の確認処理も含みます。描画の直近・最大時間はスナップショット作成、描画、LCD 転送、転送間のポーリングを含む、前回までに完了した描画の所要時間です。最初の描画が完了する前は、描画回数は既知のゼロ、所要時間は `N/A` になります。INPUT AND RUNTIME は DBI 操作回数、認識した短押し・ダブル押し・長押しの回数、最後の入力イベントと認識までの時間を表示します。入力の時間は最後の生入力変化から数え、デバウンスと各操作の判定待ち時間を含みます。
+
+追加した診断カウンターは再起動まで積算し、`4294967295` で飽和させます。既存の DBI 操作回数は32ビットで周回し、フレーム数とは別です。未取得のメーター FW・温度・製造番号・スタック使用量・リセット理由・フラッシュ診断は `N/A` です。ID・設定値の読み取りに失敗した場合も、その項目を未取得に戻します。診断スナップショットがなければ `N/A`、取得済みのゼロはゼロと表示します。これらは作成データを使った PC テストと本体向けコードのリプレイで検証します。SYSTEM V1 は実機未確認です。
+
 ## CC1 の Rd 接続試験
 
 `python build.py --pd-rd-test` でビルドし、電流グラフの次にある **RD TEST** を開きます。HID で給電し、測定用の両端子を空けて始めます。左ボタンをダブル押しして `RD OFF` を表示させてから、動作実績のある USB-C 電源を CC1 の向きで T3P のメス端子につなぎます。反対側の測定端子は空けておきます。約2秒待ってから左ボタンを1回短押しして Rd を入れ、保存された前後の VBUS を比べます。`5V SEEN` は、Rd を切ったときは4 V未満で、Rd を入れた後は3回連続で4.5〜5.5 Vだったことを示します。
@@ -176,6 +188,8 @@ PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします�
 ケーブル単体の能動読取版は `python build.py --pd-cable-read` でビルドします。同じ比較画像を `cargo run --offline --features pd-cable-read --bin preview` で `build/pd-cable-read` に生成します。`--measurement --profiles-ui` に `--cable-vbus` または `--cable-no-ra` を加え、それぞれ `preview-cable-vbus.ppm` と `preview-cable-no-ra.ppm` を追加します。同じ共通オプションに `--cable-scan=N` を加え、`N` を `0`・`6`・`8` として `preview-cable-scan-N.ppm` を作ります。この比較には実機の Identity 応答と合成した追加応答を使います。更新ファイルは `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_V3_3.0.3.bin` で作ります。
 
 **CHARGER V5** は、まず `cargo build --bin preview --features pd-charger` で PC 版をビルドし、`python preview_refs.py --pd-charger` で比較画像を `build/pd-charger` にまとめて生成します。`python build.py --pd-charger` で本体をビルドし、`python pack_demo.py --build-dir build/pd-charger --output-name T3P_RUST_METER_PD_CHARGER_V5_3.0.3.bin` で更新ファイルを作ります。更新ファイルの作成前に Pi32v2 の描画と照会のリプレイを検証します。比較画像は、必ず対象の機能で PC 版をビルドしてから生成してください。
+
+**SYSTEM V1** は `cargo test --offline --features system` と `python tests/check_system.py --cc PC用CLANGのパス` で検証します。`cargo build --offline --bin preview --features system` で PC 版をビルドし、`python preview_refs.py --system` で比較画像56枚を生成します。`python build.py --system` で本体をビルドし、`python pack_demo.py --build-dir build/system --output-name T3P_RUST_METER_SYSTEM_V1_3.0.3.bin` で更新ファイルを作ります。既存の CHARGER・ケーブル・PD に加え、SYSTEM の描画と操作をリプレイで検証します。[SYSTEM の検証データ](tests/README.md#system-diagnostics)は、実測値とは区別した作成データです。
 
 **RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
 

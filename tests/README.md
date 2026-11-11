@@ -21,6 +21,14 @@ The offer from `pd_offer.hex` is supplied first as phase 0. Host and target repl
 
 全６件とも作成したパケットです。先頭２件や拡張能力の旧データも、実測記録として扱いません。実機で確認された XID／FW／HW は `00000000`／`00`／`00` であり、この fixture の値とは異なります。表示テストの温度・電力・Revision も実機が返した結果ではありません。
 
+## SYSTEM diagnostics
+
+`system_stats.words` contains 21 constructed 32-bit words in the order shared by `native/t3p_system.h` and `src/system.rs`. It is not a device dump. Host previews and target replay use this snapshot to check a >49-day uptime, ID/config values, meter state, bus/sample/frame counters and input diagnostics. Other constructed cases cover absent snapshots, invalid ID/config after a sample failure, maximum counters and known zero counts with unavailable frame timing. No fixture value is inserted into the device's live diagnostic path.
+
+`tests/check_system.py` runs the C checks for clock wrap/counter saturation, recognized input events and delay, shared bus counters and errors, frame completion/failure, refresh scheduling, CHARGER and cable transactions. Rust checks also preserve diagnostic state across ENERGY reset; target replay verifies the C/Rust snapshot layout, nine SYSTEM frames, page cycling and exit without resetting meter totals.
+
+`system_stats.words` は C と Rust で共有する順序の32ビット値21個からなる作成データです。実機のダンプではありません。49日を超えた稼働時間、通信・取得・描画・入力の集計などを検証し、別ケースで未取得・失敗・最大値・既知のゼロを確認します。検証用の値を実機の診断経路へ組み込むことはありません。
+
 ## Cable fixtures
 
 The Identity exchange used by the cable tests reproduces the decoded Identity from the user's Sumitomo/CY4500-EPR test. Additional SVID, Modes, Manufacturer Info, active-cable status and SOP″ cases include constructed inputs to exercise optional paths. Passing those cases does not establish that an active cable or second controller was tested on hardware; the READMEs record the actual observations separately.

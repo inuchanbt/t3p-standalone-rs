@@ -27,9 +27,12 @@ def main():
     parser.add_argument("--pd-profiles", action="store_true")
     parser.add_argument("--pd-cable-read", action="store_true")
     parser.add_argument("--pd-charger", action="store_true")
+    parser.add_argument("--system", action="store_true")
     parser.add_argument("--pd-rd-test", action="store_true")
     parser.add_argument("--pd-ack-test", action="store_true")
     args = parser.parse_args()
+    if args.system:
+        args.pd_charger = True
     if args.pd_charger:
         args.pd_cable_read = True
     if args.pd_cable_read:
@@ -244,7 +247,7 @@ def main():
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-cable-ready.ppm").read_bytes():
                 raise ValueError("Pi32v2 did not advance after the oldest sniff page")
-            for _ in range(8 + int(args.pd_charger)):
+            for _ in range(8 + int(args.pd_charger) + 3 * int(args.system)):
                 cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_next_page"], [])
             if cpu.call(symbols["meter_double_press"], [])[0] != 3:
@@ -258,7 +261,7 @@ def main():
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-cable-ready.ppm").read_bytes():
                 raise ValueError("Pi32v2 sniff recapture did not reset the history cursor")
-            for _ in range(8 + int(args.pd_charger)):
+            for _ in range(8 + int(args.pd_charger) + 3 * int(args.system)):
                 cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_long_press"], [])
             cpu.call(symbols["meter_snapshot"], [])
@@ -425,6 +428,61 @@ def main():
                 if render() != (out / "preview-measurement.ppm").read_bytes():
                     raise ValueError("Pi32v2 CHARGER long press did not exit without resetting readings")
                 print("Pi32v2 CHARGER four queries, nine pages, CAP OK with Status unsupported, partial results, recapture and exit match")
+            if args.system:
+                def enter_system():
+                    for _ in range(64):
+                        if cpu.call(symbols["meter_on_system_page"], [])[0]:
+                            return
+                        cpu.call(symbols["meter_next_page"], [])
+                    raise ValueError("Pi32v2 could not navigate to SYSTEM")
+
+                def check_system(page):
+                    cpu.call(symbols["meter_snapshot"], [])
+                    if render() != (out / f"preview-system-{page}.ppm").read_bytes():
+                        raise ValueError(f"Pi32v2 SYSTEM {page} frame differs from host preview")
+
+                def publish_system(words):
+                    cpu.mem.write(strip, struct.pack("<21I", *words))
+                    cpu.call(symbols["meter_system_status"], [strip])
+
+                def check_system_exit():
+                    cpu.call(symbols["meter_snapshot"], [])
+                    if render() != (out / "preview-measurement.ppm").read_bytes():
+                        raise ValueError("Pi32v2 SYSTEM exit reset or changed meter readings/totals")
+
+                enter_system()
+                cpu.call(symbols["meter_system_status"], [0])  # Null is ignored, never dereferenced.
+                for page in ("missing-info", "missing-io", "missing-input"):
+                    check_system(page)
+                    cpu.call(symbols["meter_next_page"], [])
+                check_system_exit()
+                enter_system()
+                words = [int(word, 16) for word in (ROOT / "tests/system_stats.words").read_text().split()]
+                publish_system(words)
+                for page in ("info", "io", "input"):
+                    check_system(page)
+                    if page != "input": cpu.call(symbols["meter_next_page"], [])
+                if cpu.call(symbols["meter_double_press"], [])[0] != 0:
+                    raise ValueError("Pi32v2 SYSTEM double press requested a protocol action")
+                check_system("info")
+                cpu.call(symbols["meter_long_press"], [])
+                check_system_exit()
+                enter_system()
+                fault = words.copy()
+                fault[8], fault[9] = 0, 3  # No valid ID/config; actual sample failure.
+                publish_system(fault)
+                check_system("fault")
+                maximum = words.copy()
+                for index in (2, 3, 4, 5, 10, 11, 12, 13, 14): maximum[index] = 0xffffffff
+                publish_system(maximum)
+                cpu.call(symbols["meter_next_page"], [])
+                check_system("max-io")
+                publish_system([0] * 21)
+                check_system("boot-io")
+                cpu.call(symbols["meter_next_page"], [])
+                cpu.call(symbols["meter_next_page"], [])
+                check_system_exit()
+                print("Pi32v2 SYSTEM nine frames, >49-day uptime, missing/zero/error/maximum values and navigation match")
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():

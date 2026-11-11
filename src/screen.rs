@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 mod cable;
+#[cfg(feature = "system")]
+mod system;
+#[cfg(feature = "system")]
+use crate::SYSTEM_PAGE;
 #[cfg(feature = "pd-charger")]
 mod charger;
 #[cfg(feature = "pd-rd-test")]
@@ -233,6 +237,8 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         CABLE_PAGE => (b"CABLE", AMPS),
         #[cfg(feature = "pd-charger")]
         CHARGER_PAGE => (b"CHARGER", VOLTS),
+        #[cfg(feature = "system")]
+        SYSTEM_PAGE => (b"SYSTEM", AMPS),
         _ => (b"GRAPH", WATTS),
     };
     // The selected title and neighboring color tabs follow the KWS layout.
@@ -242,7 +248,7 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
     p.text(12, 8, title, 2, BG);
     let pd_tabs = view.pd_profiles.is_some();
     let tabs = if pd_tabs {
-        PD_PAGE_COUNT
+        PD_PAGE_COUNT + cfg!(feature = "system") as u32
     } else {
         PROFILES_PAGE
     };
@@ -308,6 +314,12 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
             CABLE_PAGE => b"TAP NEXT 2X CAP HOLD EXIT",
             #[cfg(feature = "pd-charger")]
             CHARGER_PAGE => charger::controls(view),
+            #[cfg(feature = "system")]
+            SYSTEM_PAGE if view.system_section + 1 < crate::system::SYSTEM_SECTIONS => {
+                b"TAP MORE 2X PAGE HOLD EXIT"
+            }
+            #[cfg(feature = "system")]
+            SYSTEM_PAGE => b"TAP NEXT 2X PAGE HOLD EXIT",
             PROFILES_PAGE | EPR_PAGE => b"TAP NEXT 2X CAPTURE HOLD RESET",
             2..PROFILES_PAGE => b"TAP NEXT 2X RANGE HOLD RESET",
             _ => b"TAP NEXT  HOLD RESET",
@@ -909,6 +921,8 @@ pub fn render_demo_strip(view: &Overview, top: usize, pixels: &mut [u16; SIDE * 
         }
         #[cfg(feature = "pd-charger")]
         CHARGER_PAGE => charger::render(&mut p, view),
+        #[cfg(feature = "system")]
+        SYSTEM_PAGE => system::render(&mut p, view),
         _ => graph(&mut p, view),
     }
 }

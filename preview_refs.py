@@ -12,10 +12,12 @@ def main():
     parser.add_argument("--preview", type=Path, default=ROOT / "target/debug/preview.exe")
     mode = parser.add_mutually_exclusive_group()
     for name in ("measurement", "pd-profiles", "pd-cable-read", "pd-charger",
-                 "pd-rd-test", "pd-ack-test"):
+                 "pd-rd-test", "pd-ack-test", "system"):
         mode.add_argument(f"--{name}", action="store_true")
     args = parser.parse_args()
-    variant = next((name for name in ("pd-charger", "pd-cable-read", "pd-profiles",
+    if args.system:
+        args.pd_charger = True
+    variant = next((name for name in ("system", "pd-charger", "pd-cable-read", "pd-profiles",
                                     "pd-ack-test", "pd-rd-test", "measurement")
                     if getattr(args, name.replace("-", "_"))), "")
     out = ROOT / "build" / variant
@@ -46,6 +48,10 @@ def main():
                      "status", "limits", "info", "queries", "no-ext", "partial",
                      "unsupported", "unsupported-queries")
             groups["charger"] = {name: name for name in names}
+        if args.system:
+            groups["system"] = {name: name for name in (
+                "info", "io", "input", "missing-info", "missing-io", "missing-input",
+                "fault", "max-io", "boot-io")}
         for group, states in groups.items():
             for name, flag in states.items():
                 frames[f"preview-{group}-{name}"] = ["--measurement", f"--{group}-{flag}"]
