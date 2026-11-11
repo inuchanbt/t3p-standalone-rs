@@ -17,7 +17,7 @@ All six records are **constructed fixtures**, including the Accept, PS_RDY and E
 | 5 | 5 | Source_Info, source ID 5; SIDO1 `80F0F001`, SIDO2 `C003C1E0` (guaranteed/DPS example, 240 W limits) |
 | 6 | 6 | Revision, source ID 6; RMDO `32120000` (Revision 3.2, Version 1.2) |
 
-The offer from `pd_offer.hex` is supplied first as phase 0. Host and target replay exercise each following phase separately. Tests also generate matching and mismatched GoodCRC, optional-query rejections/timeouts and malformed replies.
+The offer from `pd_offer.hex` is supplied first as phase 0. Host and target replay exercise each following phase separately. Tests also generate matching and mismatched GoodCRC, optional-query rejections/timeouts and malformed replies. The V5 Status-only `Not_Supported` case reproduces the HKY/Delta outcome pattern from the supplied hardware evidence using constructed packets, not bytes copied from `CHARGER_04.ccgx3` or `CHARGER_05.ccgx3`. C transaction tests also cover all queries unsupported, Reject, Wait, no reply and a Status-phase bus error.
 
 全６件とも作成したパケットです。先頭２件や拡張能力の旧データも、実測記録として扱いません。実機で確認された XID／FW／HW は `00000000`／`00`／`00` であり、この fixture の値とは異なります。表示テストの温度・電力・Revision も実機が返した結果ではありません。
 

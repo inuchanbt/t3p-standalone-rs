@@ -21,12 +21,12 @@ The captures stay in the user's local reference directory; they are not bundled 
 | `QC215.BMP`, `QC316.BMP` | QC 2/3 scan and voltage controls | D+/D− protocol controller pending. / D+/D− の制御実装が必要。 |
 | `SCP17.BMP`, `FCP18.BMP`, `AFC19.BMP` | Legacy charger scans and vendor data | Protocol engines pending; CHARGER explicitly shows `QC NOT SCANNED`. / 未実装。未照会と表示する。 |
 | `PD20.BMP` | PD session, request/acknowledgement/readiness timings, startup/port/PDO flags | PD SNIFF history and keepalive counters; CHARGER request, Accept/PS_RDY and per-query outcomes. Full SESSION page/timing data pending. / 履歴と照会結果に対応。SESSION 専用画面・時刻情報は未実装。 |
-| `CHARGER21.BMP` | Capabilities, identity, peaks, inputs, batteries, source power/status/revision | V4: four active queries, nine pages described below. Legacy protocol scans remain pending. / ４種類の能動照会と９ページ。 |
+| `CHARGER21.BMP` | Capabilities, identity, peaks, inputs, batteries, source power/status/revision | V5: four active queries, nine pages described below; optional Not_Supported completes normally. Legacy protocol scans remain pending. / ４種類の能動照会と９ページ。任意照会への未対応通知も正常完了。 |
 | `CABLE22.BMP`, `CABLE22-2.BMP` | Identity, raw fields, SVIDs, modes, manufacturer, active/SOP″ status | Active cable scan and numbered detail pages. Only advertised optional queries are sent. / 能動読取と詳細ページ。対応を示すケーブルに追加照会。 |
 | `SETTINGS01.BMP` | Brightness, rotation, totals/timer policy, calibration | SETTINGS menu pending. Existing totals use elapsed time and RAM storage. / 設定画面は未実装。現在は経過時間・RAM 保存。 |
-| `SYSTEM23.BMP` | Versions, temperature, bus/frame/button/stack/reset/flash diagnostics | SYSTEM menu pending. Build/audit reports are development artifacts, not live device readings. / 実機診断画面は未実装。ビルド情報を測定値として代用しない。 |
+| `SYSTEM23.BMP` | Versions, temperature, bus/frame/button/stack/reset/flash diagnostics | Selected as the next menu; implementation pending, with initial scope below. Build/audit reports are development artifacts, not live device readings. / 次のメニューに選定。初回の実装範囲は下記。実機画面は未実装。 |
 
-## CHARGER V4
+## CHARGER V5
 
 After the fixed 5 V contract, queries follow the KWS source-information categories:
 
@@ -39,11 +39,32 @@ After the fixed 5 V contract, queries follow the KWS source-information categori
 
 The full page order is SCAN, CAPABILITIES, IDENTITY, PEAKS AND MAKER, POWER STATUS, STATUS DETAILS, SOURCE LIMITS, SOURCE INFO, QUERY RESULTS. Each optional query has its own outcome. An unsupported field is not rendered as a measured zero. Source Info's present/reported power is labeled as reported data; the meter reading remains in SCAN/OVERVIEW.
 
+`CAP OK` means every optional query returned valid data or `Not_Supported`. The individual `NOT SUPPORTED` label remains visible in the normal result color. No reply, Reject or Wait still means partial results; communication errors remain failures.
+
 固定 5 V の契約後に上記を順に問い合わせます。短押しで９ページを巡ります。未対応の項目を実測ゼロとして表示せず、照会ごとの成否も確認できます。Source Info の電力は電源の報告値であり、SCAN／OVERVIEW に表示するメーターの測定値とは別です。
+
+すべての任意照会がデータ応答または `Not_Supported` で終われば `CAP OK` です。個別の `NOT SUPPORTED` は正常色で残します。未応答・Reject・Wait は部分成功、通信エラーは失敗のままです。
 
 No EPR entry or higher-voltage request is part of this CHARGER scan. The EPR OFFER page still captures offers prompted by another sink. Adding active voltage controls, legacy scans, line ADCs and ripple acquisition requires separate board work and verification.
 
 この CHARGER スキャンで EPR への移行や高電圧要求は行いません。EPR OFFER は引き続き外部 SNK が引き出す提示を受信します。能動的な電圧操作、旧規格の検出、ライン電圧やリップルの取得は、今後の実装・実機検証の対象です。
+
+## Next menu: SYSTEM / 次のメニュー
+
+After reviewing all 24 captures, SYSTEM is selected next. Its first implementation will expose software information and values obtainable from the running T3P. LINES and RIPPLE need additional acquisition work; PPS, AVS and legacy scans need new protocol control. The SYSTEM screen itself is not included in CHARGER V5.
+
+全24枚の確認後、次は SYSTEM を選定しました。初回はソフトウェアの版情報と、稼働中の T3P から取得できる値を対象にします。LINES／RIPPLE は追加の取得処理、PPS／AVS／旧規格のスキャンは新たなプロトコル制御が必要です。CHARGER V5 に SYSTEM 画面は含まれません。
+
+| Initial item / 初回対象 | Owning source and implementation boundary / 取得元と条件 |
+| --- | --- |
+| Software version / ソフトウェア版 | Package/build metadata, explicitly distinguished from the stock 3.0.3 update-container version. / 自作ソフトの版と純正コンテナーの版を区別する。 |
+| Uptime / 稼働時間 | `t3p_bsp_millis()` in `native/board.c`; independent of ENERGY reset, with clock wrap handled. / ENERGY のリセットと独立させ、時計の周回を処理する。 |
+| Meter and bus state / 測定・通信状態 | Actual identification/sample results in `native/board.c`; `t3p_meter_identify()` checks die ID `2260` and configuration, not a meter firmware version. Read/error counters need instrumentation before display. / 実際の識別・取得結果を使う。ID を FW 版と読み替えず、回数は計測処理を追加してから表示する。 |
+| Frame/button timing / 描画・ボタン診断 | Instrument completed redraws and button events in `native/board.c`. `board.operations` counts DBI operations, not frames. / 描画完了と入力イベントを計測する。DBI の操作回数をフレーム数に代用しない。 |
+
+Temperature, device serial, reset reason, live stack use and flash diagnostics remain unavailable until a verified acquisition path exists. Show `N/A` or omit those fields; never copy values from the KWS capture or static build audit into live diagnostics.
+
+温度・製造番号・リセット理由・実行時のスタック使用量・フラッシュ診断は、取得経路を確認できるまで `N/A` または非表示にします。KWS の画像やビルド時の監査値を、実機の現在値として流用しません。
 
 ## References / 参照
 

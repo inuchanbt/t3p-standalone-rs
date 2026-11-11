@@ -8,7 +8,8 @@
 enum scenario {
     COMPLETE, NO_EXT, EXT_REPLY_ONLY, EXT_RETRYFAIL, EXT_ACK_ONLY, EXT_WRONG_ACK,
     NO_INITIAL_ACK, VBUS_PRESENT, VBUS_DROP, SINK_TX_NG, PD2,
-    EXT_UNSUPPORTED, EXT_REJECTED, EXT_WAIT, ALL_UNSUPPORTED, STATUS_RESET,
+    EXT_UNSUPPORTED, EXT_REJECTED, EXT_WAIT, ALL_UNSUPPORTED, STATUS_UNSUPPORTED,
+    STATUS_RESET, STATUS_IO,
 };
 
 static const uint8_t stock[0x44] = {
@@ -129,6 +130,7 @@ int t3p_pd_rx_read(struct t3p_meter_bus *bus, uint8_t reg, uint8_t *out, unsigne
         f->left -= length;
     } else if (reg == 0x3e) {
         assert(length == 5);
+        if (f->scenario == STATUS_IO && f->sent == 3) return -1;
         memset(out, 0, length);
         out[2] = 0x03; /* SinkTxOK with the PHY's VBUSOK bit clear. */
         if (phase_seen == 3 && (f->scenario == SINK_TX_NG || f->scenario == VBUS_DROP))
@@ -173,7 +175,8 @@ int t3p_pd_sop_tx(struct t3p_meter_bus *bus, uint16_t header, const uint8_t *pay
             memcpy(f->ack, query_ack, sizeof(query_ack));
             f->ack[1] = 0xad; /* Soft Reset */
             queue(f, f->ack, sizeof(f->ack));
-        } else if (f->scenario == ALL_UNSUPPORTED || (!query &&
+        } else if (f->scenario == ALL_UNSUPPORTED ||
+                   (f->scenario == STATUS_UNSUPPORTED && query == 1) || (!query &&
                    (f->scenario == EXT_UNSUPPORTED || f->scenario == EXT_REJECTED ||
                     f->scenario == EXT_WAIT))) {
             memcpy(f->ack, query_ack, sizeof(query_ack));
@@ -251,11 +254,14 @@ int main(void)
         {EXT_ACK_ONLY, CHARGER_PARTIAL, 7, 5, CHARGER_NO_EXT},
         {EXT_WRONG_ACK, CHARGER_NO_GOODCRC, 3, 2, CHARGER_NO_GOODCRC},
         {NO_EXT, CHARGER_PARTIAL, 7, 5, CHARGER_NO_EXT},
-        {EXT_UNSUPPORTED, CHARGER_PARTIAL, 7, 5, CHARGER_UNSUPPORTED},
+        {EXT_UNSUPPORTED, CHARGER_COMPLETE, 7, 5, CHARGER_UNSUPPORTED},
         {EXT_REJECTED, CHARGER_PARTIAL, 7, 5, CHARGER_REJECTED},
         {EXT_WAIT, CHARGER_PARTIAL, 7, 5, CHARGER_WAIT},
-        {ALL_UNSUPPORTED, CHARGER_PARTIAL, 3, 5, CHARGER_UNSUPPORTED},
+        {ALL_UNSUPPORTED, CHARGER_COMPLETE, 3, 5, CHARGER_UNSUPPORTED},
+        /* HKY/Delta outcome pattern; payloads remain constructed fixtures. */
+        {STATUS_UNSUPPORTED, CHARGER_COMPLETE, 7, 5, CHARGER_READY},
         {STATUS_RESET, CHARGER_RESET, 4, 3, CHARGER_READY},
+        {STATUS_IO, CHARGER_IO, 4, 3, CHARGER_READY},
     };
     for (unsigned i = 0; i < sizeof(query_cases) / sizeof(query_cases[0]); ++i) {
         restart(&f, query_cases[i].scenario);
@@ -265,8 +271,13 @@ int main(void)
         assert(query_states[0] == query_cases[i].first_query && !t3p_pd_rd_baseline(&bus));
         if (f.sent == 5) {
             for (unsigned q = 1; q < 4; ++q)
-                assert(query_states[q] == (f.scenario == ALL_UNSUPPORTED ?
+                assert(query_states[q] == (f.scenario == ALL_UNSUPPORTED ||
+                                          (f.scenario == STATUS_UNSUPPORTED && q == 1) ?
                                           CHARGER_UNSUPPORTED : CHARGER_READY));
+        }
+        if (f.scenario == STATUS_RESET || f.scenario == STATUS_IO) {
+            assert(query_states[1] == query_cases[i].state);
+            assert(query_states[2] == ~0u && query_states[3] == ~0u);
         }
     }
 

@@ -252,11 +252,16 @@ fn main() -> io::Result<()> {
         "--charger-limits" => Some((2, 6)),
         "--charger-info" => Some((2, 7)),
         "--charger-queries" => Some((2, 8)),
+        "--charger-unsupported" => Some((2, 0)),
+        "--charger-unsupported-queries" => Some((2, 8)),
         "--charger-no-ext" => Some((24, 0)),
         "--charger-partial" => Some((24, 8)),
         _ => None,
     }) {
         let mut scan = ChargerCapture::new();
+        let status_unsupported = flags
+            .iter()
+            .any(|flag| flag == "--charger-unsupported" || flag == "--charger-unsupported-queries");
         if state >= 2 {
             let parse = |line: &str| -> Vec<u8> {
                 line.split_whitespace()
@@ -273,6 +278,10 @@ fn main() -> io::Result<()> {
                 .take(replies)
                 .enumerate()
             {
+                if status_unsupported && index == 3 {
+                    scan.set_query_state(4, 8);
+                    continue;
+                }
                 assert_eq!(scan.record(&parse(line), index as u32 + 1), 1);
             }
             scan.set_vbus(5085);

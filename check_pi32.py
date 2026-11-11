@@ -402,13 +402,29 @@ def main():
                 for page in ("offer", "identity", "peaks", "power", "status", "limits", "info", "queries"):
                     cpu.call(symbols["meter_next_page"], [])
                     check_charger(page)
+                # HKY/Delta outcome pattern, using constructed CRC-valid packets.
+                cpu.call(symbols["meter_charger_clear"], [])
+                charger_frame(frame, 0)
+                for phase, reply in enumerate(replies, 1):
+                    if phase == 4:
+                        body = bytes.fromhex("b0 09")  # Not_Supported, source ID 4
+                        reply = b"\xe0" + body + crc32(body).to_bytes(4, "little")
+                    charger_frame(reply, phase, 4 if phase == 4 else 1)
+                    if phase >= 3:
+                        cpu.call(symbols["meter_charger_query_status"], [phase, 8 if phase == 4 else 0])
+                cpu.call(symbols["meter_charger_vbus"], [5085])
+                cpu.call(symbols["meter_charger_status"], [2])
+                check_charger("unsupported")
+                for _ in range(8):
+                    cpu.call(symbols["meter_next_page"], [])
+                check_charger("unsupported-queries")
                 if cpu.call(symbols["meter_double_press"], [])[0] != 5:
                     raise ValueError("Pi32v2 CHARGER detail view did not allow rescan")
                 cpu.call(symbols["meter_long_press"], [])
                 cpu.call(symbols["meter_snapshot"], [])
                 if render() != (out / "preview-measurement.ppm").read_bytes():
                     raise ValueError("Pi32v2 CHARGER long press did not exit without resetting readings")
-                print("Pi32v2 CHARGER four queries, nine pages, partial results, recapture and exit match")
+                print("Pi32v2 CHARGER four queries, nine pages, CAP OK with Status unsupported, partial results, recapture and exit match")
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():

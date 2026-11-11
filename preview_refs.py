@@ -43,7 +43,8 @@ def main():
                 frames[f"preview-cable-scan-{section}"] = ["--measurement", f"--cable-scan={section}"]
         if args.pd_charger:
             names = ("ready", "armed", "result", "offer", "identity", "peaks", "power",
-                     "status", "limits", "info", "queries", "no-ext", "partial")
+                     "status", "limits", "info", "queries", "no-ext", "partial",
+                     "unsupported", "unsupported-queries")
             groups["charger"] = {name: name for name in names}
         for group, states in groups.items():
             for name, flag in states.items():

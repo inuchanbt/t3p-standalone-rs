@@ -65,7 +65,7 @@ pub(super) fn render(p: &mut Strip<'_>, view: &Overview) {
     let (status, color): (&[u8], u16) = match scan.state {
         0 => (b"READY", AMPS),
         1 => (b"RD OFF", AMPS),
-        2 => (b"QUERIES COMPLETE", WATTS),
+        2 => (b"CAP OK", WATTS),
         3 => (b"5V CONTRACT OK", WATTS),
         4 => (b"EXT QUERY SKIPPED", VOLTS),
         5 => (b"NO EXT CAP REPLY", VOLTS),
@@ -672,7 +672,7 @@ fn query_results(p: &mut Strip<'_>, scan: &ChargerCapture) {
             i,
             label,
             result.label(),
-            if result == QueryResult::Ok {
+            if matches!(result, QueryResult::Ok | QueryResult::NotSupported) {
                 WATTS
             } else {
                 MUTED

@@ -68,15 +68,15 @@ T3P 実機で住友のパッシブケーブル単体（`20C2/0A14`）を読み�
 
 試験用の `--pd-charger` 版では **CABLE** の次に **CHARGER** が出ます。側面の HID ポートで給電し、測定用の両端子を空けた状態で **CHARGER** の左ボタンをダブル押しします。`RD OFF` が出たら電源を CC1 の向きで T3P のメス端子につなぎます。オス端子は空けたまま、30秒以内に1回短押しします。待機中は長押しで中止できます。
 
-V4 は PDO 1 に固定 5 V を要求します。要求電流は最大 0.5 A です。Accept と PS_RDY の後、PD 3.x 電源へ **Get Source Cap Extended → Get Status → Get Source Info → Get Revision** の順で問い合わせます。各照会の前に SinkTxOK を待ち、メーターの値が 4.5〜5.5 V の範囲にあるか確認します。照会ごとの結果を別々に保存し、ACK 済みの照会が応答なし・Not Supported・Reject・Wait でも、取得済みの情報を残して次へ進みます。送信未確認やリンク・測定エラーではスキャンを止めます。PD 2.0 は `5V CONTRACT OK` と表示し、これらの PD 3.x 照会を送りません。
+V5 は PDO 1 に固定 5 V を要求します。要求電流は最大 0.5 A です。Accept と PS_RDY の後、PD 3.x 電源へ **Get Source Cap Extended → Get Status → Get Source Info → Get Revision** の順で問い合わせます。各照会の前に SinkTxOK を待ち、メーターの値が 4.5〜5.5 V の範囲にあるか確認します。照会ごとの結果を別々に保存し、ACK 済みの照会が応答なし・Not Supported・Reject・Wait でも、取得済みの情報を残して次へ進みます。送信未確認やリンク・測定エラーではスキャンを止めます。PD 2.0 は `5V CONTRACT OK` と表示し、これらの PD 3.x 照会を送りません。
 
-４種類すべての有効な応答が揃うと `QUERIES COMPLETE`、一部の任意応答がないまま照会を終えると `PARTIAL RESULTS` です。短押しで **SCAN → CAPABILITIES → IDENTITY → PEAKS AND MAKER → POWER STATUS → STATUS DETAILS → SOURCE LIMITS → SOURCE INFO → QUERY RESULTS** を巡り、最後に OVERVIEW へ戻ります。電源が返すピーク条件、入力電源・バッテリーのフラグ、保持時間、適合情報、現在・報告電力、温度や制限要因などを表示します。取得できない項目には未取得・未対応の状態を残します。拡張 PDP は電源が提示する能力です。このスキャンは EPR や高電圧 PDO を要求しません。EPR の提示を見る場合は EPR OFFER を使います。再試行は電源を抜いてダブル押しします。
+４種類すべてが有効なデータ応答または `Not_Supported` で終わると `CAP OK` です。任意照会への未対応通知は正常な回答として扱い、個別欄には `NOT SUPPORTED` を残して `OK` と同じ正常色で表示します。４種類すべてが未対応でも正常完了となるため、全情報を取得できたという意味ではありません。ACK 済みでも応答なし・Reject・Wait があれば引き続き `PARTIAL RESULTS`、送信未確認やリンク・測定エラーは失敗です。短押しで **SCAN → CAPABILITIES → IDENTITY → PEAKS AND MAKER → POWER STATUS → STATUS DETAILS → SOURCE LIMITS → SOURCE INFO → QUERY RESULTS** を巡り、最後に OVERVIEW へ戻ります。電源が返すピーク条件、入力電源・バッテリーのフラグ、保持時間、適合情報、現在・報告電力、温度や制限要因などを表示します。取得できない項目には未取得・未対応の状態を残します。拡張 PDP は電源が提示する能力です。このスキャンは EPR や高電圧 PDO を要求しません。EPR の提示を見る場合は EPR OFFER を使います。再試行は電源を抜いてダブル押しします。
 
 実機では 5 V・0.500 A の要求に対して Accept と PS_RDY を受信しました。拡張照会の送信を待つ間も、メーターの測定値で 4.5〜5.5 V の範囲を確認します。V2 では拡張応答の VID/PID と PDP を正しく表示しながら、成否欄に `NO GOODCRC` が出ました。CY4500-EPR には拡張応答と電源の GoodCRC が記録されていました。V3 は送信完了フラグがなくても検証済みの拡張応答で成功と判定し、照会に対応する GoodCRC も受信 FIFO から判別します。
 
 V3 の実機試験では `SOURCE EXT CAP OK` と 5.085 V が表示されました。直列接続した CY4500-EPR は照会（メッセージ ID 1）と応答（メッセージ ID 3）の両方に対応する GoodCRC を記録しました。25バイトの応答に含まれる VID/PID `32AC/0022` と電源が提示した PDP（SPR 100 W、EPR 240 W）は、画面の表示と一致しました。
 
-V4 の追加照会と９ページの GUI は、PC 上のテストと実機向けコードのリプレイ検証の対象です。実機確認はこれからです。[リプレイ用データの説明](tests/README.md)で、作成したテストパケットとアナライザーの記録を区別しています。
+引き継いだ実機証拠では、Chicony A240AP03Q／Framework FRANDVCH00（`CHARGER_03.ccgx3`）は４種類とも応答しました。HKY A180C-PD240W-C14（`CHARGER_04.ccgx3`）と Delta ADP-240LB B／Lenovo OEM（`CHARGER_05.ccgx3`）は Status が `Not_Supported`、ほかはデータ応答でした。V5 はこの組み合わせを `CAP OK` とします。変更後の完了表示は実機未確認です。PC テストには、この応答パターンを作成パケットで追加しています。[リプレイ用データの説明](tests/README.md)で、作成したテストパケットとアナライザーの記録を区別しています。
 
 ## CC1 の Rd 接続試験
 
@@ -175,7 +175,7 @@ PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします�
 
 ケーブル単体の能動読取版は `python build.py --pd-cable-read` でビルドします。同じ比較画像を `cargo run --offline --features pd-cable-read --bin preview` で `build/pd-cable-read` に生成します。`--measurement --profiles-ui` に `--cable-vbus` または `--cable-no-ra` を加え、それぞれ `preview-cable-vbus.ppm` と `preview-cable-no-ra.ppm` を追加します。同じ共通オプションに `--cable-scan=N` を加え、`N` を `0`・`6`・`8` として `preview-cable-scan-N.ppm` を作ります。この比較には実機の Identity 応答と合成した追加応答を使います。更新ファイルは `python pack_demo.py --build-dir build/pd-cable-read --output-name T3P_RUST_METER_PD_CABLE_READ_V3_3.0.3.bin` で作ります。
 
-**CHARGER V4** は、まず `cargo build --bin preview --features pd-charger` で PC 版をビルドし、`python preview_refs.py --pd-charger` で比較画像を `build/pd-charger` にまとめて生成します。`python build.py --pd-charger` で本体をビルドし、`python pack_demo.py --build-dir build/pd-charger --output-name T3P_RUST_METER_PD_CHARGER_V4_3.0.3.bin` で更新ファイルを作ります。更新ファイルの作成前に Pi32v2 の描画と照会のリプレイを検証します。比較画像は、必ず対象の機能で PC 版をビルドしてから生成してください。
+**CHARGER V5** は、まず `cargo build --bin preview --features pd-charger` で PC 版をビルドし、`python preview_refs.py --pd-charger` で比較画像を `build/pd-charger` にまとめて生成します。`python build.py --pd-charger` で本体をビルドし、`python pack_demo.py --build-dir build/pd-charger --output-name T3P_RUST_METER_PD_CHARGER_V5_3.0.3.bin` で更新ファイルを作ります。更新ファイルの作成前に Pi32v2 の描画と照会のリプレイを検証します。比較画像は、必ず対象の機能で PC 版をビルドしてから生成してください。
 
 **RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
 

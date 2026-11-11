@@ -229,7 +229,8 @@ static enum t3p_charger_state exchange(struct t3p_bsp *board, struct t3p_meter_b
             state != CHARGER_WAIT && state != CHARGER_UNSUPPORTED &&
             !(state == CHARGER_NO_EXT && link.tx_acked))
             return state;
-        partial |= state != CHARGER_READY;
+        /* Not_Supported is a valid terminal response to an optional query. */
+        partial |= state != CHARGER_READY && state != CHARGER_UNSUPPORTED;
         /* Finish automatic GoodCRC before the next query or detaching. */
         if (t3p_bsp_delay(board, 1)) return CHARGER_TIMER;
     }
