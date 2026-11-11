@@ -157,6 +157,49 @@ static int read_register(struct t3p_meter_bus *b, uint8_t address, uint8_t reg,
 #endif
     return error ? -1 : 0;
 }
+#ifdef T3P_SYSTEM
+/* Stock sensor bus: PA6 SCL / PA5 SDA, distinct from meter/PD PB2/PB1. */
+static void sensor_line(void *ctx, uint32_t pin, int high)
+{
+    struct t3p_bsp *b = ctx;
+    uint32_t direction = b->io.read32(b->io.context, 0xfd3008u);
+    b->io.write32(b->io.context, 0xfd3008u, high ? direction | pin : direction & ~pin);
+}
+static void sensor_scl(void *ctx, int high) { sensor_line(ctx, 1u << 6, high); }
+static void sensor_sda(void *ctx, int high) { sensor_line(ctx, 1u << 5, high); }
+static int sensor_read_scl(void *ctx) {
+    struct t3p_bsp *b = ctx;
+    return !!(b->io.read32(b->io.context, 0xfd3000u) & (1u << 6));
+}
+static int sensor_read_sda(void *ctx) {
+    struct t3p_bsp *b = ctx;
+    return !!(b->io.read32(b->io.context, 0xfd3000u) & (1u << 5));
+}
+void t3p_temperature_bus_init(struct t3p_bsp *b, struct t3p_meter_bus *bus)
+{
+    const uint32_t pins = (1u << 6) | (1u << 5);
+    /* Release before enabling digital inputs; use board pull-ups, drive low only. */
+    uint32_t value = b->io.read32(b->io.context, 0xfd3008u);
+    b->io.write32(b->io.context, 0xfd3008u, value | pins);
+    value = b->io.read32(b->io.context, 0xfd3004u);
+    b->io.write32(b->io.context, 0xfd3004u, value & ~pins);
+    value = b->io.read32(b->io.context, 0xfd300cu);
+    b->io.write32(b->io.context, 0xfd300cu, value | pins);
+    *bus = (struct t3p_meter_bus){.context = b, .scl = sensor_scl, .sda = sensor_sda,
+        .read_scl = sensor_read_scl, .read_sda = sensor_read_sda, .delay = delay};
+}
+int t3p_temperature_read(struct t3p_meter_bus *b, uint8_t reg, uint8_t *data, unsigned count)
+{ return read_register(b, 0xee, reg, data, count); }
+int t3p_temperature_write(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
+{
+    if (reg != 0xf4 || value != 0x21) return -1;
+    if (b->system) t3p_system_count(&b->system->writes);
+    int error = start(b) || write_byte(b, 0xee) || write_byte(b, reg) || write_byte(b, value);
+    stop(b);
+    if (error && b->system) t3p_system_count(&b->system->write_errors);
+    return error ? -1 : 0;
+}
+#endif
 int t3p_meter_read_register(struct t3p_meter_bus *b, uint8_t reg, uint16_t *out)
 {
     uint8_t data[2];

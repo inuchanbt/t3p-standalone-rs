@@ -12,6 +12,8 @@ struct t3p_system_stats {
     uint32_t samples, sample_errors;
     uint32_t frames, frame_ms, frame_max_ms, dbi_ops;
     uint32_t short_presses, double_presses, long_presses, key_event, key_ms;
+    int32_t temp_centi;
+    uint32_t temp_valid;
 };
 
 static inline void t3p_system_count(uint32_t *value)

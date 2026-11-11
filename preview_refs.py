@@ -51,7 +51,7 @@ def main():
         if args.system:
             groups["system"] = {name: name for name in (
                 "info", "io", "input", "missing-info", "missing-io", "missing-input",
-                "fault", "max-io", "boot-io")}
+                "fault", "max-io", "boot-io", "temperature", "cold")}
         for group, states in groups.items():
             for name, flag in states.items():
                 frames[f"preview-{group}-{name}"] = ["--measurement", f"--{group}-{flag}"]

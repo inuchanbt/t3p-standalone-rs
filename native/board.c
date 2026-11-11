@@ -3,6 +3,9 @@
 #include "t3p_bsp.h"
 #include "t3p_signal.h"
 #include "t3p_button.h"
+#ifdef T3P_SYSTEM
+#include "t3p_temperature.h"
+#endif
 #ifdef T3P_MEASURE
 #include "t3p_meter.h"
 #endif
@@ -154,13 +157,23 @@ void t3p_board_start(void)
     t3p_meter_gpio_init(&board, &meter_bus);
 #ifdef T3P_SYSTEM
     meter_bus.system = &system_stats; /* Shared by slow and fast bus copies. */
+    struct t3p_meter_bus temperature_bus;
+    t3p_temperature_bus_init(&board, &temperature_bus);
+    temperature_bus.system = &system_stats;
+    struct t3p_temperature temperature = {0};
+    unsigned temperature_ready = 0;
 #endif
     int identified = 0;
     uint32_t identified_at = start - 1000;
 #ifdef T3P_PD_PROFILES
     struct t3p_meter_bus fast_bus = meter_bus;
     struct t3p_pd_capture pd = {0};
-    if (t3p_meter_fast_bus(&board, &fast_bus)) pd.state = T3P_PD_TIMER_ERROR;
+    int fast_ready = !t3p_meter_fast_bus(&board, &fast_bus);
+    if (!fast_ready) pd.state = T3P_PD_TIMER_ERROR;
+#ifdef T3P_SYSTEM
+    temperature_ready = fast_ready;
+    if (fast_ready) temperature_bus.delay = fast_bus.delay;
+#endif
     meter_pd_status(pd.state, 0, pd.mode);
 #endif
 #ifdef T3P_PD_CHARGER
@@ -269,6 +282,17 @@ void t3p_board_start(void)
             sampled = now;
         }
         unsigned refresh_due = redraw || now - rendered >= 1000;
+#ifdef T3P_SYSTEM
+        unsigned temperature_enabled = meter_on_system_page() && temperature_ready;
+#ifdef T3P_PD_PROFILES
+        temperature_enabled &= pd.state != T3P_PD_LISTENING;
+#endif
+#ifdef T3P_PD_CHARGER
+        temperature_enabled &= charger_state != CHARGER_ARMED;
+#endif
+        t3p_temperature_poll(&temperature, &temperature_bus, &system_stats,
+            t3p_bsp_millis(&board), temperature_enabled);
+#endif
 #ifdef T3P_PD_PROFILES
         /* Give fast captures priority over automatic repaints. Key presses
            and completion still redraw, and measurement sampling continues. */

@@ -5,7 +5,7 @@
 
 int main(void)
 {
-    _Static_assert(sizeof(struct t3p_system_stats) == 21 * 4, "Rust ABI size");
+    _Static_assert(sizeof(struct t3p_system_stats) == 23 * 4, "Rust ABI size");
     _Static_assert(offsetof(struct t3p_system_stats, key_ms) == 20 * 4, "Rust ABI order");
     struct t3p_system_stats s = { .uptime_low = UINT32_MAX - 10 };
     uint32_t last = UINT32_MAX - 10;

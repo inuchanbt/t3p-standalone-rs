@@ -96,7 +96,20 @@ pub(super) fn render(p: &mut Strip<'_>, view: &Overview) {
             };
             row(p, 5, b"METER STATE", state, color);
             row(p, 6, b"METER FW", b"N/A", MUTED);
-            row(p, 7, b"TEMPERATURE", b"N/A", MUTED);
+            if let Some(s) =
+                stats.filter(|s| s.temp_valid == 1 && (-4000..=8500).contains(&s.temp_centi))
+            {
+                let n = s.temp_centi.unsigned_abs();
+                let mut text = *b"+00.00 C";
+                text[0] = if s.temp_centi < 0 { b'-' } else { b'+' };
+                text[1] += (n / 1000) as u8;
+                text[2] += (n / 100 % 10) as u8;
+                text[4] += (n / 10 % 10) as u8;
+                text[5] += (n % 10) as u8;
+                row(p, 7, b"BMP TEMP", &text, WATTS);
+            } else {
+                row(p, 7, b"BMP TEMP", b"N/A", MUTED);
+            }
             row(p, 8, b"SERIAL", b"N/A", MUTED);
         }
         1 => {

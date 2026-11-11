@@ -23,11 +23,11 @@ The offer from `pd_offer.hex` is supplied first as phase 0. Host and target repl
 
 ## SYSTEM diagnostics
 
-`system_stats.words` contains 21 constructed 32-bit words in the order shared by `native/t3p_system.h` and `src/system.rs`. It is not a device dump. Host previews and target replay use this snapshot to check a >49-day uptime, ID/config values, meter state, bus/sample/frame counters and input diagnostics. Other constructed cases cover absent snapshots, invalid ID/config after a sample failure, maximum counters and known zero counts with unavailable frame timing. No fixture value is inserted into the device's live diagnostic path.
+`system_stats.words` contains 23 constructed 32-bit words (the temperature word is signed) in the order shared by `native/t3p_system.h` and `src/system.rs`. It is not a device dump. Host previews and target replay use this snapshot to check a >49-day uptime, ID/config values, meter state, bus/sample/frame counters and input diagnostics. Other constructed cases cover absent snapshots, invalid ID/config after a sample failure, maximum counters and known zero counts with unavailable frame timing. No fixture value is inserted into the device's live diagnostic path.
 
-`tests/check_system.py` runs the C checks for clock wrap/counter saturation, recognized input events and delay, shared bus counters and errors, frame completion/failure, refresh scheduling, CHARGER and cable transactions. Rust checks also preserve diagnostic state across ENERGY reset; target replay verifies the C/Rust snapshot layout, nine SYSTEM frames, page cycling and exit without resetting meter totals.
+`tests/check_system.py` runs the C checks for clock wrap/counter saturation, recognized input events and delay, shared bus counters and errors, frame completion/failure, refresh scheduling, CHARGER and cable transactions. Rust checks also preserve diagnostic state across ENERGY reset; target replay verifies the C/Rust snapshot layout, eleven SYSTEM frames, page cycling and exit without resetting meter totals.
 
-`system_stats.words` は C と Rust で共有する順序の32ビット値21個からなる作成データです。実機のダンプではありません。49日を超えた稼働時間、通信・取得・描画・入力の集計などを検証し、別ケースで未取得・失敗・最大値・既知のゼロを確認します。検証用の値を実機の診断経路へ組み込むことはありません。
+`system_stats.words` は C と Rust で共有する順序の32ビット値23個からなる作成データです。実機のダンプではありません。49日を超えた稼働時間、通信・取得・描画・入力の集計などを検証し、別ケースで未取得・失敗・最大値・既知のゼロを確認します。検証用の値を実機の診断経路へ組み込むことはありません。
 
 ## Cable fixtures
 

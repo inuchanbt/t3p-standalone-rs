@@ -24,7 +24,7 @@ The captures stay in the user's local reference directory; they are not bundled 
 | `CHARGER21.BMP` | Capabilities, identity, peaks, inputs, batteries, source power/status/revision | V5: four active queries, nine pages described below; optional Not_Supported completes normally. Legacy protocol scans remain pending. / ４種類の能動照会と９ページ。任意照会への未対応通知も正常完了。 |
 | `CABLE22.BMP`, `CABLE22-2.BMP` | Identity, raw fields, SVIDs, modes, manufacturer, active/SOP″ status | Active cable scan and numbered detail pages. Only advertised optional queries are sent. / 能動読取と詳細ページ。対応を示すケーブルに追加照会。 |
 | `SETTINGS01.BMP` | Brightness, rotation, totals/timer policy, calibration | SETTINGS menu pending. Existing totals use elapsed time and RAM storage. / 設定画面は未実装。現在は経過時間・RAM 保存。 |
-| `SYSTEM23.BMP` | Versions, temperature, bus/frame/button/stack/reset/flash diagnostics | SYSTEM V1: three pages of app/base versions, uptime, meter state, I²C/sample/frame/button diagnostics. Unavailable fields show N/A. / ３ページを実装。未取得値は N/A。実機確認待ち。 |
+| `SYSTEM23.BMP` | Versions, temperature, bus/frame/button/stack/reset/flash diagnostics | SYSTEM V2: three pages of app/base versions, uptime, meter state, I²C/sample/frame/button diagnostics. Unavailable fields show N/A. / ３ページを実装。未取得値は N/A。実機確認待ち。 |
 
 ## CHARGER V5
 
@@ -49,15 +49,15 @@ No EPR entry or higher-voltage request is part of this CHARGER scan. The EPR OFF
 
 この CHARGER スキャンで EPR への移行や高電圧要求は行いません。EPR OFFER は引き続き外部 SNK が引き出す提示を受信します。能動的な電圧操作、旧規格の検出、ライン電圧やリップルの取得は、今後の実装・実機検証の対象です。
 
-## SYSTEM V1
+## SYSTEM V2
 
-The `--system` build retains CHARGER V5 and adds SYSTEM after it. The three pages are SYSTEM INFO, BUS AND FRAMES, and INPUT AND RUNTIME. Tap advances through them to OVERVIEW, double press cycles the three pages, and hold exits without resetting energy or diagnostics. Only existing meter/PD transactions are observed; no diagnostic I²C queries are added. SYSTEM V1 awaits hardware verification.
+The `--system` build retains CHARGER V5 and adds SYSTEM after it. The three pages are SYSTEM INFO, BUS AND FRAMES, and INPUT AND RUNTIME. Tap advances through them to OVERVIEW, double press cycles the three pages, and hold exits without resetting energy or diagnostics. Meter/PD diagnostics reuse existing transactions. V2 adds BMP TEMP reads on PA6/PA5 while SYSTEM is visible and capture/charger operations are idle. SYSTEM V2 awaits hardware verification.
 
-`--system` 版は CHARGER V5 を含み、その次に SYSTEM を追加します。SYSTEM INFO・BUS AND FRAMES・INPUT AND RUNTIME の３ページを実装しました。短押しで順に進んで OVERVIEW へ戻り、ダブル押しで３ページを循環、長押しで積算・診断値をリセットせず終了します。既存のメーター・PD 通信を集計し、診断用の追加 I²C 照会は行いません。SYSTEM V1 は実機確認待ちです。
+`--system` 版は CHARGER V5 を含み、その次に SYSTEM を追加します。SYSTEM INFO・BUS AND FRAMES・INPUT AND RUNTIME の３ページを実装しました。短押しで順に進んで OVERVIEW へ戻り、ダブル押しで３ページを循環、長押しで積算・診断値をリセットせず終了します。既存のメーター・PD 通信を集計し、V2 は SYSTEM 表示中かつ PD 取得・CHARGER 待機中でない場合に PA6/PA5 の BMP TEMP 取得を行います。SYSTEM V2 は実機確認待ちです。
 
 | Implemented item / 実装項目 | Owning source and implementation boundary / 取得元と条件 |
 | --- | --- |
-| Software version / ソフトウェア版 | `src/system.rs`: app build label `T3P RS SYSTEM V1`, separate from `BASE IMAGE 3.0.3`. / 自作ソフトの版と純正コンテナーの版を別々に表示。 |
+| Software version / ソフトウェア版 | `src/system.rs`: app build label `T3P RS SYSTEM V2`, separate from `BASE IMAGE 3.0.3`. / 自作ソフトの版と純正コンテナーの版を別々に表示。 |
 | Uptime / 稼働時間 | `t3p_bsp_millis()` and `t3p_system_tick()` in `native/board.c`: 64-bit accumulation from BSP timer initialization, independent of ENERGY reset. / BSP タイマー開始から時計の周回をまたいで積算。ENERGY のリセットと独立。 |
 | Meter and bus state / 測定・通信状態 | `native/t3p_meter.c` records actual identification/sample outcomes, successful ID/config reads and I²C transaction/sample attempts/errors. Slow/fast bus copies share counters. ID `2260` is not a firmware version. / 実際の取得・通信を集計。高速・低速バスで共有し、ID を FW 版と読み替えない。 |
 | Frame/button timing / 描画・ボタン診断 | `native/board.c` counts completed redraws and recognized events, measures previous/max frame duration and delay from the last raw button transition. `board.operations` is shown separately as DBI OPS. / 描画完了・入力イベントと所要時間を計測。DBI 操作回数は独立項目。 |
@@ -66,9 +66,9 @@ Boot counters saturate except the existing wrapping 32-bit DBI counter. Unknown 
 
 追加カウンターは再起動まで積算して飽和させます。既存の32ビット DBI カウンターは周回します。未取得は N/A、取得済みのゼロはゼロ、初回描画前の所要時間は N/A です。入力時間にはデバウンスや操作判定の待ち時間を含みます。詳しい定義と検証手順は README を参照してください。
 
-Temperature, device serial, reset reason, live stack use and flash diagnostics remain unavailable until a verified acquisition path exists. Show `N/A` or omit those fields; never copy values from the KWS capture or static build audit into live diagnostics.
+Device serial, reset reason, live stack use and flash diagnostics remain unavailable until a verified acquisition path exists. Show `N/A` or omit those fields; never copy values from the KWS capture or static build audit into live diagnostics.
 
-温度・製造番号・リセット理由・実行時のスタック使用量・フラッシュ診断は、取得経路を確認できるまで `N/A` または非表示にします。KWS の画像やビルド時の監査値を、実機の現在値として流用しません。
+製造番号・リセット理由・実行時のスタック使用量・フラッシュ診断は、取得経路を確認できるまで `N/A` または非表示にします。KWS の画像やビルド時の監査値を、実機の現在値として流用しません。
 
 ## References / 参照
 
@@ -77,3 +77,7 @@ Temperature, device serial, reset reason, live stack use and flash diagnostics r
 - [FUSB302B data sheet](https://www.onsemi.com/pdf/datasheet/fusb302b-d.pdf)
 
 See [README](README.md), [日本語 README](README.ja.md) and [fixture provenance](tests/README.md) for operating instructions and validation boundaries.
+
+BMP TEMP uses the sensor's calibration and completed conversion; failure or stale data is N/A. SERIAL remains N/A because the updater descriptor source has not been validated for normal boot. See [acquisition evidence](SYSTEM_ACQUISITION.md).
+
+BMP TEMP は個体校正値と変換済み生値から補正します。失敗・古い値は N/A です。SERIAL は更新用の生成元を通常起動で確認できていないため N/A を維持します。

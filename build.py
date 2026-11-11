@@ -181,6 +181,8 @@ def main():
         sources.append(bsp / "t3p_cable_read.c")
     if args.pd_charger:
         sources.append(bsp / "t3p_charger.c")
+    if args.system:
+        sources.append(bsp / "t3p_temperature.c")
     if rd_test:
         sources.append(bsp / "t3p_rd_test.c")
     for source in sources:
@@ -213,6 +215,8 @@ def main():
     runtime = args.llvm / "lib/clang/23/lib/pi32v2/libclang_rt.builtins.a"
     elf = out / "t3p-meter-demo.elf"
     keep_demo = ["--undefined=meter_demo_sample"] if args.measurement else []
+    if args.system:
+        keep_demo.append("--undefined=t3p_temperature_compensate")
     run(bins / "ld.lld.exe", "-T", bsp / "runtime_layout.ld", "--gc-sections", "--no-relax", *keep_demo,
         f"-Map={out / 't3p-meter-demo.map'}", "-o", elf, *objects, runtime)
     if run(bins / "llvm-nm.exe", "--undefined-only", elf, capture=True).strip():

@@ -13,7 +13,15 @@ static unsigned measurement_samples, key_page_changes, pd_polls;
 static jmp_buf done;
 #ifdef T3P_SYSTEM
 static unsigned completed_strips, fail_frame;
+static unsigned temperature_reads, fail_fast_timer;
+static int fast_delay(void *context) { (void)context; return 0; }
 uint32_t meter_on_system_page(void) { return 1; }
+void t3p_temperature_bus_init(struct t3p_bsp *b, struct t3p_meter_bus *bus)
+{ (void)b; *bus = (struct t3p_meter_bus){0}; }
+int t3p_temperature_read(struct t3p_meter_bus *bus, uint8_t reg, uint8_t *data, unsigned count)
+{ assert(bus->delay == fast_delay); ++temperature_reads; (void)reg; (void)data; (void)count; return -1; }
+int t3p_temperature_write(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
+{ (void)bus; (void)reg; (void)value; abort(); }
 void meter_system_status(const struct t3p_system_stats *s)
 {
     assert(s->frames == completed_strips / 30);
@@ -69,7 +77,15 @@ void t3p_signal_failure(unsigned stage) {
 void t3p_meter_gpio_init(struct t3p_bsp *b, struct t3p_meter_bus *bus)
 { (void)b; *bus = (struct t3p_meter_bus){0}; }
 int t3p_meter_fast_bus(struct t3p_bsp *b, struct t3p_meter_bus *bus)
-{ (void)b; (void)bus; return 0; }
+{
+    (void)b; (void)bus;
+#ifdef T3P_SYSTEM
+    bus->delay = fast_delay;
+    return fail_fast_timer ? -1 : 0;
+#else
+    return 0;
+#endif
+}
 int t3p_meter_identify(struct t3p_meter_bus *bus) { (void)bus; return 0; }
 int t3p_meter_sample(struct t3p_meter_bus *bus, uint16_t *mv, int16_t *ma)
 { (void)bus; *mv = 5000; *ma = 1000; if (capturing) ++measurement_samples; return 0; }
@@ -138,6 +154,11 @@ int main(void)
     verify_capture(3);
     verify_capture(4);
 #ifdef T3P_SYSTEM
+    unsigned before = temperature_reads;
+    fail_fast_timer = 1;
+    verify_capture(1);
+    assert(temperature_reads == before); /* No slow fallback when timer unavailable. */
+    fail_fast_timer = 0;
     clock_ms = completed_strips = 0;
     capturing = finished = 0;
     fail_frame = 1;

@@ -340,6 +340,8 @@ fn main() -> io::Result<()> {
         "--system-fault" => Some((0, 2)),
         "--system-max-io" => Some((1, 3)),
         "--system-boot-io" => Some((1, 4)),
+        "--system-temperature" => Some((0, 5)),
+        "--system-cold" => Some((0, 6)),
         _ => None,
     }) {
         let words: Vec<u32> = include_str!("../../tests/system_stats.words")
@@ -371,6 +373,10 @@ fn main() -> io::Result<()> {
         }
         if mode == 4 {
             stats = Default::default();
+        }
+        if mode >= 5 {
+            stats.temp_valid = 1;
+            stats.temp_centi = if mode == 5 { 2508 } else { -512 };
         }
         view.set_pd_profiles(0, 0, None);
         view.set_system(if mode == 1 { None } else { Some(stats) }, section);

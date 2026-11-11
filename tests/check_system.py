@@ -20,7 +20,9 @@ def main():
         ("system-input", ["tests/system_input.c"], []),
         ("measurement-system", ["tests/measurement.c", "native/t3p_meter.c"], features + ["-DT3P_SYSTEM"]),
         ("measurement-baseline", ["tests/measurement.c", "native/t3p_meter.c"], features),
-        ("board-system", ["tests/board_capture_refresh.c"], ["-DT3P_SYSTEM"]),
+        ("board-system", ["tests/board_capture_refresh.c", "native/t3p_temperature.c"], ["-DT3P_SYSTEM"]),
+        ("temperature", ["tests/temperature.c", "native/t3p_temperature.c"], ["-DT3P_SYSTEM"]),
+        ("temperature-transport", ["tests/temperature_transport.c", "native/t3p_meter.c"], features + ["-DT3P_SYSTEM"]),
         ("board-refresh", ["tests/board_capture_refresh.c"], []),
         ("board-key", ["tests/board_key.c"], []),
         # This existing test deliberately includes an unused static board entry.

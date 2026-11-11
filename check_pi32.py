@@ -429,6 +429,15 @@ def main():
                     raise ValueError("Pi32v2 CHARGER long press did not exit without resetting readings")
                 print("Pi32v2 CHARGER four queries, nine pages, CAP OK with Status unsupported, partial results, recapture and exit match")
             if args.system:
+                calibration = bytes.fromhex("70 6b 43 67 18 fc")
+                cpu.mem.write(strip, calibration)
+                for adc, expected in ((519888, 2508), (400000, -1264)):
+                    result = cpu.call(symbols["t3p_temperature_compensate"], [strip, adc, strip + 8])[0]
+                    value = int.from_bytes(cpu.mem.read(strip + 8, 4), "little", signed=True)
+                    if result or value != expected:
+                        raise ValueError("Pi32v2 native temperature compensation mismatch")
+                if cpu.call(symbols["t3p_temperature_compensate"], [strip, 0x80000, strip + 8])[0] != 0xffffffff:
+                    raise ValueError("Pi32v2 accepted a skipped temperature conversion")
                 def enter_system():
                     for _ in range(64):
                         if cpu.call(symbols["meter_on_system_page"], [])[0]:
@@ -442,7 +451,7 @@ def main():
                         raise ValueError(f"Pi32v2 SYSTEM {page} frame differs from host preview")
 
                 def publish_system(words):
-                    cpu.mem.write(strip, struct.pack("<21I", *words))
+                    cpu.mem.write(strip, struct.pack("<23I", *words))
                     cpu.call(symbols["meter_system_status"], [strip])
 
                 def check_system_exit():
@@ -477,12 +486,20 @@ def main():
                 publish_system(maximum)
                 cpu.call(symbols["meter_next_page"], [])
                 check_system("max-io")
-                publish_system([0] * 21)
+                publish_system([0] * 23)
                 check_system("boot-io")
                 cpu.call(symbols["meter_next_page"], [])
                 cpu.call(symbols["meter_next_page"], [])
                 check_system_exit()
-                print("Pi32v2 SYSTEM nine frames, >49-day uptime, missing/zero/error/maximum values and navigation match")
+                enter_system()
+                for page, value in (("temperature", 2508), ("cold", -512)):
+                    sample = words.copy()
+                    sample[21], sample[22] = value & 0xffffffff, 1
+                    publish_system(sample)
+                    check_system(page)
+                cpu.call(symbols["meter_long_press"], [])
+                check_system_exit()
+                print("Pi32v2 SYSTEM eleven frames, signed temperature, >49-day uptime, missing/zero/error/maximum values and navigation match")
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():

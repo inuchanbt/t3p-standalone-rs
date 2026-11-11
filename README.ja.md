@@ -80,15 +80,17 @@ V3 の実機試験では `SOURCE EXT CAP OK` と 5.085 V が表示されまし�
 
 ## SYSTEM 診断画面
 
-`--system` 版は CHARGER V5 の機能を含み、CHARGER の次に **SYSTEM** を追加します。短押しで **SYSTEM INFO → BUS AND FRAMES → INPUT AND RUNTIME → OVERVIEW** と進みます。ダブル押しは SYSTEM 内のページ切り替え、長押しは積算・MAX・診断値をリセットせず OVERVIEW へ戻る操作です。通常の画面更新に合わせて表示し、診断のための追加 I²C 照会は行いません。
+`--system` 版は CHARGER V5 の機能を含み、CHARGER の次に **SYSTEM** を追加します。短押しで **SYSTEM INFO → BUS AND FRAMES → INPUT AND RUNTIME → OVERVIEW** と進みます。ダブル押しは SYSTEM 内のページ切り替え、長押しは積算・MAX・診断値をリセットせず OVERVIEW へ戻る操作です。通常の画面更新に合わせて表示します。メーター・PD の集計は既存通信を利用し、V2 では下記条件の温度照会を追加します。
 
-SPR 以外の取得中は、既存の受信優先処理に合わせて SYSTEM の定期描画も止まります。その間も稼働時間と診断カウンターは継続し、次の描画で最新の値を表示します。
+V2 は別系統の PA6/PA5 センサーバスと既存の高速タイマーで **BMP TEMP** を実取得します。高速タイマーを利用できなければ N/A を維持します。SYSTEM の表示中で、PD 取得や CHARGER の待機操作がない場合だけ、BMP280 互換 ID `58` と個体の温度校正値を読み、温度のみの単発変換を要求します。センサーのリセットや圧力スキャンは行いません。変換完了後の補正値が −40〜+85 ℃の範囲にある場合だけ表示し、通信失敗・ID／校正不正・未変換・長時間の変換待ち・2.5秒を超えた古い値は `N/A` にします。これはセンサー内部の温度であり、校正済みの室温ではありません。[取得経路とシリアルの未確定事項](SYSTEM_ACQUISITION.md) · [Bosch BMP280 データシート](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmp280-ds001.pdf)
 
-SYSTEM INFO は、自作ソフトの版（`T3P RS SYSTEM V1`）、純正の更新コンテナーの版（`BASE IMAGE 3.0.3`）、稼働時間、最後に正常取得したメーターの die ID・設定値、直近の識別・サンプル取得結果を表示します。die ID はメーターの FW 版とは区別します。稼働時間はアプリの BSP タイマー開始から数え、LCD の初期化時間を含みます。32ビットのミリ秒時計が周回しても継続し、ENERGY のリセットとは独立します。純正ブートローダーの起動時間は含みません。
+SPR 以外の取得中は、既存の受信優先処理に合わせて SYSTEM の定期描画も止まります。温度照会も止めますが、稼働時間と診断カウンターは継続し、次の描画で最新の値を表示します。I²C 集計には温度用の別バスも含みます。
+
+SYSTEM INFO は、自作ソフトの版（`T3P RS SYSTEM V2`）、純正の更新コンテナーの版（`BASE IMAGE 3.0.3`）、稼働時間、最後に正常取得したメーターの die ID・設定値、直近の識別・サンプル取得結果を表示します。die ID はメーターの FW 版とは区別します。稼働時間はアプリの BSP タイマー開始から数え、LCD の初期化時間を含みます。32ビットのミリ秒時計が周回しても継続し、ENERGY のリセットとは独立します。純正ブートローダーの起動時間は含みません。
 
 BUS AND FRAMES はメーターと PD コントローラーを合算した I²C 読み書きの試行・通信エラー、メーター取得の試行・失敗、完了した画面描画の回数を表示します。FIFO への書き込みも I²C 書き込み１件であり、PD パケットの個数ではありません。取得回数には既存の CABLE／CHARGER の確認処理も含みます。描画の直近・最大時間はスナップショット作成、描画、LCD 転送、転送間のポーリングを含む、前回までに完了した描画の所要時間です。最初の描画が完了する前は、描画回数は既知のゼロ、所要時間は `N/A` になります。INPUT AND RUNTIME は DBI 操作回数、認識した短押し・ダブル押し・長押しの回数、最後の入力イベントと認識までの時間を表示します。入力の時間は最後の生入力変化から数え、デバウンスと各操作の判定待ち時間を含みます。
 
-追加した診断カウンターは再起動まで積算し、`4294967295` で飽和させます。既存の DBI 操作回数は32ビットで周回し、フレーム数とは別です。未取得のメーター FW・温度・製造番号・スタック使用量・リセット理由・フラッシュ診断は `N/A` です。ID・設定値の読み取りに失敗した場合も、その項目を未取得に戻します。診断スナップショットがなければ `N/A`、取得済みのゼロはゼロと表示します。これらは作成データを使った PC テストと本体向けコードのリプレイで検証します。SYSTEM V1 は実機未確認です。
+追加した診断カウンターは再起動まで積算し、`4294967295` で飽和させます。既存の DBI 操作回数は32ビットで周回し、フレーム数とは別です。未取得のメーター FW・温度・製造番号・スタック使用量・リセット理由・フラッシュ診断は `N/A` です。ID・設定値の読み取りに失敗した場合も、その項目を未取得に戻します。診断スナップショットがなければ `N/A`、取得済みのゼロはゼロと表示します。これらは作成データを使った PC テストと本体向けコードのリプレイで検証します。SYSTEM V2 は実機未確認です。
 
 ## CC1 の Rd 接続試験
 
@@ -189,7 +191,7 @@ PD PROFILES 試験版は `python build.py --pd-profiles` でビルドします�
 
 **CHARGER V5** は、まず `cargo build --bin preview --features pd-charger` で PC 版をビルドし、`python preview_refs.py --pd-charger` で比較画像を `build/pd-charger` にまとめて生成します。`python build.py --pd-charger` で本体をビルドし、`python pack_demo.py --build-dir build/pd-charger --output-name T3P_RUST_METER_PD_CHARGER_V5_3.0.3.bin` で更新ファイルを作ります。更新ファイルの作成前に Pi32v2 の描画と照会のリプレイを検証します。比較画像は、必ず対象の機能で PC 版をビルドしてから生成してください。
 
-**SYSTEM V1** は `cargo test --offline --features system` と `python tests/check_system.py --cc PC用CLANGのパス` で検証します。`cargo build --offline --bin preview --features system` で PC 版をビルドし、`python preview_refs.py --system` で比較画像56枚を生成します。`python build.py --system` で本体をビルドし、`python pack_demo.py --build-dir build/system --output-name T3P_RUST_METER_SYSTEM_V1_3.0.3.bin` で更新ファイルを作ります。既存の CHARGER・ケーブル・PD に加え、SYSTEM の描画と操作をリプレイで検証します。[SYSTEM の検証データ](tests/README.md#system-diagnostics)は、実測値とは区別した作成データです。
+**SYSTEM V2** は `cargo test --offline --features system` と `python tests/check_system.py --cc PC用CLANGのパス` で検証します。`cargo build --offline --bin preview --features system` で PC 版をビルドし、`python preview_refs.py --system` で比較画像58枚を生成します。`python build.py --system` で本体をビルドし、`python pack_demo.py --build-dir build/system --output-name T3P_RUST_METER_SYSTEM_V2_3.0.3.bin` で更新ファイルを作ります。既存の CHARGER・ケーブル・PD に加え、SYSTEM の描画と操作をリプレイで検証します。[SYSTEM の検証データ](tests/README.md#system-diagnostics)は、実測値とは区別した作成データです。
 
 **RD TEST** は実測版の7枚の比較画像を `build/pd-rd-test` に用意します。さらに `cargo run --offline --features pd-rd-test --bin preview -- PATH --rd-off` と `--rd-5v` で、それぞれ `preview-rd-off.ppm` と `preview-rd-5v.ppm` を同じ場所に作ります。`python pack_demo.py --build-dir build/pd-rd-test --output-name T3P_RUST_METER_PD_RD_TEST_V2_3.0.3.bin` で更新ファイルを作ります。
 

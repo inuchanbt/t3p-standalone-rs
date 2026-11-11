@@ -2,7 +2,7 @@
 
 pub const SYSTEM_PAGE: u32 = crate::pd::PD_PAGE_COUNT;
 pub const SYSTEM_SECTIONS: u8 = 3;
-pub const FIRMWARE_VERSION: &[u8] = b"T3P RS SYSTEM V1";
+pub const FIRMWARE_VERSION: &[u8] = b"T3P RS SYSTEM V2";
 pub const BASE_IMAGE_VERSION: &[u8] = b"3.0.3";
 
 /// Native snapshot, matching native/t3p_system.h. Unknown values use flags,
@@ -32,6 +32,8 @@ pub struct SystemStats {
     pub long_presses: u32,
     pub key_event: u32,
     pub key_ms: u32,
+    pub temp_centi: i32,
+    pub temp_valid: u32,
 }
 
 impl SystemStats {
@@ -46,7 +48,7 @@ mod tests {
 
     #[test]
     fn native_snapshot_layout_and_clock_carry_are_preserved() {
-        assert_eq!(core::mem::size_of::<SystemStats>(), 21 * 4);
+        assert_eq!(core::mem::size_of::<SystemStats>(), 23 * 4);
         assert_eq!(core::mem::offset_of!(SystemStats, key_ms), 20 * 4);
         let stats = SystemStats {
             uptime_low: 123,
