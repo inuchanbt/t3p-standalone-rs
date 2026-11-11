@@ -37,7 +37,7 @@ static mut GRAPH_WINDOW: u32 = 0;
 #[cfg(feature = "pd-charger")]
 static mut CHARGER: ChargerCapture = ChargerCapture::new();
 #[cfg(feature = "pd-charger")]
-static mut CHARGER_OFFER: bool = false;
+static mut CHARGER_SECTION: u8 = 0;
 #[cfg(feature = "pd-rd-test")]
 static mut RD_TEST: crate::RdTest = crate::RdTest {
     state: 0,
@@ -155,7 +155,7 @@ unsafe extern "C" fn meter_long_press() {
     unsafe {
         #[cfg(feature = "pd-charger")]
         if *(&raw const PAGE) == CHARGER_PAGE {
-            *(&raw mut CHARGER_OFFER) = false;
+            *(&raw mut CHARGER_SECTION) = 0;
             *(&raw mut PAGE) = 0;
             return;
         }
@@ -196,11 +196,13 @@ unsafe extern "C" fn meter_next_page() {
         }
         #[cfg(feature = "pd-charger")]
         if *(&raw const PAGE) == CHARGER_PAGE {
-            if !*(&raw const CHARGER_OFFER) && (&*(&raw const CHARGER)).has_offer() {
-                *(&raw mut CHARGER_OFFER) = true;
+            if *(&raw const CHARGER_SECTION) + 1 < crate::pd::charger::CHARGER_SECTIONS
+                && (&*(&raw const CHARGER)).has_offer()
+            {
+                *(&raw mut CHARGER_SECTION) += 1;
                 return;
             }
-            *(&raw mut CHARGER_OFFER) = false;
+            *(&raw mut CHARGER_SECTION) = 0;
         }
         *(&raw mut PAGE) = (*(&raw const PAGE) + 1) % PAGE_COUNT;
     }
@@ -235,7 +237,7 @@ unsafe extern "C" fn meter_double_press() -> u32 {
 unsafe extern "C" fn meter_charger_clear() {
     unsafe {
         *(&raw mut CHARGER) = ChargerCapture::new();
-        *(&raw mut CHARGER_OFFER) = false;
+        *(&raw mut CHARGER_SECTION) = 0;
     }
 }
 
@@ -243,6 +245,12 @@ unsafe extern "C" fn meter_charger_clear() {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn meter_charger_status(state: u32) {
     unsafe { (&mut *(&raw mut CHARGER)).set_state(state) };
+}
+
+#[cfg(feature = "pd-charger")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_charger_query_status(phase: u32, state: u32) {
+    unsafe { (&mut *(&raw mut CHARGER)).set_query_state(phase, state) };
 }
 
 #[cfg(feature = "pd-charger")]
@@ -437,7 +445,7 @@ unsafe extern "C" fn meter_snapshot() {
         #[cfg(feature = "pd-profiles")]
         view.set_pd_cable(&*(&raw const PD_CABLE), *(&raw const PD_CABLE_SECTION));
         #[cfg(feature = "pd-charger")]
-        view.set_charger(*(&raw const CHARGER), *(&raw const CHARGER_OFFER));
+        view.set_charger(*(&raw const CHARGER), *(&raw const CHARGER_SECTION));
         view.set_page(*(&raw const PAGE));
         view.set_graph_window(*(&raw const GRAPH_WINDOW));
         (&*(&raw const METER)).overview(view);

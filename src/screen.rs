@@ -13,7 +13,7 @@ use crate::pd::{
 use crate::{Overview, SIDE, STRIP_ROWS};
 
 const BG: u16 = 0x0000;
-const PANEL: u16 = 0x0842;
+const PANEL: u16 = BG;
 const GRID: u16 = 0x19c8;
 const TEXT: u16 = 0xffff;
 const MUTED: u16 = 0xb65a;
@@ -124,6 +124,9 @@ fn glyph(ch: u8) -> u32 {
         b':' => rows([0, 6, 6, 0, 6, 6, 0]),
         b'/' => rows([1, 1, 2, 2, 4, 8, 8]),
         b'+' => rows([0, 2, 2, 15, 2, 2, 0]),
+        b'%' => rows([9, 10, 2, 4, 4, 5, 9]),
+        b'<' => rows([1, 2, 4, 8, 4, 2, 1]),
+        b'=' => rows([0, 0, 15, 0, 15, 0, 0]),
         b'_' => rows([0, 0, 0, 0, 0, 0, 15]),
         _ => 0,
     }
@@ -232,27 +235,34 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         CHARGER_PAGE => (b"CHARGER", VOLTS),
         _ => (b"GRAPH", WATTS),
     };
-    p.text(8, 8, title, 2, color);
+    // The selected title and neighboring color tabs follow the KWS layout.
+    // Keep the uncalibrated indicator visible on the square T3P display.
+    let title_width = title.len() * 10 + 8;
+    p.rect(8, 6, title_width, 18, color);
+    p.text(12, 8, title, 2, BG);
     let pd_tabs = view.pd_profiles.is_some();
     let tabs = if pd_tabs {
         PD_PAGE_COUNT
     } else {
         PROFILES_PAGE
     };
-    let (stride, width) = if pd_tabs && cfg!(feature = "pd-charger") {
-        (6, 4)
-    } else if pd_tabs {
-        (7, 5)
-    } else {
-        (10, 6)
-    };
+    let start = 12 + title_width;
+    let stride = ((178 - start) / tabs as usize).clamp(3, 7);
     for index in 0..tabs {
+        let tab_color = match index {
+            1 | 2 | PROFILES_PAGE => WATTS,
+            3 => VOLTS,
+            EPR_PAGE => PURPLE,
+            #[cfg(feature = "pd-charger")]
+            CHARGER_PAGE => VOLTS,
+            _ => AMPS,
+        };
         p.rect(
-            120 + index as usize * stride,
-            10,
-            width,
-            10,
-            if view.page == index { color } else { GRID },
+            start + index as usize * stride,
+            if view.page == index { 8 } else { 10 },
+            stride - 1,
+            if view.page == index { 14 } else { 10 },
+            tab_color,
         );
     }
     p.text(
@@ -478,7 +488,7 @@ fn spr_rows(p: &mut Strip<'_>, caps: &SourceCaps) {
         if top >= p.top + STRIP_ROWS || top + 20 <= p.top {
             continue;
         }
-        p.rect(8, top, 224, 20, PANEL);
+        p.outline(8, top, 224, 20, GRID);
         let y = top + 3;
         p.text(13, y + 4, &[b'1' + index as u8], 1, MUTED);
         match pdo {
@@ -582,7 +592,7 @@ fn epr_profiles(p: &mut Strip<'_>, pd: &Profiles) {
         if top >= p.top + STRIP_ROWS || top + 25 <= p.top {
             continue;
         }
-        p.rect(8, top, 224, 25, PANEL);
+        p.outline(8, top, 224, 25, GRID);
         let y = top + 5;
         let numbers: [&[u8]; 4] = [b"8", b"9", b"10", b"11"];
         p.text(12, y + 4, numbers[index], 1, MUTED);
@@ -803,7 +813,7 @@ fn graph(p: &mut Strip<'_>, view: &Overview) {
         2,
         color,
     );
-    p.rect(8, 112, 224, 100, PANEL);
+    p.outline(8, 112, 224, 100, color);
     if p.top >= 104 && p.top < 216 {
         let mut digits = [0; 11];
         let label = milli(u64::from(view.graph_max), false, &mut digits);

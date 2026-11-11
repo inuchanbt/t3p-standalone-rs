@@ -65,7 +65,7 @@ pub struct Overview {
     #[cfg(feature = "pd-charger")]
     charger: ChargerCapture,
     #[cfg(feature = "pd-charger")]
-    charger_offer: bool,
+    charger_section: u8,
     #[cfg(feature = "pd-rd-test")]
     rd_test: Option<RdTest>,
     mah: u64,
@@ -96,7 +96,7 @@ impl Overview {
             #[cfg(feature = "pd-charger")]
             charger: ChargerCapture::new(),
             #[cfg(feature = "pd-charger")]
-            charger_offer: false,
+            charger_section: 0,
             #[cfg(feature = "pd-rd-test")]
             rd_test: None,
             mah: 0,
@@ -173,9 +173,13 @@ impl Overview {
     }
 
     #[cfg(feature = "pd-charger")]
-    pub fn set_charger(&mut self, capture: ChargerCapture, offer: bool) {
+    pub fn set_charger(&mut self, capture: ChargerCapture, section: u8) {
         self.charger = capture;
-        self.charger_offer = offer && capture.has_offer();
+        self.charger_section = if capture.has_offer() {
+            section.min(pd::charger::CHARGER_SECTIONS - 1)
+        } else {
+            0
+        };
     }
 
     pub fn set_page(&mut self, page: u32) {

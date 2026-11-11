@@ -369,31 +369,46 @@ def main():
                 charger_frame(replies[0], 1)
                 charger_frame(replies[1], 2)
                 cpu.call(symbols["meter_charger_vbus"], [5085])
-                cpu.call(symbols["meter_charger_status"], [5])
+                for phase, state in ((3, 5), (4, 8), (5, 6), (6, 5)):
+                    cpu.call(symbols["meter_charger_query_status"], [phase, state])
+                cpu.call(symbols["meter_charger_status"], [24])
                 check_charger("no-ext")
                 cpu.call(symbols["meter_next_page"], [])
                 check_charger("offer")
+                for _ in range(7):
+                    cpu.call(symbols["meter_next_page"], [])
+                check_charger("partial")
                 cpu.call(symbols["meter_charger_clear"], [])
                 check_charger("ready")
                 charger_frame(frame, 0)
                 for phase, reply in enumerate(replies, 1):
+                    if phase >= 3:
+                        # Only a CRC-valid source GoodCRC for this query ID counts.
+                        from zlib import crc32
+                        header = 0x0181 | ((phase - 2) << 9)
+                        body = header.to_bytes(2, "little")
+                        goodcrc = b"\xe0" + body + crc32(body).to_bytes(4, "little")
+                        charger_frame(goodcrc[:-1] + bytes([goodcrc[-1] ^ 1]), phase, 6)
+                        charger_frame(goodcrc, phase, 7)
                     if phase == 3:
-                        # Only the source's GoodCRC for our query (ID 1) counts.
                         charger_frame(bytes.fromhex("e0 a1 07 f4 0a a1 68"), phase, 0)
                         charger_frame(bytes.fromhex("e0 81 02 d9 da 4f 8d"), phase, 0)
-                        charger_frame(bytes.fromhex("e0 a1 03 ed ce cc 6e"), phase, 6)
-                        charger_frame(bytes.fromhex("e0 a1 03 ed ce cc 6f"), phase, 7)
                     charger_frame(reply, phase)
+                    if phase >= 3:
+                        cpu.call(symbols["meter_charger_query_status"], [phase, 12])
                 cpu.call(symbols["meter_charger_vbus"], [5085])
                 cpu.call(symbols["meter_charger_status"], [2])
                 check_charger("result")
-                cpu.call(symbols["meter_next_page"], [])
-                check_charger("offer")
+                for page in ("offer", "identity", "peaks", "power", "status", "limits", "info", "queries"):
+                    cpu.call(symbols["meter_next_page"], [])
+                    check_charger(page)
+                if cpu.call(symbols["meter_double_press"], [])[0] != 5:
+                    raise ValueError("Pi32v2 CHARGER detail view did not allow rescan")
                 cpu.call(symbols["meter_long_press"], [])
                 cpu.call(symbols["meter_snapshot"], [])
                 if render() != (out / "preview-measurement.ppm").read_bytes():
                     raise ValueError("Pi32v2 CHARGER long press did not exit without resetting readings")
-                print("Pi32v2 CHARGER scan, offer fallback, recapture and exit match")
+                print("Pi32v2 CHARGER four queries, nine pages, partial results, recapture and exit match")
         cpu.call(symbols["meter_live_sample"], [1100, 0, 0, 0])
         cpu.call(symbols["meter_snapshot"], [])
         if render() != (out / "preview-missing.ppm").read_bytes():

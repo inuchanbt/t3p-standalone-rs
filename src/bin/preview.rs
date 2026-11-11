@@ -240,12 +240,20 @@ fn main() -> io::Result<()> {
         0
     });
     #[cfg(feature = "pd-charger")]
-    if let Some((state, offer)) = flags.iter().find_map(|flag| match flag.to_str()? {
-        "--charger-ready" => Some((0, false)),
-        "--charger-armed" => Some((1, false)),
-        "--charger-result" => Some((2, false)),
-        "--charger-offer" => Some((2, true)),
-        "--charger-no-ext" => Some((5, false)),
+    if let Some((state, section)) = flags.iter().find_map(|flag| match flag.to_str()? {
+        "--charger-ready" => Some((0, 0)),
+        "--charger-armed" => Some((1, 0)),
+        "--charger-result" => Some((2, 0)),
+        "--charger-offer" => Some((2, 1)),
+        "--charger-identity" => Some((2, 2)),
+        "--charger-peaks" => Some((2, 3)),
+        "--charger-power" => Some((2, 4)),
+        "--charger-status" => Some((2, 5)),
+        "--charger-limits" => Some((2, 6)),
+        "--charger-info" => Some((2, 7)),
+        "--charger-queries" => Some((2, 8)),
+        "--charger-no-ext" => Some((24, 0)),
+        "--charger-partial" => Some((24, 8)),
         _ => None,
     }) {
         let mut scan = ChargerCapture::new();
@@ -259,7 +267,7 @@ fn main() -> io::Result<()> {
                 scan.record(&parse(include_str!("../../tests/pd_offer.hex")), 0),
                 1
             );
-            let replies = if state == 5 { 2 } else { 3 };
+            let replies = if state == 24 { 2 } else { 6 };
             for (index, line) in include_str!("../../tests/charger_scan.hex")
                 .lines()
                 .take(replies)
@@ -268,11 +276,16 @@ fn main() -> io::Result<()> {
                 assert_eq!(scan.record(&parse(line), index as u32 + 1), 1);
             }
             scan.set_vbus(5085);
+            if state == 24 {
+                for (phase, state) in [(3, 5), (4, 8), (5, 6), (6, 5)] {
+                    scan.set_query_state(phase, state);
+                }
+            }
         }
         scan.set_state(state);
         view.set_pd_profiles(0, 0, None);
         view.set_page(CHARGER_PAGE);
-        view.set_charger(scan, offer);
+        view.set_charger(scan, section);
     }
     view.set_graph_window(if flags.iter().any(|x| x == "--window2") {
         1

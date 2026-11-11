@@ -46,7 +46,7 @@
 #define DETACH_MS 350u
 
 enum { IRQ_A, IRQ_B, LIVE0, LIVE1, IRQ, STATUS_COUNT };
-enum { OFFER, ACCEPT, PS_RDY, EXTENDED };
+enum { OFFER, ACCEPT, PS_RDY, EXTENDED, GET_STATUS, SOURCE_INFO, REVISION };
 enum { IGNORE, MATCH, REJECT, WAIT, UNSUPPORTED, LINK_RESET, INVALID, QUERY_ACK };
 
 uint32_t meter_charger_frame(const uint8_t *, uint32_t, uint32_t phase);
@@ -118,11 +118,11 @@ static enum t3p_charger_state receive(struct t3p_bsp *board, struct t3p_meter_bu
                                       enum t3p_charger_state expired)
 {
     uint32_t start = t3p_bsp_millis(board);
-    unsigned needs_ack = phase == ACCEPT || phase == EXTENDED;
+    unsigned needs_ack = phase == ACCEPT || phase >= EXTENDED;
     unsigned matched = 0, rx_acked = 0, ignored = 0;
     do {
         uint8_t status[STATUS_COUNT];
-        enum t3p_charger_state state = read_status(bus, status, phase != EXTENDED);
+        enum t3p_charger_state state = read_status(bus, status, phase < EXTENDED);
         if (state != CHARGER_READY) return state;
         link->tx_acked |= status[IRQ_A] & I_TXSENT;
         rx_acked |= status[IRQ_B] & I_GCRCSENT;
@@ -139,9 +139,9 @@ static enum t3p_charger_state receive(struct t3p_bsp *board, struct t3p_meter_bu
             if (result == QUERY_ACK) link->tx_acked = 1;
             switch (result) {
             case MATCH: matched = 1; break;
-            case REJECT: return CHARGER_REJECTED;
-            case WAIT: return CHARGER_WAIT;
-            case UNSUPPORTED: return CHARGER_UNSUPPORTED;
+            case REJECT: link->tx_acked = 1; return CHARGER_REJECTED;
+            case WAIT: link->tx_acked = 1; return CHARGER_WAIT;
+            case UNSUPPORTED: link->tx_acked = 1; return CHARGER_UNSUPPORTED;
             case LINK_RESET: return CHARGER_RESET;
             case INVALID: return CHARGER_RX_ERROR;
             default:
@@ -150,7 +150,7 @@ static enum t3p_charger_state receive(struct t3p_bsp *board, struct t3p_meter_bu
                 continue;
             }
         }
-        /* A validated reply completes the final query even without TXSENT. */
+        /* A validated reply proves delivery even without the TXSENT latch. */
         if (matched && (phase != OFFER || rx_acked) && (phase != ACCEPT || link->tx_acked))
             return CHARGER_READY;
         if (t3p_bsp_delay(board, 1)) return CHARGER_TIMER;
@@ -168,7 +168,9 @@ static enum t3p_charger_state wait_sink_tx_ok(struct t3p_bsp *board, struct t3p_
         enum t3p_charger_state state = check_vbus(bus, 1);
         if (state != CHARGER_READY) return state;
         uint8_t status[STATUS_COUNT];
-        state = read_status(bus, status, 1);
+        /* Late retry latches must not invalidate an already validated reply.
+         * The next transmit has its own acknowledgement/response deadline. */
+        state = read_status(bus, status, 0);
         if (state != CHARGER_READY) return state;
         if ((status[LIVE0] & (ACTIVITY | 3)) == SINK_TX_OK &&
             (status[LIVE1] & (RX_EMPTY | TX_EMPTY)) == (RX_EMPTY | TX_EMPTY))
@@ -204,15 +206,34 @@ static enum t3p_charger_state exchange(struct t3p_bsp *board, struct t3p_meter_b
         return state == CHARGER_READY ? CHARGER_PD2 : state;
     }
 
-    state = wait_sink_tx_ok(board, bus);
-    if (state != CHARGER_READY) return state;
-    link = (struct pd_link){0};
-    /* Message ID 1 after the acknowledged Request, Get_Source_Cap_Extended. */
-    if (t3p_pd_sop_tx(bus, (1u << 9) | revision | 17u, 0, 0)) return CHARGER_IO;
-    state = receive(board, bus, &link, EXTENDED, REPLY_MS, CHARGER_NO_EXT);
-    if (state != CHARGER_READY) return state;
-    /* Allow the PHY to finish its automatic GoodCRC before disconnecting. */
-    return t3p_bsp_delay(board, 1) ? CHARGER_TIMER : CHARGER_COMPLETE;
+    const uint8_t queries[] = {17, 18, 23, 24};
+    unsigned partial = 0;
+    for (unsigned query = 0; query < sizeof(queries); ++query) {
+        unsigned phase = EXTENDED + query;
+        state = wait_sink_tx_ok(board, bus);
+        if (state != CHARGER_READY) {
+            meter_charger_query_status(phase, state);
+            return state;
+        }
+        link = (struct pd_link){0};
+        /* IDs 1..4 follow the acknowledged PDO-1 Request (ID 0). */
+        if (t3p_pd_sop_tx(bus, ((query + 1u) << 9) | revision | queries[query], 0, 0)) {
+            meter_charger_query_status(phase, CHARGER_IO);
+            return CHARGER_IO;
+        }
+        state = receive(board, bus, &link, phase, REPLY_MS, CHARGER_NO_EXT);
+        meter_charger_query_status(phase, state);
+        /* Optional requests may be unsupported or acknowledged without a reply.
+         * Do not advance MessageID after an unacknowledged transmit. */
+        if (state != CHARGER_READY && state != CHARGER_REJECTED &&
+            state != CHARGER_WAIT && state != CHARGER_UNSUPPORTED &&
+            !(state == CHARGER_NO_EXT && link.tx_acked))
+            return state;
+        partial |= state != CHARGER_READY;
+        /* Finish automatic GoodCRC before the next query or detaching. */
+        if (t3p_bsp_delay(board, 1)) return CHARGER_TIMER;
+    }
+    return partial ? CHARGER_PARTIAL : CHARGER_COMPLETE;
 }
 
 enum t3p_charger_state t3p_charger_scan(struct t3p_bsp *board, struct t3p_meter_bus *bus)

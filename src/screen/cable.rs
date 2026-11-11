@@ -130,7 +130,7 @@ fn cc_voltage(code: u8) -> [u8; 6] {
 }
 
 fn row(p: &mut Strip<'_>, y: usize, label: &[u8], value: &[u8], color: u16) {
-    p.rect(8, y, 224, 17, PANEL);
+    p.outline(8, y, 224, 17, GRID);
     p.text(12, y + 5, label, 1, MUTED);
     let (offset, scale) = if value.len() > 15 { (5, 1) } else { (2, 2) };
     p.text(81, y + offset, value, scale, color);
