@@ -11,6 +11,7 @@ static struct t3p_bsp *bus;
 static struct t3p_flash_reader reader;
 static volatile uint8_t dma[64] __attribute__((aligned(4)));
 static uint8_t answer[64],configured,stage,address_pending,address_value;
+static uint8_t tx_data[64],tx_length,tx_pending;
 static uint32_t resets,stalls;
 static uint32_t setups,setup_word0,setup_word1,last_csr,last_count,bus_events;
 void meter_flash_reader_render(const uint32_t words[17],uint32_t top,uint16_t pixels[1920]);
@@ -18,13 +19,22 @@ static uint32_t rd(uint32_t a){return bus->io.read32(bus->io.context,a);}
 static void wr(uint32_t a,uint32_t v){bus->io.write32(bus->io.context,a,v);}
 static void change(uint32_t a,uint32_t clear,uint32_t set){wr(a,(rd(a)&~clear)|set);}
 static unsigned word(const uint8_t *p){return p[0]|(unsigned)p[1]<<8;}
-static void stall(void){wr(CSR,0x60);stage=address_pending=0;stalls++;}
+static void stall(void){wr(CSR,0x60);stage=address_pending=tx_pending=0;stalls++;}
+static void kick_tx(void)
+{
+    if(!tx_pending||(rd(CSR)&2))return;
+    for(unsigned i=0;i<tx_length;i++)dma[i]=tx_data[i];
+    wr(USB+8,tx_length);wr(CSR,0x0a);tx_pending=0;
+}
 static void send(const uint8_t *p,unsigned n)
 {
-    for(unsigned i=0;i<n;i++)dma[i]=p[i];
-    wr(USB+8,n);wr(CSR,0x4a);stage=2;
+    /* Match SDK usb_control_transfer -> ep0_stage_tx: release the received
+     * packet BEFORE replacing the shared RX/TX DMA buffer or arming CNT.
+     * Combining service-RX and start-TX after CNT (V1/V2) is not equivalent. */
+    for(unsigned i=0;i<n;i++)tx_data[i]=p[i];
+    wr(CSR,0x40);stage=2;tx_length=(uint8_t)n;tx_pending=1;kick_tx();
 }
-static const uint8_t device[]={18,1,0,2,0,0,0,64,0x83,0x04,0x50,0x57,0x02,0x09,1,2,0,1};
+static const uint8_t device[]={18,1,0,2,0,0,0,64,0x83,0x04,0x50,0x57,0x03,0x09,1,2,0,1};
 static const uint8_t report[]={0x06,0x31,0xff,0x09,1,0xa1,1,0x15,0,0x26,0xff,0,
                              0x75,8,0x95,64,0x09,1,0xb1,2,0xc0};
 static const uint8_t configuration[]={9,2,34,0,1,1,0,0x80,50,
@@ -32,7 +42,7 @@ static const uint8_t configuration[]={9,2,34,0,1,1,0,0x80,50,
     7,5,0x81,3,64,0,10};
 static void reset(void)
 {
-    configured=stage=address_pending=address_value=0;resets++;
+    configured=stage=address_pending=address_value=tx_pending=0;resets++;
     wr(SIE,0);wr(USB+0x1c,(uint32_t)(uintptr_t)dma);
     /* EP1 is advertised for HID compatibility; it always NAKs. Only EP0
      * feature reports are used, and its DMA pointer remains in static RAM. */
@@ -46,7 +56,7 @@ static void setup(const uint8_t q[8])
     setup_word0=(uint32_t)q[0]|(uint32_t)q[1]<<8|(uint32_t)q[2]<<16|(uint32_t)q[3]<<24;
     setup_word1=(uint32_t)q[4]|(uint32_t)q[5]<<8|(uint32_t)q[6]<<16|(uint32_t)q[7]<<24;
     unsigned type=q[0],req=q[1],value=word(q+2),index=word(q+4),length=word(q+6);
-    stage=address_pending=0;
+    stage=address_pending=tx_pending=0;
     if(type==0x80&&req==6&&index==0) {
         const uint8_t *p=0;unsigned n=0;uint8_t string[64];
         if(value==0x100){p=device;n=sizeof device;}
@@ -55,7 +65,7 @@ static void setup(const uint8_t q[8])
         if(p){send(p,length<n?length:n);return;}
     }
     if(type==0x80&&req==6&&(index==0||index==0x409)&&((value==0x301)||(value==0x302))) {
-        const char *s=value==0x301?"T3P Experimental":"T3P Flash Reader V2";
+        const char *s=value==0x301?"T3P Experimental":"T3P Flash Reader V3";
         uint8_t p[64]={0,3};unsigned n=2;
         while(*s&&n<62){p[n++]=(uint8_t)*s++;p[n++]=0;}p[0]=(uint8_t)n;
         send(p,length<n?length:n);return;
@@ -92,20 +102,20 @@ static void poll(void)
     bus_events|=intr;
     (void)rd(SIE+0xc);(void)rd(SIE+0x10);(void)rd(SIE+0x14);
     if(intr&4){reset();return;}
-    if(intr&0x20){configured=stage=address_pending=0;return;}
+    if(intr&0x20){configured=stage=address_pending=tx_pending=0;return;}
     uint32_t csr=rd(CSR);
     if(csr)last_csr=csr;
-    if(csr&4){wr(CSR,0);stage=address_pending=0;return;}
-    if(csr&0x10){wr(CSR,0x80);stage=address_pending=0;csr=rd(CSR);}
+    if(csr&4){wr(CSR,0);stage=address_pending=tx_pending=0;return;}
+    if(csr&0x10){wr(CSR,0x80);stage=address_pending=tx_pending=0;csr=rd(CSR);}
     if(address_pending&&(tx&1)&&!(csr&2)) {wr(SIE,address_value);address_pending=0;}
-    if(!(csr&1))return;
+    if(!(csr&1)){kick_tx();return;}
     unsigned n=rd(SIE+0x58)&0x7f;
     last_count=n;
     if(stage==1) {
         if(n!=64){stall();return;}
         uint8_t q[64];for(unsigned i=0;i<64;i++)q[i]=dma[i];
         t3p_flash_reader_request(&reader,q,answer);wr(CSR,0x48);stage=0;
-    } else if(stage==2&&n==0){wr(CSR,0x40);stage=0;}
+    } else if(stage==2&&n==0){wr(CSR,0x40);stage=tx_pending=0;}
     else if(n==8) {uint8_t q[8];for(unsigned i=0;i<8;i++)q[i]=dma[i];setup(q);}
     else stall();
 }

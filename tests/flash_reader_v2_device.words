@@ -1,0 +1,7 @@
+# User photographs received 2026-11-12; no flash acquisition succeeded.
+# STATUS: mapping, configuration, requests, errors, resets, stalls, physical base, length
+STATUS 00000001 00000000 00000001 00000000 00000005 00000000 00005000 001FA000
+# USB: setups, setup word0, setup word1, last CSR0, last count, CON0, bus events, POWER
+USB 00000004 01000680 00400000 0000000A 00000008 0000283D 00000004 00000070
+# Last SETUP bytes: 80 06 00 01 00 00 40 00 (GET_DESCRIPTOR DEVICE, wLength=64).
+# Resets includes one software startup reset. Requests includes one startup INFO.

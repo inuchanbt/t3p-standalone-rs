@@ -29,16 +29,32 @@ def main():
     for address,raw,_ in evidence:
         b=bytes.fromhex(raw);at=16+address-0x102600
         assert boot[at:at+len(b)]==b,hex(address) # 16-byte loader file header
+    app=(base/'local/unpacked/T3P Firmware Version 3.0.3.bin/files/app.bin').read_bytes()
+    assert hashlib.sha256(app).hexdigest()=='ecd03d659db7c961585ffd1e090a7325a82433a1c270f5964f268ddb5c1bdc0c'
+    tx_evidence=[(0xc0cb1fc,'40 ea 40 20','service RX before entering the TX helper'),
+                 (0xc0cb206,'b6 88','branch to TX dispatch after RX service'),
+                 (0xc0cacda,'bf ea 2c ff','call TX helper'),
+                 (0xc0cab38,'c6 ff 44 20 fd 00','TX helper CSR0 base'),
+                 (0xc0cab42,'51 e8 30 0a','defer while TX ready is set'),
+                 (0xc0cab80,'f5 62','arm EP0 byte count after payload copy'),
+                 (0xc0cab9e,'40 ea 0a 60','start final TX packet separately from RX service')]
+    for address,raw,_ in tx_evidence:
+        b=bytes.fromhex(raw);at=address-0xc000100
+        assert app[at:at+len(b)]==b,hex(address)
+    assert 0xc0cb206+2-0x530==0xc0cacd8
+    assert 0xc0cacda+4-0x1a8==0xc0cab36
     report=dict(status='OFFLINE SOURCE EVIDENCE; reader USB enumeration and CPU mapping reads NOT device-verified',
                 stock_boot_sha256=hashlib.sha256(boot).hexdigest(),
                 sdk_cpu_sha256=hashlib.sha256(cpu).hexdigest(),
                 instructions=[dict(address=hex(a),bytes=b,meaning=m) for a,b,m in evidence],
-                sdk_research_members=['usb.c.o','usb_phy.c.o'],sdk_objects_linked=False,
+                stock_app_sha256=hashlib.sha256(app).hexdigest(),
+                tx_order_instructions=[dict(address=hex(a),bytes=b,meaning=m) for a,b,m in tx_evidence],
+                sdk_research_members=['usb.c.o','usb_phy.c.o','usb_setup.c.o'],sdk_objects_linked=False,
                 flash_program_erase_interface=False,raw_spi_commands=False,
                 usb_irq_mode='polling, CPU IRQs remain disabled',
                 inherited_clock_configuration=True)
     out=ROOT/'build/flash-reader/source-evidence.json';out.parent.mkdir(parents=True,exist_ok=True)
     out.write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
-    print(f'Verified {len(evidence)} stock USB instructions and pinned SDK archive; no device access')
+    print(f'Verified {len(evidence)} boot USB and {len(tx_evidence)} app TX instructions plus dispatch targets; no device access')
 
 if __name__=='__main__':main()

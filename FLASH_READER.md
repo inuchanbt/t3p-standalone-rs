@@ -1,4 +1,4 @@
-# Read-only flash view trial V2 / 読み取り専用取得版
+# Read-only flash view trial V3 / 読み取り専用取得版
 
 This firmware adds a polling USB HID feature-report transport and a bounded
 CPU-mapped flash reader. **Hardware enumeration and acquisition are pending
@@ -11,8 +11,8 @@ mapping; it never changes SFC/cache/PLL settings or issues SPI commands.
 
 ## Device trial
 
-Candidate: `build/flash-reader/T3P_RUST_FLASH_READER_V2_3.0.3.bin`.
-Use the existing firmware update procedure. Startup shows **FLASH READER V2**.
+Candidate: `build/flash-reader/T3P_RUST_FLASH_READER_V3_3.0.3.bin`.
+Use the existing firmware update procedure. Startup shows **FLASH READER V3**.
 This is a dedicated acquisition application: measurement/PD routines are not
 started. Disconnect power to stop it; restore the earlier SYSTEM/preflight
 image through the existing updater when finished.
@@ -33,7 +33,7 @@ py flash_read.py --output build/flash-reader/t3p-device.mapped.bin
 ```
 
 The tool finds exactly one HID with stock VID/PID 0483:5750 **and** product
-string `T3P Flash Reader V2`. It refuses the stock updater/normal application
+string `T3P Flash Reader V3`. It refuses the stock updater/normal application
 and multiple matching devices. This is a local experimental identity, not a
 newly assigned public VID/PID. No USB driver replacement is required.
 
@@ -77,7 +77,8 @@ flash read. No raw SPI workaround or guessed address is enabled on failure.
   Device initialization follows stock-loader USB pin setup and pinned BR35
   SDK register definitions. Interrupts remain disabled and the driver polls.
 - `flash_reader_source_evidence.py`: verifies stock boot and SDK archive
-  hashes plus 16 stock USB instructions. SDK objects were inspected locally;
+  hashes plus 16 boot USB and 7 app TX instructions and dispatch targets.
+  SDK objects were inspected locally;
   none are linked or redistributed. Clock configuration is inherited, so
   actual clock/PHY operation remains a device-test dependency.
 - `tests/check_flash_reader.py`: C protocol/bounds/init/USB-control tests,
@@ -91,7 +92,7 @@ cargo build --offline --features flash-reader --bin preview
 python flash_reader_source_evidence.py
 python build.py --flash-reader
 python preview_refs.py --flash-reader --preview PATH_TO_PREVIEW
-python pack_demo.py --build-dir build/flash-reader --output-name T3P_RUST_FLASH_READER_V2_3.0.3.bin
+python pack_demo.py --build-dir build/flash-reader --output-name T3P_RUST_FLASH_READER_V3_3.0.3.bin
 ```
 
 Packaging compares ready/locked UI frames and the linked Pi32v2 native
@@ -145,3 +146,37 @@ Independent unpacking passed all four CRC checks with the boot prefix and
 
 V2 image: 1,540,096 bytes. SHA-256:
 `cc1ecf8337ed79f866b13f42ce16db07721c8c53491e41491b1d4fa72af3f2e8`.
+
+## V2 device evidence and V3 TX ordering correction
+
+Windows again reported device-descriptor request failure. The two user photos
+are transcribed in `tests/flash_reader_v2_device.words`: five reset-handler
+calls (one startup), four SETUPs, no configuration. The last SETUP is
+`80 06 00 01 00 00 40 00`: GET_DESCRIPTOR DEVICE with wLength 64. CSR0 last
+read 0x0A, received count 8, USB CON0 0x283D, bus events 4 and POWER 0x70.
+V2 therefore established reception of host resets and valid SETUP packets;
+it did not establish successful IN data transfer. No flash data was acquired.
+
+The stock app services RX with CSR0=0x40 at 0x0C0CB1FC, then dispatches to
+its TX helper at 0x0C0CAB36. The helper checks TX-ready, copies the payload,
+arms EP0_CNT, and separately writes CSR0=0x0A. V1/V2 instead replaced the
+shared DMA buffer and armed CNT while RX was held, then combined RX service
+and TX start with CSR0=0x4A. V3 follows the stock ordering. A private pending
+copy defers transmission while TX is busy; reset, stall, setup abort or status
+completion cancels a deferred response.
+
+The host USB model now refuses modifying the DMA contents or arming CNT
+before RX is released and rejects combining RX service with TX start.
+It checks busy-TX deferral and reset/status cancellation. These tests pass
+with V3's implementation; they do not prove physical IN completion.
+Product string and device revision identify V3; wire protocol remains V1.
+V3 enumeration and acquisition need a new on-device trial.
+
+V3 offline validation passed: 38 Rust tests, both C reader/USB executables,
+4 Python acquisition tests, pinned stock-source checks, three Pi32v2 UI
+frames and the native protocol/mapped-byte checks. The packaged image passed
+independent unpacking and all four CRC checks; the boot prefix and 44 other
+files remained unchanged.
+
+V3 image: 1,540,096 bytes. SHA-256:
+`e20639519a67a653c0ea61f2f5ae5ae8d18f5d395100afbde7fb4335e5ae8872`.

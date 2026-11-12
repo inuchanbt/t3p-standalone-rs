@@ -7,7 +7,7 @@ pub fn render(words: &[u32; 17], top: usize, pixels: &mut [u16; SIDE * STRIP_ROW
     if top >= SIDE { return; }
     let mut p=Strip { pixels, top };
     let diagnostic=words[16]!=0;
-    p.text(8,8,b"FLASH READER V2",2,AMPS);
+    p.text(8,8,b"FLASH READER V3",2,AMPS);
     p.text(8,30,if diagnostic {b"USB DIAGNOSTICS  2/2"} else {b"CPU MAPPED VIEW  1/2"},1,VOLTS);
     let labels:[&[u8];8]=if diagnostic {
         [b"SETUP COUNT",b"SETUP WORD0",b"SETUP WORD1",b"LAST CSR0",b"LAST COUNT0",b"USB CON0",b"BUS EVENTS",b"USB POWER"]
