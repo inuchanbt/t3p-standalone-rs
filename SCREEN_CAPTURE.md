@@ -170,3 +170,18 @@ to authorize writes. No writable partition is established by these photos
 alone. Remaining work is partition ownership/raw access validation and the
 native flash/USB implementations. No new firmware was generated for this
 evidence-only update.
+
+## Partition ownership investigation
+
+`python capture_partition_audit.py` reconciles the photographed mapping with
+the stock 3.0.3 directory. Its output is an investigation report, never a
+write authorization. The directory reserves VM with offset 1,540,096 and
+length 499,712 bytes, plus BTIF and EXIF entries. Thus the space after the
+distributed image cannot be assumed blank or disposable. Absolute versus
+app-relative interpretation remains explicitly unresolved in the report.
+
+An application-internal capture area would also require an explicit container
+and boot-validation design: modifying bytes covered by the application CRC
+cannot simply be assumed bootable. Neither region is enabled for writes.
+A full device flash backup, if available, is useful evidence beyond the
+distributed recovery image; blank bytes alone would not establish ownership.
