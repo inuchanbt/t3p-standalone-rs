@@ -7,6 +7,7 @@
 #include <string.h>
 #define T3P_CAPTURE_STORE_HOST 1
 #include "../native/t3p_capture_store.c"
+#include "puya_p25q16h_sfdp.h"
 static uint8_t flash[0x200000],directory[256],reserved_header[32],sfdp_data[128];
 /* Literal independent addresses from BR35 JL_SPI0/JL_PORTF definitions. */
 #define MODEL_SPI 0xfe0700u
@@ -19,9 +20,11 @@ static uint8_t data[256];
 static struct t3p_bsp model_clock;
 static uint32_t ticks;
 static unsigned model_port;
+static unsigned busy_after_id,identified;
 static void finish_command(void)
 {
     if(command==6){wel=1;enables++;}
+    if(command==0x9f)identified=1;
     if(command==0x20||command==2){
         assert(wel);wel=0;
         unsigned n=command==0x20?4096:program_bytes;
@@ -37,14 +40,15 @@ static void finish_command(void)
 }
 uint32_t capture_mmio_read(uint32_t at)
 {
-    if(at==MODEL_SPI)return regs_spi[0]|0x8000;
+    if(at==MODEL_SPI)return (regs_spi[0]|0x8000)&~(busy_after_id==3&&command==0x5a?0x8000u:0u);
     if(at>=MODEL_SPI&&at<=MODEL_SPI+20)return regs_spi[(at-MODEL_SPI)/4];
     if(at==MODEL_GPIO+4)return gpio_out;
     if(at==MODEL_GPIO+8)return gpio_dir;
-    if(at==SFC)return sfc_con;
+    if(at==SFC)return sfc_con|(busy_after_id==2&&identified?0x80000000u:0u);
     if(at==SFC+16)return 0xf4005000;
     if(at==SFC+4)return 0x18;
-    if(at==SFC+0x24||at==0xffe400)return 0;
+    if(at==SFC+0x24)return 0;
+    if(at==0xffe400)return busy_after_id==1&&identified?0x80000000u:0;
     if(at==0xfe1104)return model_port?2:0;
     if(at==0xfd0604){ticks+=1000;return ticks&65535;}
     abort();
@@ -57,7 +61,12 @@ void capture_mmio_write(uint32_t at,uint32_t value)
         gpio_out=value;return;
     }
     if(at==MODEL_GPIO+8){gpio_dir=value;return;}
-    if(at==SFC){sfc_con=value|0x40000000;return;}
+    if(at==SFC){
+        /* The reference resumes bit 1, then bit 0, in separate writes. */
+        assert((sfc_con&3)||!(value&1));
+        /* Busy is read-only; a read/modify/write cannot latch it forever. */
+        sfc_con=(value&~0x80000000u)|0x40000000;return;
+    }
     assert(at>=MODEL_SPI&&at<=MODEL_SPI+20);regs_spi[(at-MODEL_SPI)/4]=value;
     if(at!=MODEL_SPI+8)return;
     assert((regs_spi[0]&1)&&!(gpio_out&(model_port?8:1))&&!(sfc_con&3));transfers++;
@@ -89,7 +98,15 @@ static void setup(void)
     memset(sfdp_data,0,sizeof sfdp_data);memcpy(sfdp_data,"SFDP",4);sfdp_data[5]=1;
     sfdp_data[10]=1;sfdp_data[11]=11;sfdp_data[12]=32;sfdp_data[15]=255;
     sfdp_data[36]=sfdp_data[37]=sfdp_data[38]=255;sfdp_data[60]=12;sfdp_data[61]=0x20;sfdp_data[72]=0x80;
-    protected_flash=wel=0;erases=enables=0;
+    protected_flash=wel=busy_after_id=identified=0;erases=enables=0;
+    id_bytes[0]=0xef;id_bytes[1]=0x40;id_bytes[2]=0x15;
+}
+static void legacy_setup(void)
+{
+    setup();id_bytes[0]=0x85;id_bytes[1]=0x60;
+    memset(sfdp_data,255,sizeof sfdp_data);
+    memcpy(sfdp_data,puya_header,sizeof puya_header);
+    memcpy(sfdp_data+0x30,puya_bfpt,sizeof puya_bfpt);
 }
 int main(int argc,char **argv)
 {
@@ -97,6 +114,7 @@ int main(int argc,char **argv)
     assert(fread(directory,1,256,f)==256);assert(fread(reserved_header,1,32,f)==32);fclose(f);
     setup();assert(!t3p_capture_store_init(&model_clock));assert(!erases&&!enables);
     assert(t3p_capture_jedec==0xef4015&&t3p_capture_sfdp==0x50444653);
+    assert(!t3p_capture_diagnostics[0]&&!t3p_capture_diagnostics[1]);
     unsigned before=transfers;uint8_t check[300];
     assert(t3p_capture_store_program(T3P_CAPTURE_BYTES-1,check,2));
     assert(t3p_capture_store_read(UINT32_MAX,check,1));assert(transfers==before);
@@ -118,6 +136,29 @@ int main(int argc,char **argv)
     /* Unknown SFDP and corrupt partition descriptors never authorize writes. */
     setup();sfdp_data[36]=0;assert(t3p_capture_store_init(&model_clock));assert(t3p_capture_store_prepare());assert(!enables&&!erases);
     setup();directory[8]^=1;assert(t3p_capture_store_init(&model_clock));assert(t3p_capture_store_prepare());assert(!enables&&!erases);directory[8]^=1;
+    /* Reproduce the observed V1 fields without treating the absent signature
+     * as a recognized chip. Diagnose transfer failure separately from zeros. */
+    setup();id_bytes[0]=0x85;id_bytes[1]=0x60;memset(sfdp_data,0,sizeof sfdp_data);
+    assert(t3p_capture_store_init(&model_clock)&&t3p_capture_status==2);
+    assert(t3p_capture_jedec==0x856015&&!t3p_capture_sfdp&&t3p_capture_diagnostics[0]==4);
+    assert(t3p_capture_store_prepare()&&!enables&&!erases);
+    for(unsigned fault=1;fault<=3;fault++){
+        setup();busy_after_id=fault;assert(t3p_capture_store_init(&model_clock));
+        assert(t3p_capture_diagnostics[0]==3&&t3p_capture_diagnostics[1]==fault&&!t3p_capture_sfdp);
+        assert(t3p_capture_store_prepare()&&!enables&&!erases);
+    }
+    /* Accept the exact manufacturer's legacy table; every published byte
+     * and the chip ID remain part of the qualification. No boot writes. */
+    legacy_setup();assert(!t3p_capture_store_init(&model_clock));
+    assert(t3p_capture_diagnostics[2]==9&&t3p_capture_diagnostics[3]==0x30&&!enables&&!erases);
+    assert(!t3p_capture_store_prepare()&&erases==32);
+    for(unsigned i=0;i<sizeof puya_header+sizeof puya_bfpt;i++){
+        legacy_setup();sfdp_data[i<sizeof puya_header?i:i-sizeof puya_header+0x30]^=1;
+        assert(t3p_capture_store_init(&model_clock));
+        assert(t3p_capture_store_prepare()&&!enables&&!erases);
+    }
+    legacy_setup();id_bytes[1]^=1;assert(t3p_capture_store_init(&model_clock));
+    assert(t3p_capture_store_prepare()&&!enables&&!erases);
     /* Protected flash is not globally unlocked; failed erase is an I/O error. */
     setup();assert(!t3p_capture_store_init(&model_clock));protected_flash=1;
     assert(t3p_capture_store_prepare());assert(t3p_capture_status==3&&erases==1);

@@ -24,6 +24,7 @@ uint8_t capture_mapped_read(uint32_t);
 #define SPI 0xfe0700u
 #define GPIO 0xfe1000u
 uint32_t t3p_capture_status=1,t3p_capture_jedec,t3p_capture_sfdp;
+uint32_t t3p_capture_diagnostics[10];
 static uint32_t cs_mask, saved_sfc, saved_spi[3], saved_gpio[2];
 static uint32_t virgin, page_at=~0u;
 static uint8_t page[256];
@@ -55,7 +56,7 @@ static RAM int byte(unsigned value,unsigned receive)
     W(SPI,receive?(R(SPI)|0x1000):(R(SPI)&~0x1000u));
     W(SPI,R(SPI)&~0xc00u);W(SPI+8,value&255);SYNC();
     unsigned timeout=196608;
-    while(!(R(SPI)&0x8000u))if(!--timeout)return -1;
+    while(!(R(SPI)&0x8000u))if(!--timeout){t3p_capture_diagnostics[1]=3;return -1;}
     unsigned result=R(SPI+8)&255;
     W(SPI,R(SPI)|0x1000);W(SPI,R(SPI)&~8u);W(SPI,R(SPI)|0x4000);
     return (int)result;
@@ -68,9 +69,9 @@ static RAM int enter(void)
     /* Drain cache traffic before disabling XIP; IRQs remain disabled by
      * the standalone entry. This firmware never starts the second core. */
     SYNC();unsigned timeout=196608;
-    while(R(0xffe400)&0x80000000u)if(!--timeout)return -1;
+    while(R(0xffe400)&0x80000000u)if(!--timeout){t3p_capture_diagnostics[1]=1;return -1;}
     timeout=196608;
-    while(R(SFC)&0x80000000u)if(!--timeout)return -1;
+    while(R(SFC)&0x80000000u)if(!--timeout){t3p_capture_diagnostics[1]=2;return -1;}
     W(SFC,R(SFC)&~1u);W(SFC,R(SFC)&~2u);
     /* tzspi_init config plus sfc_suspend(1)'s SPI enable bit. */
     W(SPI,0x125021u);W(SPI+20,R(SPI+20)&~4u);W(SPI+4,31);
@@ -80,7 +81,10 @@ static RAM void leave(void)
 {
     cs(1);W(SPI,saved_spi[0]);W(SPI+4,saved_spi[1]);W(SPI+20,saved_spi[2]);
     W(GPIO+4,saved_gpio[0]);W(GPIO+8,saved_gpio[1]);
-    W(SFC,(R(SFC)&~3u)|(saved_sfc&3));SYNC();
+    /* Match the reference sfc_resume: restore bit 1 before bit 0. Do not
+     * combine the two enables into one controller transition. */
+    W(SFC,(R(SFC)&~2u)|(saved_sfc&2));
+    W(SFC,(R(SFC)&~1u)|(saved_sfc&1));SYNC();
     /* Never return into unavailable XIP after a controller fault. */
     while(!(R(SFC)&0x40000000u)){}
 }
@@ -154,6 +158,9 @@ int t3p_capture_store_init(struct t3p_bsp *clock)
 {
     timer_owner=clock;
     t3p_capture_status=1;page_at=~0u;dirty=0;virgin=0;
+    t3p_capture_jedec=t3p_capture_sfdp=0;
+    for(unsigned i=0;i<10;i++)t3p_capture_diagnostics[i]=0;
+    t3p_capture_diagnostics[0]=1;
     if(R(SFC+16)!=0xf4005000u||(R(SFC+4)&1)||R(SFC+0x24))return -1;
     uint8_t h[32];
     if(!mapped_header(0xc000000,h)||get(h+8)!=0x80000||get(h+4)!=0xc000100)return -1;
@@ -173,17 +180,43 @@ int t3p_capture_store_init(struct t3p_bsp *clock)
     }
     cs_mask=(R(0xfe1104)&2)?8:1;
     t3p_capture_status=2;
+    t3p_capture_diagnostics[0]=2;
     uint8_t id[3];if(identify_io(id))return -1;
     t3p_capture_jedec=(uint32_t)id[0]<<16|(uint32_t)id[1]<<8|id[2];
     if(id[0]==0||id[0]==255||id[2]!=0x15)return -1;
-    uint8_t s[64];if(raw_io(0,s,16,1))return -1;
+    t3p_capture_diagnostics[0]=3;
+    uint8_t s[64];if(raw_io(0,s,24,1))return -1;
+    for(unsigned i=0;i<4;i++)t3p_capture_diagnostics[4+i]=get(s+4*i);
     t3p_capture_sfdp=get(s);
-    if(get(s)!=0x50444653u||s[5]!=1||s[8]!=0||s[10]!=1||s[11]<11||s[15]!=255)return -1;
+    t3p_capture_diagnostics[0]=4;
+    if(get(s)!=0x50444653u)return -1;
+    t3p_capture_diagnostics[0]=5;
+    if(s[5]!=1||s[8]!=0||s[10]!=1||s[11]<9||s[15]!=255)return -1;
     uint32_t pt=(uint32_t)s[12]|(uint32_t)s[13]<<8|(uint32_t)s[14]<<16;
-    if(pt>0xffc0||raw_io(pt,s,44,1))return -1;
-    if(get(s+4)!=0xffffffu||((get(s)>>17)&3)>1||((get(s+40)>>4)&15)!=8)return -1;
+    unsigned words=s[11];t3p_capture_diagnostics[2]=words;t3p_capture_diagnostics[3]=pt;
+    /* P25Q16H V2.1 pp.54-56 publishes a nine-DWORD JESD216 table;
+     * DWORD 11 (page size) does not exist. Qualify that exact legacy table
+     * plus the PUYA header and JEDEC ID, never a missing SFDP response. */
+    unsigned legacy=t3p_capture_jedec==0x856015&&s[4]==0&&s[6]==1&&s[7]==255&&
+        s[9]==0&&words==9&&pt==0x30&&get(s+16)==0x03010085u&&get(s+20)==0xff000060u;
+    if(pt>0xffc0||(!legacy&&words<11))return -1;
+    t3p_capture_diagnostics[0]=6;
+    if(raw_io(pt,s,legacy?36:44,1))return -1;
+    t3p_capture_diagnostics[8]=get(s+4);
+    if(!legacy)t3p_capture_diagnostics[9]=get(s+40);
+    t3p_capture_diagnostics[0]=7;
+    if(get(s+4)!=0xffffffu||((get(s)>>17)&3)>1)return -1;
+    t3p_capture_diagnostics[0]=8;
     unsigned erase=0;for(unsigned i=28;i<36;i+=2)if(s[i]==12&&s[i+1]==0x20)erase=1;
     if(!erase)return -1;
+    t3p_capture_diagnostics[0]=9;
+    if(legacy){
+        const uint8_t expected[]={0xe5,0x20,0xf1,0xff,0xff,0xff,0xff,0x00,
+            0x44,0xeb,0x08,0x6b,0x08,0x3b,0x80,0xbb,0xee,0xff,0xff,0xff,
+            0xff,0xff,0x00,0xff,0xff,0xff,0x00,0xff,0x0c,0x20,0x0f,0x52,0x10,0xd8,0x08,0x81};
+        for(unsigned i=0;i<sizeof expected;i++)if(s[i]!=expected[i])return -1;
+    }else if(((get(s+40)>>4)&15)!=8)return -1;
+    t3p_capture_diagnostics[0]=0;
     t3p_capture_status=0;return 0;
 }
 static int bounds(uint32_t at,uint32_t n)

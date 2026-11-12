@@ -35,6 +35,7 @@ class Reader:
     query_magic=b'T3PQ'
     response_magic=b'T3PR'
     view=1
+    metadata_ops=(0,)
     def __init__(self, device):self.device=device;self.sequence=0
     def exchange(self, op, offset=0, length=0):
         self.sequence=(self.sequence+1)&0xffffffff
@@ -46,7 +47,7 @@ class Reader:
                 raw=bytes(self.device.get_feature_report(0,65))
                 if len(raw)!=65 or raw[0]!=0:raise ValueError('Short HID response/report ID')
                 data=decode(raw[1:],offset,self.sequence,self.response_magic,self.view)
-                if len(data)!=(40 if op==0 else length):raise ValueError('Short reader data')
+                if len(data)!=(40 if op in self.metadata_ops else length):raise ValueError('Short reader data')
                 return data
             except (OSError,ValueError) as error:
                 last=error

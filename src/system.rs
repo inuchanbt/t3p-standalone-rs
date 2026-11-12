@@ -5,7 +5,7 @@ pub const SYSTEM_SECTIONS: u8 = 3;
 #[cfg(not(feature = "capture-device"))]
 pub const FIRMWARE_VERSION: &[u8] = b"T3P RS SYSTEM V2";
 #[cfg(feature = "capture-device")]
-pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAPTURE V1";
+pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAPTURE V2";
 pub const BASE_IMAGE_VERSION: &[u8] = b"3.0.3";
 
 /// Native snapshot, matching native/t3p_system.h. Unknown values use flags,

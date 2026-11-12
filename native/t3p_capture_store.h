@@ -8,6 +8,9 @@
 #define T3P_CAPTURE_SLOT 0x20000u
 /* 0 ready; nonzero is a real lock/fault, never an invented success. */
 extern uint32_t t3p_capture_status, t3p_capture_jedec, t3p_capture_sfdp;
+/* Read-only probe record: step, low-level error, BFPT length/pointer,
+ * four SFDP header words, density, page-size word. Zero step means ready. */
+extern uint32_t t3p_capture_diagnostics[10];
 int t3p_capture_store_init(struct t3p_bsp *clock);
 int t3p_capture_store_prepare(void);
 int t3p_capture_store_read(uint32_t offset, uint8_t *out, uint32_t count);

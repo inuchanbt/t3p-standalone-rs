@@ -87,24 +87,27 @@ class Checks(unittest.TestCase):
         wire=(ROOT/'build/capture-device/protocol-fixture.bin').read_bytes()
         info=decode(wire[:64],0,0,b'T3CR',2)
         self.assertEqual(struct.unpack_from('<4I',info),(0x90000,0xc0000,0x20000,6))
-        self.assertEqual(decode(wire[64:],7,9,b'T3CR',2),bytes(range(7,47)))
+        self.assertEqual(decode(wire[64:128],7,9,b'T3CR',2),bytes(range(7,47)))
         for i in range(64):
-            bad=bytearray(wire[64:]);bad[i]^=1
+            bad=bytearray(wire[64:128]);bad[i]^=1
             with self.assertRaises(ValueError):decode(bad,7,9,b'T3CR',2)
-        with self.assertRaises(ValueError):decode(wire[64:],7,10,b'T3CR',2)
-        with self.assertRaises(ValueError):decode(wire[64:],7,9)
+        with self.assertRaises(ValueError):decode(wire[64:128],7,10,b'T3CR',2)
+        with self.assertRaises(ValueError):decode(wire[64:128],7,9)
         class Hid:
             def send_feature_report(self,q):
                 assert len(q)==65 and q[:5]==b'\0T3CQ';self.q=q[1:];return 65
             def get_feature_report(self,report_id,n):
                 assert report_id==0 and n==65
-                q=self.q;a=bytearray(wire[:64] if q[4]==0 else wire[64:])
+                q=self.q;a=bytearray(wire[q[4]*64:q[4]*64+64])
                 a[8:12]=q[8:12];a[16:20]=q[12:16]
                 a[12:16]=bytes(4);struct.pack_into('<I',a,12,zlib.crc32(a))
                 return b'\0'+a
         reader=host.CaptureReader(Hid())
         self.assertEqual(reader.info()['slots'],6)
         self.assertEqual(reader.read(7,40),bytes(range(7,47)))
+        diag=reader.diagnostics()
+        self.assertEqual((diag['step_name'],diag['io_error_name']),('SFDP transfer','cache idle timeout'))
+        self.assertIsNone(diag['sfdp_header']);self.assertIsNone(diag['density_word']);self.assertIsNone(diag['page_word'])
 
 
 def main():

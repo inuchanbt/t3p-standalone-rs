@@ -1,10 +1,13 @@
 # Persistent screen capture / 画面キャプチャ
 
-`--capture-device` (Capture V1) implements a native flash backend, a frozen-frame
+`--capture-device` (Capture V2) implements a native flash backend, a frozen-frame
 save gesture and BMP export through the V3 EP0 USB HID transport. It includes
 SYSTEM V2 and the existing CHARGER V5 functions. The current candidate is for
-hardware validation: **boot with the reduced allocation, native SPI access,
-program/erase, power-off retention and Capture V1 USB export remain unverified**.
+hardware validation. Capture V1 booted with the reduced allocation and its USB
+INFO returned JEDEC `856015`, STORE `2`, SFDP `0`, last result `-1` on this unit.
+It refused the save before erase/program. **The cause of that missing SFDP
+signature is unresolved; program/erase, power-off retention and image export
+remain unverified on hardware. V2 is a correction/diagnostics trial.**
 
 永続保存を優先する方針です。RAMだけの撮影版には変更していません。
 保存処理とUSB取り出しを実装し、オフラインで検証しています。実機での成功は
@@ -41,9 +44,14 @@ python capture_export.py --info
 python capture_export.py --output build/captures/session-01
 ```
 
-The device identifies as `T3P Capture V1` (VID/PID 0483:5750). Only this product is
+The device identifies as `T3P Capture V2` (VID/PID 0483:5750). The host also accepts
+Capture V1. Only these products are
 selected; the stock software and Flash Reader V3 are not treated as capture devices.
-The protocol has INFO and bounded READ only: **no host program/erase command**.
+The protocol has INFO, bounded READ and cached DIAGNOSTICS only:
+**no host program/erase command**. V2 `--info` reports the failed initialization
+step, cache/SFC/SPI timeout, SFDP header and BFPT length/pointer/density/page word.
+Unread fields are `null`, not invented values. DIAGNOSTICS returns the boot record
+even while locked and performs no SPI transaction or write. V1 INFO remains usable.
 Each committed image is read twice, checked against its stored CRC32, decoded and
 published as a top-down 16-bit RGB565 BMP plus a SHA-256 JSON sidecar. Existing
 output names are never replaced; choose a new session directory. A failed or
@@ -101,7 +109,11 @@ The native backend first checks the actual SFC mapping, reduced app headers,
 reserved-extent header and private manifest. It refuses unsupported continuous
 or DTR mode. JEDEC and SFDP are read from the chip; the SFDP gate requires a
 2 MiB density, three-byte addressing support, 256-byte pages and the advertised
-4 KiB erase opcode 20h. Unsupported chips stay LOCKED. Synthetic preview JEDEC
+4 KiB erase opcode 20h. Normal BFPT tables supply page size in DWORD 11.
+V2 additionally accepts the exact nine-DWORD table published for PUYA P25Q16H
+(ID `856015`), including its vendor header and all 36 BFPT bytes; its documented
+page size is 256 bytes. A missing/zero SFDP signature never qualifies via ID alone.
+Unsupported chips stay LOCKED. Synthetic preview JEDEC
 values are never used as live data. `STORE=1` indicates a mapping/layout guard,
 `2` a controller/chip-profile guard, and `3` an I/O/readback fault.
 
@@ -113,7 +125,10 @@ runs from owned SRAM while XIP is unavailable. Build checks reject references fr
 that island to flash code/constants. The standalone startup keeps CPU interrupts
 disabled and does not launch a second core. The existing SFC offset/key/decode
 configuration is preserved; capture reads/programming use raw SPI, so transparent
-SFC decoding cannot corrupt screenshot bytes. No stale mapped capture data is used
+SFC decoding cannot corrupt screenshot bytes. V2 restores SFC bit 1 before bit 0
+in separate writes, matching the reference resume sequence; V1 combined them.
+This discrepancy is corrected, but has not been established as the real fault.
+No stale mapped capture data is used
 for readback/export, and application instructions are never modified.
 TIMER0 is also polled from the SRAM island during storage work, using the BSP's
 existing counter conversion, so long erases/reads do not lose uptime at a 16-bit wrap.
@@ -132,6 +147,11 @@ as success. USB reads cannot flush a pending program buffer.
 SFDP interpretation follows the primary Linux SPI-NOR definitions for
 [BFPT density, erase types](https://github.com/torvalds/linux/blob/master/drivers/mtd/spi-nor/sfdp.c)
 and [page size/address bytes](https://github.com/torvalds/linux/blob/master/drivers/mtd/spi-nor/sfdp.h).
+The legacy exception is restricted to the manufacturer's
+[P25Q16H Datasheet V2.1](https://www.puyasemi.com/download_path/%E6%95%B0%E6%8D%AE%E6%89%8B%E5%86%8C/Flash/P25Q16H_Datasheet_V2.1.pdf),
+pp.4, 49, 53–56. The ID identifies a supported profile, not a confirmed package
+marking or exact silicon revision. Tests use transcribed manufacturer tables,
+clearly separated from device acquisitions.
 Native hardware sequences remain a trial on this unit even with these gates.
 A controller failure can prevent return to XIP; do not interpret a frozen SAVING
 screen as a completed record.
@@ -147,7 +167,8 @@ python tests/check_system.py --cc PATH_TO_HOST_CLANG
 cargo build --offline --features capture-device --bin preview
 python preview_refs.py --capture-device --preview PATH_TO_PREVIEW_EXE
 python build.py --capture-device
-python pack_demo.py --build-dir build/capture-device --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V1_3.0.3.bin
+python tests/check_capture_probe_pi32.py --build-dir build/capture-device
+python pack_demo.py --build-dir build/capture-device --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V2_3.0.3.bin
 ```
 
 Packaging runs the full Pi32v2 measurement/PD/CABLE/CHARGER/SYSTEM comparisons,
@@ -157,6 +178,10 @@ exercise the physical command model and USB framing; they do not emulate actual
 flash silicon, cache timing or power loss on the hardware. Rust journal tests
 include interrupted writes at every byte of a complete solid-image save, prior
 image preservation, corrupted data, occupied slots, full storage and high entropy.
+The separate Pi32v2 probe check executes the linked C layout/profile guards and
+USB diagnostics in six cases, with synthetic read-only SPI transaction results.
+It covers legacy/modern acceptance and wrong-ID/zero/corrupted/density refusal;
+it does not emulate peripheral timing or establish the cause of the device fault.
 
 The target writer also produces `OFFLINE-native-capture-io.bin`. Replay its exact
 read/program/flush sequence through the actual C page-buffer backend with:
@@ -181,8 +206,9 @@ offline counts, not measurements of the device.
   57,600 frozen RGB565 pixels. Its exact I/O trace also passed the C NOR replay.
 - Packaging: independent full decryption, both mutated-capture CRC checks,
   unchanged boot prefix and 44 unchanged non-app files passed.
-- Native SPI execution, erase/program, reduced-layout boot and power-off
-  retention on the device remain pending. No device was flashed by these checks.
+- At packaging time native SPI execution, erase/program, reduced-layout boot and
+  retention were pending. The later V1 observation below establishes only
+  reduced-layout boot, JEDEC acquisition and USB INFO, not successful storage.
 
 Candidate: `build/capture-device/T3P_RUST_METER_CAPTURE_V1_3.0.3.bin`
 (1,540,096 bytes).
@@ -193,3 +219,47 @@ For the earlier read-only stages and actual device observations, see
 [FLASH_READER.md](FLASH_READER.md), `tests/capture_preflight_device.words` and
 `tests/flash_reader_v2_device.words`. The existing `--capture-probe` firmware remains
 read-only and is separate from Capture V1.
+
+## Capture V1 hardware observation and V2 trial (2026-11-12)
+
+The user held the left button for three seconds. The screen showed
+`SAVE FAILED / LOCKED`, STORE `00000002`, JEDEC `00856015`, SFDP `N/A`.
+Two subsequent USB INFO requests during ordinary measurement agreed on status
+`2`, ID `856015`, signature `0` and last result `-1`. This confirms the gesture,
+the reduced-layout boot and HID communication. The store guard runs before
+`prepare()`; no erase/program was authorized by this attempt. The local record
+is `build/capture-device/device-v1-locked-info.json` (ignored, not a raw backup).
+
+V1 cannot distinguish an SFDP transfer timeout from an all-zero response in its
+existing INFO. Independently, it incorrectly requires at least 11 BFPT DWORDs,
+whereas the P25Q16H publication supplies nine. That length issue alone does not
+explain signature zero. V2 fixes the known length/profile and resume-sequence
+issues while preserving refusal of missing, corrupted and mismatched data.
+
+V2 diagnostics operation `2` uses the existing 64-byte framing and a zero
+request offset/length. Its 40-byte payload is ten little-endian words:
+step, I/O error, BFPT length, BFPT pointer, four SFDP header words, density word,
+page-size word. INFO/READ are unchanged. Steps are 0 ready, 1 layout, 2 JEDEC,
+3 SFDP transfer, 4 signature, 5 header, 6 BFPT transfer, 7 density/addressing,
+8 erase, 9 page/profile. I/O errors are 0 none, 1 cache idle timeout,
+2 SFC idle timeout, 3 SPI byte timeout. No protection bits are changed.
+
+After flashing V2, leave the unit connected in ordinary measurement mode so
+`capture_export.py --info` can read this record. Only a ready backend may attempt
+the three-second save. Then verify `SAVED TO FLASH`, power-off retention, and
+two-pass BMP export. A locked V2 remains an incomplete hardware trial.
+
+V2 candidate: `build/capture-device/T3P_RUST_METER_CAPTURE_V2_3.0.3.bin`.
+Size: 1,540,096 bytes. SHA-256:
+`bb02ba184353591d6f1007aeaeeebc4790dcc9737513719b1ae60719d07b5439`.
+The checksum sidecar and independent package audit are stored alongside it.
+
+V2 verification passed: 48 Rust tests, 22 C checks, eight Python checks,
+63 host reference frames, six linked Pi32v2 qualification/diagnostics cases,
+and the full Pi32v2 capture/measurement/graph/PD/CABLE/CHARGER/SYSTEM suite.
+The linked writer's 4,352-call trace also passed the C buffered NOR replay.
+All ten SPI-island functions remain in owned SRAM, with seven RAM-only
+relocations. Packaging independently decrypted the complete update, checked
+both CRC spans after capture-area mutation, preserved the boot prefix, and
+matched all 44 non-application files. These results do not establish V2 device
+execution, successful saving, retention or actual image export.

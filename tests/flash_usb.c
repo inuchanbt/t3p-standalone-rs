@@ -4,6 +4,7 @@
 #include "../native/t3p_flash_usb.c"
 #ifdef T3P_CAPTURE_DEVICE
 uint32_t t3p_capture_status,t3p_capture_jedec,t3p_capture_sfdp;
+uint32_t t3p_capture_diagnostics[10];
 int t3p_capture_store_export_read(uint32_t at,uint8_t *p,uint32_t n)
 {for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(at+i);return 0;}
 #endif

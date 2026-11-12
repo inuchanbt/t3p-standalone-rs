@@ -1,4 +1,4 @@
-"""Export committed T3P Capture V1 screenshots as BMP via read-only USB HID.
+"""Export committed T3P Capture screenshots as BMP via read-only USB HID.
 
 No flash erase/program command exists in this protocol. Requires hidapi only
 for hardware access. Existing output files are never replaced.
@@ -11,7 +11,7 @@ import struct
 import zlib
 from flash_read import Reader
 
-PRODUCT='T3P Capture V1'
+PRODUCTS=('T3P Capture V1','T3P Capture V2')
 SLOT=0x20000
 
 
@@ -19,6 +19,7 @@ class CaptureReader(Reader):
     query_magic=b'T3CQ'
     response_magic=b'T3CR'
     view=2
+    metadata_ops=(0,2)
 
     def info(self):
         f=struct.unpack('<10I',self.exchange(0))
@@ -31,6 +32,18 @@ class CaptureReader(Reader):
     def read(self, at, count):
         if at<0 or count<0 or at+count>6*SLOT:raise ValueError('Capture bounds')
         return b''.join(self.exchange(1,p,min(40,at+count-p)) for p in range(at,at+count,40))
+
+    def diagnostics(self):
+        f=struct.unpack('<10I',self.exchange(2))
+        steps=('ready','layout','JEDEC read/ID','SFDP transfer','SFDP signature',
+               'SFDP header','BFPT transfer','density/addressing','4K erase','page/profile')
+        errors=('none','cache idle timeout','SFC idle timeout','SPI byte timeout')
+        return dict(step=f[0],step_name=steps[f[0]] if f[0]<len(steps) else 'unknown',
+                    io_error=f[1],io_error_name=errors[f[1]] if f[1]<len(errors) else 'unknown',
+                    bfpt_dwords=f[2],bfpt_pointer=f[3],
+                    sfdp_header=struct.pack('<4I',*f[4:8]).hex() if f[0]==0 or f[0]>=4 else None,
+                    density_word=f'{f[8]:08X}' if f[0]==0 or f[0]>=7 else None,
+                    page_word=f'{f[9]:08X}' if f[2]>=11 and (f[0]==0 or f[0]>=7) else None)
 
 
 def record(h):
@@ -94,11 +107,12 @@ def main():
     a=p.parse_args()
     if not a.info and a.output is None:p.error('Use --info or --output DIRECTORY')
     import hid
-    devices=[d for d in hid.enumerate(0x483,0x5750) if d.get('product_string')==PRODUCT]
-    if len(devices)!=1:raise SystemExit(f'Expected one {PRODUCT}; found {len(devices)}')
+    devices=[d for d in hid.enumerate(0x483,0x5750) if d.get('product_string') in PRODUCTS]
+    if len(devices)!=1:raise SystemExit(f'Expected one T3P Capture V1/V2; found {len(devices)}')
     dev=hid.device()
     try:
         dev.open_path(devices[0]['path']);r=CaptureReader(dev);info=r.info()
+        if devices[0]['product_string']==PRODUCTS[1]:info['diagnostics']=r.diagnostics()
         print(json.dumps(info,indent=2),flush=True)
         if a.output:
             entries=export(r,a.output,info)
