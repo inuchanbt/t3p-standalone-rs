@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #![no_std]
 
+pub mod capture;
+#[cfg(feature = "capture-probe")]
+pub use screen::capture_probe::render as render_capture_probe_strip;
+
 #[cfg(all(feature = "board", target_os = "none"))]
 #[path = "../native/demo.rs"]
 mod demo;

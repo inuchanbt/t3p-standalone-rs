@@ -6,6 +6,8 @@ int t3p_boot_capture(struct t3p_boot_snapshot *s,uint32_t address,t3p_boot_read 
 {
     if(!s)return -1;
     s->valid=0;
+    s->auxiliary_valid=0;
+    s->header_valid=0;
     if(!read || address%4 || !ram_range(address,24) ||
        read(context,address,s->context,24))return -1;
     /* The actual bootloader handoff must not be interpreted as the SDK's
@@ -16,7 +18,14 @@ int t3p_boot_capture(struct t3p_boot_snapshot *s,uint32_t address,t3p_boot_read 
     for(uint32_t i=0;i<32;i++)aux[i]=0;
     uint32_t secondary=s->context[2];
     if(!(secondary%4) && ram_range(secondary,32))
-        (void)read(context,secondary,s->auxiliary,32);
+        s->auxiliary_valid = !read(context,secondary,s->auxiliary,32);
+    /* Stock 3.0.3 c105572 loads context[0], then reads +8 and +13.
+     * Snapshot this independently as opaque bytes, only within main SRAM. */
+    volatile uint8_t *header=s->header;
+    for(uint32_t i=0;i<32;i++)header[i]=0;
+    uint32_t primary=s->context[0];
+    if(!(primary%4) && ram_range(primary,32))
+        s->header_valid = !read(context,primary,s->header,32);
     /* Stock3.0.3 copies these exact fields from r0. Keep the words opaque:
      * the SDK boot_info ABI has not been established by device readback.
      * The initial backend preserves SFC registers, rather than reconfiguring

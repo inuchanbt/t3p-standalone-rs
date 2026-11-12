@@ -16,6 +16,8 @@ def main():
     common = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-ffunction-sections",
               "-fdata-sections", "-Wl,--gc-sections"]
     cases = [
+        ("capture-probe", ["tests/capture_probe.c", "native/t3p_capture_probe.c", "native/t3p_boot.c"], ["-DT3P_BOOT_HOST"]),
+        ("board-capture-probe", ["tests/board_capture_probe.c", "native/t3p_capture_probe.c"], []),
         ("system-clock", ["tests/system_clock.c"], []),
         ("system-input", ["tests/system_input.c"], []),
         ("measurement-system", ["tests/measurement.c", "native/t3p_meter.c"], features + ["-DT3P_SYSTEM"]),

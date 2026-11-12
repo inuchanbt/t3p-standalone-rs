@@ -385,6 +385,25 @@ fn main() -> io::Result<()> {
     write!(output, "P6\n{SIDE} {SIDE}\n255\n")?;
     for top in (0..SIDE).step_by(STRIP_ROWS) {
         render_demo_strip(&view, top, &mut pixels);
+        #[cfg(feature = "capture-probe")]
+        if let Some(section) = flags.iter().find_map(|f| {
+            f.to_str()?
+                .strip_prefix("--capture-probe=")?
+                .parse::<u32>()
+                .ok()
+        }) {
+            // Artificial sentinel values for host/target pixel comparisons only.
+            let mut words = [0; 36];
+            for (i, w) in words.iter_mut().enumerate() {
+                *w = 0x12340000 + i as u32;
+            }
+            words[4] = if flags.iter().any(|f| f == "--probe-missing") {
+                0
+            } else {
+                7
+            };
+            t3p_standalone::render_capture_probe_strip(&words, section, top, &mut pixels);
+        }
         for pixel in pixels {
             let r = ((pixel >> 11) & 31) * 255 / 31;
             let g = ((pixel >> 5) & 63) * 255 / 63;

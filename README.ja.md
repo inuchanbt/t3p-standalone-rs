@@ -1,5 +1,7 @@
 # T3P Standalone
 
+画面キャプチャは開発中です。画像保存形式とBMP取り出し部分はPC上で検証済みです。[保存領域の確認版](SCREEN_CAPTURE.md)は起動情報・フラッシュ設定を読み取り表示します。**実機での撮影・永続保存・USB取り出しはまだ使えません。**
+
 [English](README.md)
 
 ATORCH T3P USB 電力計向けの実験的な Rust ファームウェアです。[KWS-X1 Standalone](https://github.com/kralonur/kws-x1-standalone-rs) と、ローカルの DOOM on T3P 基板調査をもとに開発しています。

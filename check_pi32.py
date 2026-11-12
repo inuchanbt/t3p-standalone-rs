@@ -28,9 +28,12 @@ def main():
     parser.add_argument("--pd-cable-read", action="store_true")
     parser.add_argument("--pd-charger", action="store_true")
     parser.add_argument("--system", action="store_true")
+    parser.add_argument("--capture-probe", action="store_true")
     parser.add_argument("--pd-rd-test", action="store_true")
     parser.add_argument("--pd-ack-test", action="store_true")
     args = parser.parse_args()
+    if args.capture_probe:
+        args.system = True
     if args.system:
         args.pd_charger = True
     if args.pd_charger:
@@ -97,6 +100,24 @@ def main():
         actual_path.write_bytes(actual)
         raise ValueError(f"Pi32v2 demo frame differs from the host preview. See {actual_path}")
     print(f"Pi32v2: {SIDE * SIDE:,} RGB pixels match ({cpu.steps:,} simulated instructions)")
+    if args.capture_probe:
+        words = [0x12340000 + i for i in range(36)]
+        # Leave one full strip between output pixels and the immutable input.
+        probe_input = strip + SIDE * STRIP_ROWS * 2
+        for missing in (False, True):
+            words[4] = 0 if missing else 7
+            cpu.mem.write(probe_input, struct.pack("<36I", *words))
+            for section in range(4):
+                pixels = bytearray(HEADER)
+                for top in range(0, SIDE, STRIP_ROWS):
+                    cpu.call(symbols["meter_capture_probe_render"], [probe_input, section, top, strip])
+                    for pixel, in struct.iter_unpack("<H", cpu.mem.read(strip, SIDE * STRIP_ROWS * 2)):
+                        pixels.extend((((pixel >> 11) & 31) * 255 // 31,
+                                       ((pixel >> 5) & 63) * 255 // 63, (pixel & 31) * 255 // 31))
+                name = f"preview-capture-probe-{'missing-' if missing else ''}{section}.ppm"
+                if pixels != (out / name).read_bytes():
+                    raise ValueError(f"Pi32v2 preflight mismatch: {name}")
+        print("Pi32v2 capture preflight eight raw/missing-data frames match; no storage writes")
     if args.measurement:
         # Exercise the graph with a full minute of changing readings and gaps,
         # rather than only the single point in the short measurement preview.

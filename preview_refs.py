@@ -12,12 +12,14 @@ def main():
     parser.add_argument("--preview", type=Path, default=ROOT / "target/debug/preview.exe")
     mode = parser.add_mutually_exclusive_group()
     for name in ("measurement", "pd-profiles", "pd-cable-read", "pd-charger",
-                 "pd-rd-test", "pd-ack-test", "system"):
+                 "pd-rd-test", "pd-ack-test", "system", "capture-probe"):
         mode.add_argument(f"--{name}", action="store_true")
     args = parser.parse_args()
+    if args.capture_probe:
+        args.system = True
     if args.system:
         args.pd_charger = True
-    variant = next((name for name in ("system", "pd-charger", "pd-cable-read", "pd-profiles",
+    variant = next((name for name in ("capture-probe", "system", "pd-charger", "pd-cable-read", "pd-profiles",
                                     "pd-ack-test", "pd-rd-test", "measurement")
                     if getattr(args, name.replace("-", "_"))), "")
     out = ROOT / "build" / variant
@@ -25,6 +27,10 @@ def main():
     profiles = args.pd_profiles or args.pd_cable_read or args.pd_charger
     common = ["--profiles-ui"] if profiles else []
     frames = {"preview": [], "demo-graph": ["--power"]}
+    if args.capture_probe:
+        for section in range(4):
+            frames[f"preview-capture-probe-{section}"] = [f"--capture-probe={section}"]
+            frames[f"preview-capture-probe-missing-{section}"] = [f"--capture-probe={section}", "--probe-missing"]
     if variant:
         for name in ("measurement", "energy", "power", "voltage", "current", "missing"):
             frames[f"preview-{name}"] = ["--measurement"] + (

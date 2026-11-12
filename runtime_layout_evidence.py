@@ -47,7 +47,10 @@ def inspect_layout(path,driver_flash_reserve=98304,driver_ram_reserve=32768):
     assert sections['.runtime_stack'][5]==16384
     assert symbols['__runtime_stack_end']==ram_end
     assert symbols['__runtime_heap_start']<=symbols['__runtime_heap_end']
-    assert sections['.boot_state'][1]==8 and sections['.boot_state'][5]==76
+    # Four entry registers (16), six context words (24), auxiliary bytes (32),
+    # root/auxiliary validity (8), root[0] header bytes (32) and validity (4).
+    assert sections['.boot_state'][1]==8 and sections['.boot_state'][5]==116
+    assert symbols['t3p_boot_snapshot'] + 100 <= symbols['__runtime_bss_start']
     assert symbols['t3p_boot_parameters']<symbols['__runtime_bss_start']
     for a,b in [('__runtime_bss_start','__runtime_bss_end'),
                 ('__runtime_data_start','__runtime_data_end')]:

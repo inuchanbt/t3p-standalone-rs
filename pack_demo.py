@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+from runtime_layout_evidence import inspect_layout
 
 ROOT = Path(__file__).resolve().parent
 STOCK_NAME = "T3P Firmware Version 3.0.3.bin"
@@ -38,7 +39,6 @@ def main():
     from audit_stock_recovery import entry, require
     from build_native_board import flatten
     from check_stock_app_container import rebuild_in_memory
-    from runtime_layout_evidence import inspect_layout
 
     out = args.build_dir
     elf = out / "t3p-meter-demo.elf"
@@ -59,6 +59,8 @@ def main():
         check.append("--pd-charger")
     if "SYSTEM diagnostics" in build_audit["status"]:
         check.append("--system")
+    if "capture storage read-only preflight" in build_audit["status"]:
+        check.append("--capture-probe")
     if "CC1 Rd attach test" in build_audit["status"]:
         check.append("--pd-rd-test")
     if "CC1 GoodCRC test" in build_audit["status"]:

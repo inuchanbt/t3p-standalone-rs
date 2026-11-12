@@ -6,6 +6,22 @@ use crate::pd::{CABLE_PAGE, EPR_PAGE, PD_PAGE_COUNT, PROFILES_PAGE, SNIFF_PAGE};
 use crate::{CHARGER_PAGE, ChargerCapture};
 use crate::{Meter, Overview, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
 
+#[cfg(feature = "capture-probe")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn meter_capture_probe_render(
+    words: *const [u32; 36],
+    section: u32,
+    top: u32,
+    pixels: *mut [u16; SIDE * STRIP_ROWS],
+) {
+    if words.is_null() || pixels.is_null() {
+        return;
+    }
+    unsafe {
+        crate::render_capture_probe_strip(&*words, section, top as usize, &mut *pixels);
+    }
+}
+
 const PAGE_COUNT: u32 = if cfg!(feature = "pd-profiles") {
     PD_PAGE_COUNT + cfg!(feature = "system") as u32
 } else if cfg!(feature = "pd-rd-test") {

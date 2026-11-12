@@ -7,6 +7,9 @@ struct t3p_boot_snapshot {
     uint32_t context[6];
     uint8_t auxiliary[32];
     uint32_t valid;
+    uint32_t auxiliary_valid;
+    uint8_t header[32];
+    uint32_t header_valid;
 };
 /* Reads are constrained to ordinary main SRAM. Never dereference untrusted
  * boot addresses as MMIO or Flash. The native entry supplies r0 saved above.

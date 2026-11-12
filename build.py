@@ -110,9 +110,12 @@ def main():
     pd_mode.add_argument("--pd-cable-read", action="store_true", help="Build the active SOP' cable read candidate")
     pd_mode.add_argument("--pd-charger", action="store_true", help="Build the active CC1 charger scan candidate")
     pd_mode.add_argument("--system", action="store_true", help="Add SYSTEM diagnostics to the charger build")
+    pd_mode.add_argument("--capture-probe", action="store_true", help="Read-only capture storage preflight; capture backend remains disabled")
     pd_mode.add_argument("--pd-rd-test", action="store_true", help="Build the CC1 Rd attach test candidate")
     pd_mode.add_argument("--pd-ack-test", action="store_true", help="Build the CC1 GoodCRC test candidate")
     args = parser.parse_args()
+    if args.capture_probe:
+        args.system = True
     if args.system:
         args.pd_charger = True
     pd_cable_read = args.pd_cable_read or args.pd_charger
@@ -133,6 +136,8 @@ def main():
         variant = "pd-ack-test" if args.pd_ack_test else "pd-rd-test"
     if args.system:
         variant = "system"
+    if args.capture_probe:
+        variant = "capture-probe"
     out = ROOT / "build" / variant
     out.mkdir(parents=True, exist_ok=True)
 
@@ -149,6 +154,8 @@ def main():
 
     rust_ir = out / "meter-thumb.ll"
     rust_features = ["--cfg", 'feature="board"']
+    if args.capture_probe:
+        rust_features += ["--cfg", 'feature="capture-probe"']
     if args.system:
         rust_features += ["--cfg", 'feature="system"']
     if pd_profiles:
@@ -183,6 +190,8 @@ def main():
         sources.append(bsp / "t3p_charger.c")
     if args.system:
         sources.append(bsp / "t3p_temperature.c")
+    if args.capture_probe:
+        sources.append(bsp / "t3p_capture_probe.c")
     if rd_test:
         sources.append(bsp / "t3p_rd_test.c")
     for source in sources:
@@ -204,6 +213,8 @@ def main():
                 flags.append("-DT3P_PD_CHARGER")
             if args.system:
                 flags.append("-DT3P_SYSTEM")
+            if args.capture_probe:
+                flags.append("-DT3P_CAPTURE_PROBE")
             if rd_test:
                 flags.append("-DT3P_PD_RD_TEST")
             if args.pd_ack_test:
@@ -236,6 +247,8 @@ def main():
         report["status"] += "; CC1 active charger scan"
     if args.system:
         report["status"] += "; SYSTEM diagnostics"
+    if args.capture_probe:
+        report["status"] += "; capture storage read-only preflight, no screenshot save or USB export"
     if args.pd_rd_test:
         report["status"] += "; CC1 Rd attach test"
     if args.pd_ack_test:

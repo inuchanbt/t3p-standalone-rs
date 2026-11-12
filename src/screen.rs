@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 mod cable;
+#[cfg(feature = "capture-probe")]
+pub(crate) mod capture_probe;
 #[cfg(feature = "system")]
 mod system;
 #[cfg(feature = "system")]

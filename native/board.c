@@ -3,6 +3,9 @@
 #include "t3p_bsp.h"
 #include "t3p_signal.h"
 #include "t3p_button.h"
+#ifdef T3P_CAPTURE_PROBE
+#include "t3p_capture_probe.h"
+#endif
 #ifdef T3P_SYSTEM
 #include "t3p_temperature.h"
 #endif
@@ -148,6 +151,32 @@ void t3p_board_start(void)
 #endif
     if (t3p_bsp_lcd_init(&board)) t3p_signal_failure(3);
     init_key();
+
+#ifdef T3P_CAPTURE_PROBE
+    /* Read-only preflight, before meter/PD initialization. A long press exits.
+     * No capture storage backend is enabled in this diagnostic firmware. */
+    uint32_t probe_words[36];
+    t3p_capture_probe_read(&board, &t3p_boot_snapshot, t3p_boot_parameters, probe_words);
+    struct t3p_button probe_key;
+    t3p_button_init(&probe_key, t3p_bsp_millis(&board), key_pressed());
+    unsigned probe_section=0, probe_redraw=1;
+    for (;;) {
+        if (probe_redraw) {
+            for (uint32_t top=0;top<PANEL_SIDE;top+=STRIP_ROWS) {
+                meter_capture_probe_render(probe_words,probe_section,top,strip);
+                if (t3p_bsp_rectangle(&board,0,PANEL_SIDE-1,top,top+STRIP_ROWS-1,strip,PANEL_SIDE*STRIP_ROWS))
+                    t3p_signal_failure(4);
+            }
+            t3p_bsp_backlight(&board,1);
+            probe_redraw=0;
+        }
+        enum t3p_button_event event=t3p_button_poll(&probe_key,t3p_bsp_millis(&board),key_pressed());
+        if (event==T3P_BUTTON_LONG) break;
+        if (event==T3P_BUTTON_SHORT || event==T3P_BUTTON_DOUBLE) {
+            probe_section=(probe_section+1)%4; probe_redraw=1;
+        }
+    }
+#endif
 
     uint32_t start = t3p_bsp_millis(&board);
     uint32_t sampled = start - 100;
