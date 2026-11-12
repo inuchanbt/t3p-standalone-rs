@@ -1,12 +1,12 @@
 # Read-only flash view trial V3 / 読み取り専用取得版
 
 This firmware adds a polling USB HID feature-report transport and a bounded
-CPU-mapped flash reader. **Hardware enumeration and acquisition are pending
-device testing.** The read callback only loads bytes from the inherited CPU
+CPU-mapped flash reader. **V3 enumeration and acquisition succeeded on the
+user's unit on 2026-11-12.** The read callback only loads bytes from the inherited CPU
 mapping; it never changes SFC/cache/PLL settings or issues SPI commands.
 
 取得版は、実機で確認したアドレス対応を使い、CPUから見える領域をUSBでPCへ送ります。
-**実機でのUSB認識・読み出しはこれから確認する段階です。**
+**V3で実機のUSB認識と対象領域全体の二度読み一致を確認しました。**
 物理フラッシュの完全バックアップではありません。保存領域の調査用データです。
 
 ## Device trial
@@ -170,7 +170,7 @@ before RX is released and rejects combining RX service with TX start.
 It checks busy-TX deferral and reset/status cancellation. These tests pass
 with V3's implementation; they do not prove physical IN completion.
 Product string and device revision identify V3; wire protocol remains V1.
-V3 enumeration and acquisition need a new on-device trial.
+The resulting V3 device trial is recorded below.
 
 V3 offline validation passed: 38 Rust tests, both C reader/USB executables,
 4 Python acquisition tests, pinned stock-source checks, three Pi32v2 UI
@@ -180,3 +180,36 @@ files remained unchanged.
 
 V3 image: 1,540,096 bytes. SHA-256:
 `e20639519a67a653c0ea61f2f5ae5ae8d18f5d395100afbde7fb4335e5ae8872`.
+
+## V3 successful device acquisition (2026-11-12)
+
+The user flashed V3 and reconnected the unit. `flash_read.py --info` found the
+V3 HID and returned ready=1 with CPU base 0x0C000000, physical base 0x5000,
+length 0x1FA000 and SFC offset 0xF4005000. A 256-byte read at view offset
+0x100 matched the audited V3 ELF exactly. The entire view was then acquired
+twice through HID feature reports and every byte matched.
+
+- View size: **2,072,576 bytes**, corresponding to physical
+  `[0x5000,0x1FF000)` under the observed mapping.
+- SHA-256: `ecbbe8bfbb9dfc07f40650d6435a8015e63c4e619394218a434f8d77f22be274`.
+- The full 1,465,664-byte application allocation matched the audited V3
+  payload, including its padding. The mapped directory header CRC matched.
+- No flash erase/program command was sent. This remains a CPU-mapped view,
+  excluding the boot prefix and key_mac tail; it is not a raw whole-flash
+  restoration image and does not establish writable partition ownership.
+
+Local outputs (ignored by Git; device data is not committed):
+
+```text
+build/flash-reader/device-v3-entry.mapped.bin
+build/flash-reader/device-v3-entry.mapped.bin.json
+build/flash-reader/device-v3-full.mapped.bin
+build/flash-reader/device-v3-full.mapped.bin.json
+build/flash-reader/device-v3-readback-verification.json
+```
+
+The full-view sidecar records two identical acquisitions, the mapped range
+and SHA-256. The separate readback report records the comparison against
+the V3 package's audited ELF and the directory-header check. The earlier
+V1/V2 failures are retained above; successful acquisition is specific to
+this V3 device trial. No new firmware was generated for this record.

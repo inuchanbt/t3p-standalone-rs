@@ -1,6 +1,6 @@
 # T3P Standalone
 
-The [read-only USB flash-view trial](FLASH_READER.md) transfers the CPU-mapped view to a PC. Device enumeration/acquisition still needs testing; this is not a full raw physical flash backup.
+The [read-only USB flash-view trial](FLASH_READER.md) transfers the CPU-mapped view to a PC. V3 enumeration and a byte-identical double acquisition succeeded on the user's unit; this is not a full raw physical flash backup.
 
 [日本語](README.ja.md)
 

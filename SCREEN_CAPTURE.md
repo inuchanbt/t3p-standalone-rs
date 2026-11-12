@@ -1,8 +1,9 @@
 # Screen capture development / 画面キャプチャ開発
 
 The [read-only USB acquisition trial](FLASH_READER.md) now implements a bounded
-CPU-mapped view transport for partition research. Its hardware test is pending;
-it does not yet provide raw whole-flash backup or persistent screenshot saving.
+CPU-mapped view transport for partition research. V3 enumeration and double
+acquisition succeeded on the user's unit; raw whole-flash backup and persistent
+screenshot saving are still pending.
 
 Status: **persistent capture is not yet available on the device**. The user
 selected persistent storage, not a RAM-only replacement. This branch contains
