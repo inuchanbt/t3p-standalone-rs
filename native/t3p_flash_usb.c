@@ -3,12 +3,17 @@
  * transcribed from stock loader 104320..104372 and pinned BR35 SDK usb.c.o.
  * No SDK object code or ROM entry points are linked. */
 #include "t3p_flash_reader.h"
+#ifdef T3P_CAPTURE_DEVICE
+#include "t3p_capture_usb.h"
+#endif
 #define SIE 0xfd2000u
 #define USB 0xfd2500u
 #define CSR (SIE+0x44)
 #define PORT 0xfd3500u
 static struct t3p_bsp *bus;
+#ifndef T3P_CAPTURE_DEVICE
 static struct t3p_flash_reader reader;
+#endif
 static volatile uint8_t dma[64] __attribute__((aligned(4)));
 static uint8_t answer[64],configured,stage,address_pending,address_value;
 static uint8_t tx_data[64],tx_length,tx_pending;
@@ -65,7 +70,12 @@ static void setup(const uint8_t q[8])
         if(p){send(p,length<n?length:n);return;}
     }
     if(type==0x80&&req==6&&(index==0||index==0x409)&&((value==0x301)||(value==0x302))) {
-        const char *s=value==0x301?"T3P Experimental":"T3P Flash Reader V3";
+        const char *s=value==0x301?"T3P Experimental":
+#ifdef T3P_CAPTURE_DEVICE
+            "T3P Capture V1";
+#else
+            "T3P Flash Reader V3";
+#endif
         uint8_t p[64]={0,3};unsigned n=2;
         while(*s&&n<62){p[n++]=(uint8_t)*s++;p[n++]=0;}p[0]=(uint8_t)n;
         send(p,length<n?length:n);return;
@@ -114,17 +124,24 @@ static void poll(void)
     if(stage==1) {
         if(n!=64){stall();return;}
         uint8_t q[64];for(unsigned i=0;i<64;i++)q[i]=dma[i];
-        t3p_flash_reader_request(&reader,q,answer);wr(CSR,0x48);stage=0;
+#ifdef T3P_CAPTURE_DEVICE
+        t3p_capture_usb_request(q,answer);
+#else
+        t3p_flash_reader_request(&reader,q,answer);
+#endif
+        wr(CSR,0x48);stage=0;
     } else if(stage==2&&n==0){wr(CSR,0x40);stage=tx_pending=0;}
     else if(n==8) {uint8_t q[8];for(unsigned i=0;i<8;i++)q[i]=dma[i];setup(q);}
     else stall();
 }
+#ifndef T3P_CAPTURE_DEVICE
 static int mapped_read(void *context,uint32_t address,uint8_t *out,uint32_t n)
 {
     (void)context;
     volatile const uint8_t *p=(volatile const uint8_t *)(uintptr_t)address;
     for(uint32_t i=0;i<n;i++)out[i]=p[i];return 0;
 }
+#endif
 static int start(struct t3p_bsp *b)
 {
     bus=b;
@@ -146,6 +163,14 @@ static int start(struct t3p_bsp *b)
     change(USB,0,0x800);
     return 0;
 }
+#ifdef T3P_CAPTURE_DEVICE
+int t3p_capture_usb_start(struct t3p_bsp *b)
+{
+    uint8_t info[64]={'T','3','C','Q'};t3p_capture_usb_request(info,answer);
+    return start(b);
+}
+void t3p_capture_usb_poll(void){poll();}
+#else
 void t3p_flash_usb_run(struct t3p_bsp *b)
 {
     (void)t3p_flash_reader_init(&reader,&t3p_boot_snapshot,b,0,mapped_read);
@@ -164,3 +189,4 @@ void t3p_flash_usb_run(struct t3p_bsp *b)
         t3p_bsp_backlight(b,1);
     }
 }
+#endif

@@ -1,6 +1,7 @@
 """Reconcile device mapping with stock reserved entries; never authorize writes."""
 import json
 import struct
+import argparse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -24,6 +25,29 @@ def inspect(plain, context, offset):
                             'device-specific data outside distributed image'])
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--device-view',type=Path)
+    args=parser.parse_args()
+    if args.device_view:
+        from capture_layout import verify_device, DEVICE_SHA, START, LENGTH, SLOT_BYTES, AREA_BYTES
+        verify_device(args.device_view.read_bytes())
+        report=dict(status='CAPTURE V1 ALLOCATION; hardware boot/write/retention validation pending',
+                    source_sha256=DEVICE_SHA,source_bytes=0x1fa000,
+                    source_kind='CPU mapped view, not a raw/full physical backup',
+                    application_area=[hex(0x5000),hex(0x5000+AREA_BYTES)],
+                    reserved_extent=[hex(0x5000+AREA_BYTES),hex(0x16ae40)],
+                    capture_partition=[hex(START),hex(START+LENGTH)],
+                    slot_bytes=SLOT_BYTES,slots=LENGTH//SLOT_BYTES,
+                    origin='Reclaimed old app allocation; not unused VM/settings space',
+                    VM_BTIF_EXIF_entries_unchanged=True,
+                    app_and_area_crcs_exclude_captures=True,
+                    raw_spi_bypasses_sfc_decode=True,
+                    raw_flash_chip_identification='Pending on Capture V1 firmware',
+                    hardware_write_test=False,power_off_retention_test=False)
+        out=ROOT/'build/capture-device/partition-audit.json'
+        out.parent.mkdir(parents=True,exist_ok=True)
+        out.write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
+        print(json.dumps(report,indent=2));return
     words = {}
     for line in (ROOT / 'tests/capture_preflight_device.words').read_text().splitlines():
         if line and not line.startswith('#'):

@@ -3,6 +3,13 @@
 #include "t3p_bsp.h"
 #include "t3p_signal.h"
 #include "t3p_button.h"
+#ifdef T3P_CAPTURE_DEVICE
+#include "t3p_capture_store.h"
+#include "t3p_capture_usb.h"
+int32_t meter_capture_save(uint16_t pixels[1920]);
+void meter_capture_notice(const uint32_t words[4],uint32_t,uint16_t pixels[1920]);
+static unsigned capture_pending;
+#endif
 #ifdef T3P_FLASH_READER
 #include "t3p_flash_reader.h"
 #endif
@@ -82,6 +89,9 @@ enum redraw_request {
 static unsigned poll_key(uint32_t now)
 {
     enum t3p_button_event event = t3p_button_poll(&button, now, key_pressed());
+#ifdef T3P_CAPTURE_DEVICE
+    if (event == T3P_BUTTON_SAVE) { capture_pending=1; return 0; }
+#endif
 #ifdef T3P_SYSTEM
     t3p_system_tick(&system_stats, &system_tick, now);
     if (event != T3P_BUTTON_NONE) {
@@ -140,6 +150,18 @@ static unsigned poll_pd(struct t3p_pd_capture *pd, struct t3p_meter_bus *bus, ui
 }
 #endif
 
+#ifdef T3P_CAPTURE_DEVICE
+static void capture_message(int32_t result)
+{
+    uint32_t words[]={(uint32_t)result,t3p_capture_status,t3p_capture_jedec,t3p_capture_sfdp};
+    for(unsigned top=0;top<240;top+=8){
+        meter_capture_notice(words,top,strip);
+        if(t3p_bsp_rectangle(&board,0,239,top,top+7,strip,1920))t3p_signal_failure(4);
+    }
+    t3p_bsp_backlight(&board,1);
+}
+#endif
+
 void t3p_board_start(void)
 {
     struct t3p_bsp_io io;
@@ -154,6 +176,12 @@ void t3p_board_start(void)
 #endif
     if (t3p_bsp_lcd_init(&board)) t3p_signal_failure(3);
     init_key();
+#ifdef T3P_CAPTURE_DEVICE
+    (void)t3p_capture_store_init(&board);
+    (void)t3p_capture_usb_start(&board);
+    uint32_t capture_notice_at=0;
+    unsigned capture_notice=0;
+#endif
 
 #ifdef T3P_FLASH_READER
     t3p_flash_usb_run(&board);
@@ -233,6 +261,9 @@ void t3p_board_start(void)
     unsigned redraw = 0;
     for (;;) {
         uint32_t now = t3p_bsp_millis(&board);
+#ifdef T3P_CAPTURE_DEVICE
+        t3p_capture_usb_poll();
+#endif
         redraw |= poll_key(now);
 #ifdef T3P_PD_CHARGER
         if (redraw & CHARGER_ARM) {
@@ -279,6 +310,23 @@ void t3p_board_start(void)
         }
         redraw |= poll_pd(&pd, &fast_bus, now);
 #endif
+#ifdef T3P_CAPTURE_DEVICE
+        if(capture_pending){
+            capture_pending=0;
+            if(capture_notice||pd.state==T3P_PD_LISTENING||charger_state==CHARGER_ARMED||
+               charger_state==CHARGER_RESTORE||pd.state==T3P_PD_CABLE_RESTORE)
+                t3p_capture_result=-3;
+            else if(t3p_capture_status)t3p_capture_result=-1;
+            else {
+                capture_message(0);
+                t3p_capture_result=t3p_capture_store_prepare()?-1:meter_capture_save(strip);
+            }
+            capture_message(t3p_capture_result);
+            capture_notice=1;capture_notice_at=t3p_bsp_millis(&board);
+            now=capture_notice_at;
+        }
+        if(capture_notice&&now-capture_notice_at>=4000){capture_notice=0;redraw|=REDRAW;}
+#endif
 #ifdef T3P_PD_DIAGNOSTIC
         if (now - pd_at >= 2000) {
             static const uint8_t registers[] = {0x01, 0x02, 0x08, 0x0b, 0x40};
@@ -320,6 +368,9 @@ void t3p_board_start(void)
             sampled = now;
         }
         unsigned refresh_due = redraw || now - rendered >= 1000;
+#ifdef T3P_CAPTURE_DEVICE
+        if(capture_notice)refresh_due=0;
+#endif
 #ifdef T3P_SYSTEM
         unsigned temperature_enabled = meter_on_system_page() && temperature_ready;
 #ifdef T3P_PD_PROFILES
@@ -372,6 +423,9 @@ void t3p_board_start(void)
                     t3p_signal_failure(4);
                 }
                 uint32_t between_strips = t3p_bsp_millis(&board);
+#ifdef T3P_CAPTURE_DEVICE
+                t3p_capture_usb_poll();
+#endif
                 redraw |= poll_key(between_strips);
 #ifdef T3P_PD_PROFILES
                 redraw |= poll_pd(&pd, &fast_bus, between_strips);

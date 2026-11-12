@@ -6,6 +6,8 @@ The user's 24 BMP captures in `kws_x1_screen_capture/` are the visual reference 
 
 The captures stay in the user's local reference directory; they are not bundled with the firmware or committed here. No reference screenshot is used as a runtime image.
 
+The optional Capture V1 build adds a three-second hold to save the currently displayed snapshot. Existing one-second reset/exit actions run when released before three seconds. This does not add a new KWS menu. Persistent storage and BMP export are implemented; device erase/program and power-cycle verification remain pending. See [capture operation](SCREEN_CAPTURE.md).
+
 キャプチャはローカルの参照資料として扱い、ファームウェアへの埋め込みや本リポジトリへの追加は行っていません。
 
 | Reference | KWS contents / 内容 | T3P implementation / 対応 |

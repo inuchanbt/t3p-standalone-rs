@@ -50,5 +50,7 @@ SECTIONS
     ASSERT(((__runtime_data_end - __runtime_data_start) & 3) == 0, "Data length")
     ASSERT(((__runtime_bss_end - __runtime_bss_start) & 3) == 0, "BSS length")
     ASSERT(__runtime_flash_end <= 0xC165E40, "Stock app budget exceeded")
+    ASSERT(!DEFINED(__capture_build) || __runtime_flash_end <= 0xC080000,
+           "Capture app overlaps reclaimed storage")
     /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 }

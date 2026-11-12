@@ -3,7 +3,7 @@
 #define T3P_BUTTON_H
 #include <stdint.h>
 
-enum t3p_button_event { T3P_BUTTON_NONE, T3P_BUTTON_SHORT, T3P_BUTTON_DOUBLE, T3P_BUTTON_LONG };
+enum t3p_button_event { T3P_BUTTON_NONE, T3P_BUTTON_SHORT, T3P_BUTTON_DOUBLE, T3P_BUTTON_LONG, T3P_BUTTON_SAVE };
 struct t3p_button {
     uint32_t changed, pressed_at, released_at;
     unsigned raw, stable, long_sent, pending_short, second_press;
@@ -31,6 +31,12 @@ static inline enum t3p_button_event t3p_button_poll(struct t3p_button *b, uint32
                 else return T3P_BUTTON_SHORT;
             }
         } else if (!b->long_sent) {
+#ifdef T3P_CAPTURE_DEVICE
+            if (b->changed - b->pressed_at >= 3000u) {
+                b->second_press = b->pending_short = 0;
+                return T3P_BUTTON_SAVE;
+            }
+#endif
             if (b->changed - b->pressed_at >= 1000u) {
                 b->second_press = b->pending_short = 0;
                 return T3P_BUTTON_LONG;
@@ -43,10 +49,20 @@ static inline enum t3p_button_event t3p_button_poll(struct t3p_button *b, uint32
             b->released_at = now;
         }
     }
-    if (b->stable && b->raw && !b->long_sent && now - b->pressed_at >= 1000u) {
+    if (b->stable && b->raw && !b->long_sent && now - b->pressed_at >=
+#ifdef T3P_CAPTURE_DEVICE
+        3000u
+#else
+        1000u
+#endif
+    ) {
         b->long_sent = 1;
         b->pending_short = b->second_press = 0;
+#ifdef T3P_CAPTURE_DEVICE
+        return T3P_BUTTON_SAVE;
+#else
         return T3P_BUTTON_LONG;
+#endif
     }
     if (b->pending_short && !b->stable && !b->raw && now - b->released_at >= 350u) {
         b->pending_short = 0;

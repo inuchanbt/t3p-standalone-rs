@@ -19,8 +19,8 @@ def request(op, offset=0, length=0, sequence=0):
     struct.pack_into('<II',q,8,offset,sequence)
     return bytes(q)
 
-def decode(a, offset, sequence):
-    if len(a)!=64 or a[:5]!=b'T3PR\x01' or a[7]!=1:
+def decode(a, offset, sequence, magic=b'T3PR', view=1):
+    if len(a)!=64 or a[:5]!=magic+b'\x01' or a[7]!=view:
         raise ValueError('Unexpected reader response/view')
     checksum=struct.unpack_from('<I',a,12)[0]
     clean=bytearray(a);clean[12:16]=bytes(4)
@@ -32,17 +32,20 @@ def decode(a, offset, sequence):
     return a[24:24+a[6]]
 
 class Reader:
+    query_magic=b'T3PQ'
+    response_magic=b'T3PR'
+    view=1
     def __init__(self, device):self.device=device;self.sequence=0
     def exchange(self, op, offset=0, length=0):
         self.sequence=(self.sequence+1)&0xffffffff
-        q=request(op,offset,length,self.sequence)
+        q=bytearray(request(op,offset,length,self.sequence));q[:4]=self.query_magic;q=bytes(q)
         last=None
         for attempt in range(3):
             try:
                 if self.device.send_feature_report(b'\0'+q)!=65:raise OSError('Short HID request')
                 raw=bytes(self.device.get_feature_report(0,65))
                 if len(raw)!=65 or raw[0]!=0:raise ValueError('Short HID response/report ID')
-                data=decode(raw[1:],offset,self.sequence)
+                data=decode(raw[1:],offset,self.sequence,self.response_magic,self.view)
                 if len(data)!=(40 if op==0 else length):raise ValueError('Short reader data')
                 return data
             except (OSError,ValueError) as error:

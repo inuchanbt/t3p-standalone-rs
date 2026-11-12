@@ -1,192 +1,195 @@
-# Screen capture development / 画面キャプチャ開発
+# Persistent screen capture / 画面キャプチャ
 
-The [read-only USB acquisition trial](FLASH_READER.md) now implements a bounded
-CPU-mapped view transport for partition research. V3 enumeration and double
-acquisition succeeded on the user's unit; raw whole-flash backup and persistent
-screenshot saving are still pending.
+`--capture-device` (Capture V1) implements a native flash backend, a frozen-frame
+save gesture and BMP export through the V3 EP0 USB HID transport. It includes
+SYSTEM V2 and the existing CHARGER V5 functions. The current candidate is for
+hardware validation: **boot with the reduced allocation, native SPI access,
+program/erase, power-off retention and Capture V1 USB export remain unverified**.
 
-Status: **persistent capture is not yet available on the device**. The user
-selected persistent storage, not a RAM-only replacement. This branch contains
-a tested portable image journal/export core and a **read-only storage preflight
-firmware**. The preflight has no flash program/erase or USB export backend.
+永続保存を優先する方針です。RAMだけの撮影版には変更していません。
+保存処理とUSB取り出しを実装し、オフラインで検証しています。実機での成功は
+候補を書き込んだ後に確認します。温度・シリアルはSYSTEM V2の取得状況のままです。
 
-現時点では実機の撮影・永続保存・USB取り出しは未実装です。RAM保存への方針変更はしていません。
-`--capture-probe` は保存先の特定に必要な実機情報を表示する確認版です。
+## Operation / 操作
 
-## Preflight trial
+- From any normal meter/SYSTEM/PD results page, hold the left button for **3 seconds**.
+  A completed frame uses one frozen snapshot, 240×240 RGB565, with all 16 pixel bits.
+- `SAVING - PLEASE WAIT` precedes storage work. `SAVED TO FLASH` and
+  `SCRN0001.BMP` appear only after payload/header readback and final commit readback.
+  The result stays visible for four seconds, then the meter resumes.
+- Existing long-press reset/exit actions run **on release after 1 second but before
+  3 seconds** in this build. Tap/double tap keep their page actions. A held boot
+  button cannot cause a save. Other build variants retain the original hold timing.
+- Capturing is refused during PD listening, armed CHARGER work or pending restore.
+  This avoids interrupting time-sensitive protocol traffic. Measurement pauses
+  during synchronous saving. No high-voltage request or active EPR entry is added.
+- Six 128 KiB slots are available. Full, dirty or unknown slots are never silently
+  overwritten. There is no automatic recycling or erase-all command. An interrupted
+  save can consume a slot; export existing images before firmware updates, which
+  can replace the capture extent.
 
-Build with `python build.py --capture-probe`, generate matching host references
-with `python preview_refs.py --capture-probe --preview PATH_TO_PREVIEW`, then run
-`python pack_demo.py --build-dir build/capture-probe --output-name T3P_RUST_METER_CAPTURE_PREFLIGHT_V1_3.0.3.bin`.
-The host preview must be built with Cargo feature `capture-probe`.
+左ボタンを3秒長押しして保存します。1秒以上3秒未満で離すと、従来のリセット・退出操作です。
+`SAVE FAILED / LOCKED` は成功扱いにしません。`STORE`・`JEDEC`・`SFDP` は診断用の16進値です。
+満杯や失敗した枠は自動消去しません。保存中はUSB取り出しを開始せず、完了表示を待ちます。
 
-On startup, **CAPTURE PREFLIGHT V1** shows four pages. Tap (or double tap) to
-advance; hold to leave the preflight and start the existing SYSTEM V2 measurement
-application. Reconnect power to reopen preflight. Meter/PD initialization occurs
-after leaving preflight. The preflight is not a meter screen and does not sample
-electrical measurements. Existing measurements are nominal/uncalibrated as before.
+## USB export / USB取り出し
 
-確認版は起動直後に4ページを表示します。短押しで次ページ、長押しで通常の測定画面に進みます。
-**4ページすべての実機表示が次の調査に必要です。** この時点では撮影保存はできません。
-`SAVE BACKEND: LOCKED` は実装状態を示し、フラッシュチップの保護ビットの測定値ではありません。
-
-All numeric values are hexadecimal. ENTRY values are saved R0/R1/R2/IRQ state;
-CONTEXT and AUX are opaque bootloader-provided words, not assumed capacities,
-serial numbers or partition addresses. BOOT FLAGS bit 0 means the root copy was
-valid; bit 1 means the context[2] auxiliary copy succeeded; bit 2 means the
-context[0] header copy succeeded. Invalid fields display N/A.
-Both copy-success flags are stored separately so a failed copy cannot be
-shown as a measured zero. The linker audit accounts for the additional 40 bytes.
-Stock entry calls the helper at `0x0C105564`; instructions `0x0C105572..0x0C10557A`
-load context[0] and read offsets 8 and 13. HEADER preserves its first 32 bytes
-only if that pointer falls wholly inside main SRAM. It is not a blind flash read.
-
-The seven SFC reads are CON0, CON1, OFFSET_ADR, NDEC_SADR, NDEC_EADR, CLK_CON,
-and DTR_CON at `0xFE0200 + {0,4,16,24,28,32,36}`. The register block/offsets are
-from the pinned BR35 SDK `interface/driver/cpu/br35/asm/br35.h`; stock 3.0.3
-also accesses this controller (for example `0x0C033D62`). The read-only probe
-excludes the write-only key register and user command registers. It does not
-alter SFC/cache configuration, issue SPI commands, call an assumed ROM routine,
-or inspect arbitrary addresses derived from the displayed values.
-
-## Why a fixed storage address is not enabled yet
-
-The local stock recovery audit has not established this unit's physical flash
-layout. Its loader also has a relocation path for a runtime base of `0x10000`.
-The file offset in a packaged update is consequently insufficient to authorize
-a physical write. VM/settings locations and encrypted versus raw flash views
-also need to be reconciled before allocating a persistent partition.
-
-The pinned SDK's `tzflash_vm_info_set` populates mapping information at runtime;
-`sfc0_cpu_addr2flash_addr` calculates `cpu_address + physical_base - mapped_base`.
-This is evidence that mapping must be established, not evidence that the SDK's
-structure ABI matches this device's boot handoff. The probe preserves the raw
-values for comparison with the stock boot/app code.
-
-Research inputs remain local, not included in the repository:
-
-- Stock app SHA-256: `ecd03d659db7c961585ffd1e090a7325a82433a1c270f5964f268ddb5c1bdc0c`.
-- SDK revision: `d0167685d032d745d88fe50233302edd46941622`.
-- SDK `cpu.a` SHA-256: `787b6fc0913a0a8a634ee8c7606d5e4a68dc5604d8feacf806fd60dc1e2fc8ca`.
-- Locally inspected members: `tzsfc.c.o`, `tzflash.c.o`, `usb.c.o`,
-  `usb_phy.c.o`, `usb_setup.c.o`. No SDK code/library is linked into this change.
-
-USB controller helpers exist in the SDK, but a working independent T3P USB
-device driver/descriptor/control-transfer/bulk transport path has not been
-verified. The FAT sector generator alone does not make the T3P a USB drive.
-The transport implementation must handle reset/error recovery according to
-the [USB-IF Bulk-Only Transport specification](https://www.usb.org/sites/default/files/usbmassbulk_10.pdf).
-
-## Portable core implemented
-
-`src/capture.rs` accepts top-to-bottom 240x8 RGB565 strips from one frozen frame.
-It preserves all 16 pixel bits with bounded literal/run encoding; even the
-uncompressible frame fits in a 128 KiB logical slot. It never allocates a full
-frame and never erases storage. A writer exclusively borrows its storage until
-completion/abandonment; export holds an immutable borrow.
-
-The format has a reserved header, streamed payload, CRC32/length metadata,
-readback verification, and a final four-byte commit marker. Partial, malformed
-or corrupt records are not exported. Dirty or unknown slots are not reused.
-The current design permits 1..8 **logical** slots; this is not a claim of
-available physical space or an approved address on the T3P. No clear operation
-or automatic overwrite is implemented. Record sequence numbers are 1..9999.
-
-`src/capture/disk.rs` exposes a read-only 4 MiB FAT16 *image*, with two mirrored
-FATs and short filenames such as `SYST0001.BMP`. Four uppercase letters identify
-the page; the four-digit counter is shared across pages. Each BMP is top-down,
-240x240, 16-bit BI_BITFIELDS with RGB565 masks. File dates are the fixed FAT
-epoch, not a claimed capture time. USB identity, device-side key gesture,
-capture scheduling and persistent storage drivers remain to be connected.
-
-The capture directory must remain immutable while mounted for export. A future
-backend must validate the physical partition, preserve all bytes outside it,
-handle page programming/RAM execution/cache coherency, and provide synchronous
-read/program operations. The image core's host tests do not establish those
-hardware properties.
-
-## Validation and offline reproduction
+Install Python's `hidapi` package, connect the HID port to the PC and run:
 
 ```text
-cargo test --offline --features capture-probe
-python capture_source_evidence.py
-python tests/check_system.py --cc PATH_TO_CLANG
-cargo run --offline --features system --example capture_disk -- build/capture-fixture SYSI=build/system/preview-system-info.ppm BUSF=build/system/preview-system-io.ppm INPT=build/system/preview-system-input.ppm
-python tests/check_capture_disk.py build/capture-fixture/OFFLINE-capture-fat16.img SYSI=build/system/preview-system-info.ppm BUSF=build/system/preview-system-io.ppm INPT=build/system/preview-system-input.ppm
+python capture_export.py --info
+python capture_export.py --output build/captures/session-01
 ```
 
-The offline fixture uses synthetic host preview inputs, **not real device
-captures**. An independent Python FAT walker and Pillow BMP decoder verify
-directory entries, both FATs, file chains, padding and RGB565 pixel equality.
-The seven journal/export tests include high-entropy pixels, interrupted writes at
-every byte of a complete solid-image save, preservation of earlier captures,
-unknown occupied slots, silent program corruption caught before commit,
-malformed inputs, CRC failure, full storage and reversed
-sector access. Fourteen C executables include exact read-address/no-write probe
-checks, failed auxiliary boot copies, and startup tap/hold navigation before
-measurement initialization. Packaging compares eight preflight frames (valid and
-missing data) on Pi32v2 in addition to the existing SYSTEM/PD/measurement suite.
+The device identifies as `T3P Capture V1` (VID/PID 0483:5750). Only this product is
+selected; the stock software and Flash Reader V3 are not treated as capture devices.
+The protocol has INFO and bounded READ only: **no host program/erase command**.
+Each committed image is read twice, checked against its stored CRC32, decoded and
+published as a top-down 16-bit RGB565 BMP plus a SHA-256 JSON sidecar. Existing
+output names are never replaced; choose a new session directory. A failed or
+changed acquisition is not published as a valid BMP. There is no invented timestamp.
 
-Before capture becomes usable on hardware: obtain the four preflight pages;
-establish and validate the physical partition and raw/encrypted access; implement
-and test the native flash and USB paths; connect the frozen-frame save gesture;
-then verify repeated capture, power-off retention and byte-identical USB export
-on the device. Temperature and serial acquisition remain at V2 status meanwhile.
+Windowsのドライブ表示ではなく、専用ツールでBMPを取り出す方式です。
+V3で認識・読み出しを確認したHID経路を共用します。USB経由の書き込み・消去はできません。
+`src/capture/disk.rs` の読み取り専用FAT16生成部も残していますが、この候補はUSB
+マスストレージとして列挙しません。FATイメージの検証と実機USBの動作は別の検証です。
 
-## Preflight V1 validation record (2026-11-12)
+## Allocation from acquired device data / 実機データと保存領域
 
-- Rust: 41 unit tests and 7 capture integration tests passed.
-- C: all 14 validation executables passed.
-- Host: 66 preview images generated; three offline BMPs independently decoded
-  with all RGB565 pixels matching their synthetic inputs.
-- Pi32v2: eight preflight frames plus the existing measurement, PD profiles,
-  EPR history, CABLE, CHARGER, SYSTEM and ten-minute graph comparisons passed.
-- Packaging: independent unpacking matched the payload, four nested CRC checks
-  passed, and the boot prefix and 44 non-application files remained unchanged.
-- Device execution, actual persistent storage and USB export remain unverified.
+The user's V3 CPU mapped view was acquired twice with every byte matching:
 
-Candidate: `build/capture-probe/T3P_RUST_METER_CAPTURE_PREFLIGHT_V1_3.0.3.bin`
+- View length: 2,072,576 bytes, physical mapping `0x5000..0x1FF000`.
+- SHA-256: `ecbbe8bfbb9dfc07f40650d6435a8015e63c4e619394218a434f8d77f22be274`.
+- CPU mapping: `0x0C000000`, SFC offset `0xF4005000`.
+- The view excludes the boot prefix and key_mac tail; it is **not a raw or full
+  physical flash backup**. Private binary inputs remain under ignored `build/`.
+
+Blank bytes alone do not establish ownership. The old `app.bin` allocation ends
+at physical `0x16AE40`; its unused portion is still covered by the old app and
+area CRCs. Capture V1 explicitly reduces those allocations and inserts a reserved
+JLFS extent so original resources keep their positions.
+
+| Physical interval (end exclusive) | Capture V1 owner |
+| --- | --- |
+| `0x000000..0x005000` | Existing protected boot prefix, unchanged |
+| `0x005000..0x085000` | Reduced app area: directory + 524,032-byte app allocation |
+| `0x085000..0x16AE40` | New reserved JLFS extent; skips to unchanged resources |
+| `0x090000..0x150000` | Capture storage: 786,432 bytes, 6 × 131,072-byte slots |
+| `0x16AE40..` | Existing resources/remaining data, not capture storage |
+
+The usable capture interval lies entirely inside the old app file and was FF
+throughout in the acquired decoded view. This does **not** claim raw erased flash.
+VM (`offset=0x178000, size=0x7A000`), PRCT (`0, 0x178000`), BTIF
+(`0x1F2000, 0x1000`) and EXIF (`0x1F3000, 0x1000`) directory records remain unchanged.
+The mapping/ownership of VM is not needed to authorize capture writes.
+
+`capture_layout.py` keeps the original container length, app entry address, flags,
+reserved fields and existing resource offsets. A CRC-protected private manifest
+occupies unused inner-directory padding at physical `0x50C0`. Both application
+CRC spans end at `0x85000`. Packaging checks them again after changing **every
+capture byte**, then independently unpacks the update and compares the boot files
+and all 44 non-app files. This is offline evidence; hardware boot validation of
+this new layout is still required.
+
+```text
+python capture_partition_audit.py --device-view build/flash-reader/device-v3-full.mapped.bin
+```
+
+## Native storage constraints / ネイティブ保存処理
+
+The native backend first checks the actual SFC mapping, reduced app headers,
+reserved-extent header and private manifest. It refuses unsupported continuous
+or DTR mode. JEDEC and SFDP are read from the chip; the SFDP gate requires a
+2 MiB density, three-byte addressing support, 256-byte pages and the advertised
+4 KiB erase opcode 20h. Unsupported chips stay LOCKED. Synthetic preview JEDEC
+values are never used as live data. `STORE=1` indicates a mapping/layout guard,
+`2` a controller/chip-profile guard, and `3` an I/O/readback fault.
+
+SFC disable/resume and SPI byte sequencing were independently transcribed from
+stock/SDK register evidence (pinned SDK revision `d0167685d032d745d88fe50233302edd46941622`,
+`cpu.a` SHA-256 `787b6fc0913a0a8a634ee8c7606d5e4a68dc5604d8feacf806fd60dc1e2fc8ca`).
+No SDK object or assumed ROM function address is linked. The SPI execution island
+runs from owned SRAM while XIP is unavailable. Build checks reject references from
+that island to flash code/constants. The standalone startup keeps CPU interrupts
+disabled and does not launch a second core. The existing SFC offset/key/decode
+configuration is preserved; capture reads/programming use raw SPI, so transparent
+SFC decoding cannot corrupt screenshot bytes. No stale mapped capture data is used
+for readback/export, and application instructions are never modified.
+TIMER0 is also polled from the SRAM island during storage work, using the BSP's
+existing counter conversion, so long erases/reads do not lose uptime at a 16-bit wrap.
+The NOR model uses independently stated SPI0 (`0xFE0700`) and PORTF (`0xFE1000`)
+addresses, checks the SPI enable bit, covers both chip-select ports and verifies
+clock accumulation across counter wraps.
+
+A SAVE initializes at most one slot whose **entire decoded image** was verified
+as fresh packaged FF at boot. Erase/program addresses are bounded to the capture
+partition; 256-byte page splits and one-way bit transitions are checked, every
+program is read back, and the journal commits last. Unknown/partial records are
+preserved. Flash status/protection registers are never written, and there is no
+chip erase or VM access. Protected writes fail readback rather than being reported
+as success. USB reads cannot flush a pending program buffer.
+
+SFDP interpretation follows the primary Linux SPI-NOR definitions for
+[BFPT density, erase types](https://github.com/torvalds/linux/blob/master/drivers/mtd/spi-nor/sfdp.c)
+and [page size/address bytes](https://github.com/torvalds/linux/blob/master/drivers/mtd/spi-nor/sfdp.h).
+Native hardware sequences remain a trial on this unit even with these gates.
+A controller failure can prevent return to XIP; do not interpret a frozen SAVING
+screen as a completed record.
+
+## Build and offline checks
+
+```text
+cargo test --offline --features capture-device
+python tests/check_capture_device.py --cc PATH_TO_HOST_CLANG --device-view build/flash-reader/device-v3-full.mapped.bin
+python tests/check_flash_reader.py --cc PATH_TO_HOST_CLANG
+python capture_store_source_evidence.py
+python tests/check_system.py --cc PATH_TO_HOST_CLANG
+cargo build --offline --features capture-device --bin preview
+python preview_refs.py --capture-device --preview PATH_TO_PREVIEW_EXE
+python build.py --capture-device
+python pack_demo.py --build-dir build/capture-device --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V1_3.0.3.bin
+```
+
+Packaging runs the full Pi32v2 measurement/PD/CABLE/CHARGER/SYSTEM comparisons,
+five capture-result views and the linked native Rust save path against a NOR model.
+The resulting BMP must match all 57,600 frozen RGB565 pixels. C checks separately
+exercise the physical command model and USB framing; they do not emulate actual
+flash silicon, cache timing or power loss on the hardware. Rust journal tests
+include interrupted writes at every byte of a complete solid-image save, prior
+image preservation, corrupted data, occupied slots, full storage and high entropy.
+
+The target writer also produces `OFFLINE-native-capture-io.bin`. Replay its exact
+read/program/flush sequence through the actual C page-buffer backend with:
+
+```text
+python tests/check_capture_device.py --cc PATH_TO_HOST_CLANG --native-io build/capture-device/OFFLINE-native-capture-io.bin
+```
+
+This checks the boundary between the Rust journal and C buffering, including
+readback flushes and final commit. The constructed frame uses 4,352 storage calls
+and 103 page-program operations in the model (maximum four per page). These are
+offline counts, not measurements of the device.
+
+## Capture V1 validation record (2026-11-12)
+
+- Rust: 41 unit tests and 7 journal/export integration tests passed.
+- C: 6 capture checks, 14 SYSTEM/baseline checks and 2 reader/USB checks passed.
+- Python: 4 capture/export checks and 4 reader checks passed.
+- Host: 63 reference frames generated and the capture UI reviewed visually.
+- Pi32v2: capture results, linked writer, measurement, graphs, PD/EPR/history,
+  CABLE, CHARGER and SYSTEM comparisons passed. The saved BMP matches all
+  57,600 frozen RGB565 pixels. Its exact I/O trace also passed the C NOR replay.
+- Packaging: independent full decryption, both mutated-capture CRC checks,
+  unchanged boot prefix and 44 unchanged non-app files passed.
+- Native SPI execution, erase/program, reduced-layout boot and power-off
+  retention on the device remain pending. No device was flashed by these checks.
+
+Candidate: `build/capture-device/T3P_RUST_METER_CAPTURE_V1_3.0.3.bin`
 (1,540,096 bytes).
 
-SHA-256: `f2f941e135f34c3839154cb9c53d6f5da415a5d15c5cc5c56a6695420a362066`
+SHA-256: `f8bd47cab034b9eb0887d6c5837620cfdee7808d9447015d583312d76ca7aa06`.
 
-## Device preflight photographs (2026-11-12)
-
-The user supplied all four V1 pages. Their transcription is retained in
-`tests/capture_preflight_device.words`. This confirms startup and display of
-the preflight on this unit; it does not verify capture, writes or USB export.
-
-BOOT FLAGS is 5: the root and root[0] header were copied successfully. AUX
-is N/A because context[2] is `0x0C000000`, outside main SRAM, so the guard
-correctly refused the optional RAM copy. This is not a failed flash read.
-
-Context[1] is `0x5000`, context[2] is `0x0C000000`, and SFC OFFSET is
-`0xF4005000`. These agree exactly with the SDK mapping formula modulo 2^32:
-`0x5000 - 0x0C000000 = 0xF4005000`. Under this mapping, the application
-entry `0x0C000100` corresponds to physical `0x5100`, matching the packaged
-application offset. This is evidence for this boot, not all loader modes.
-
-HEADER[2] is `0x1FF000`, matching the stock header's FlashSize field and
-the existing recovery audit's key_mac boundary. It is not free space.
-HEADER[3] decodes to bytes `21 10 A4 FF`; the SDK layout's alignment byte
-is therefore 0x10 (4096 bytes), subject to stock ABI confirmation.
-The reported NDEC endpoints are preserved raw; their meaning is not used
-to authorize writes. No writable partition is established by these photos
-alone. Remaining work is partition ownership/raw access validation and the
-native flash/USB implementations. No new firmware was generated for this
-evidence-only update.
-
-## Partition ownership investigation
-
-`python capture_partition_audit.py` reconciles the photographed mapping with
-the stock 3.0.3 directory. Its output is an investigation report, never a
-write authorization. The directory reserves VM with offset 1,540,096 and
-length 499,712 bytes, plus BTIF and EXIF entries. Thus the space after the
-distributed image cannot be assumed blank or disposable. Absolute versus
-app-relative interpretation remains explicitly unresolved in the report.
-
-An application-internal capture area would also require an explicit container
-and boot-validation design: modifying bytes covered by the application CRC
-cannot simply be assumed bootable. Neither region is enabled for writes.
-A full device flash backup, if available, is useful evidence beyond the
-distributed recovery image; blank bytes alone would not establish ownership.
+For the earlier read-only stages and actual device observations, see
+[FLASH_READER.md](FLASH_READER.md), `tests/capture_preflight_device.words` and
+`tests/flash_reader_v2_device.words`. The existing `--capture-probe` firmware remains
+read-only and is separate from Capture V1.

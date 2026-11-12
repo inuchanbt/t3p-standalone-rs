@@ -8,7 +8,7 @@ Experimental Rust firmware for the ATORCH T3P USB power meter, building on [KWS-
 
 ## Status
 
-Screen capture work is in progress: the portable journal/BMP disk core is tested offline. The optional [capture storage preflight](SCREEN_CAPTURE.md) displays read-only boot/flash mapping information; **device capture, persistent saving and USB export are not available yet**.
+The optional `--capture-device` build implements persistent screen capture and BMP export over USB HID. Hold the left button for three seconds to save the displayed meter snapshot; existing one-second actions run on release before three seconds. Six capture slots are allocated inside the reclaimed application allocation, outside both application CRC spans. [Operation, build instructions and limits](SCREEN_CAPTURE.md). **The new flash program/erase path and retention across power-off still require hardware verification.** V3 USB enumeration and read-only device acquisition have already succeeded.
 
 The default build is a **startup and display demo with simulated readings**. The experimental measurement build reads real values without device-specific calibration. In the KWS-X1-style square UI, **OVERVIEW** shows voltage, signed current, power and their peaks. **ENERGY** shows charge, energy and elapsed time, and **GRAPH** shows the past 1, 2, 5 or 10 minutes of power, voltage or current. A separate profiles build listens for SPR and EPR source offers; both have been captured on the device in the test setups described below. Its PD SNIFF log was compared with an inline CY4500-EPR: some captures matched and others missed messages.
 

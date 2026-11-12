@@ -2,6 +2,8 @@
 #![no_std]
 
 pub mod capture;
+#[cfg(feature = "capture-device")]
+pub use screen::capture_status::render as render_capture_status_strip;
 #[cfg(feature = "flash-reader")]
 pub use screen::flash_reader::render as render_flash_reader_strip;
 #[cfg(feature = "capture-probe")]
@@ -10,6 +12,9 @@ pub use screen::capture_probe::render as render_capture_probe_strip;
 #[cfg(all(feature = "board", target_os = "none"))]
 #[path = "../native/demo.rs"]
 mod demo;
+#[cfg(all(feature = "capture-device", feature = "board", target_os = "none"))]
+#[path = "../native/capture.rs"]
+mod native_capture;
 #[path = "../vendor/kws-x1/energy.rs"]
 mod energy;
 mod pd;

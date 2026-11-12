@@ -9,6 +9,9 @@ mapping; it never changes SFC/cache/PLL settings or issues SPI commands.
 **V3で実機のUSB認識と対象領域全体の二度読み一致を確認しました。**
 物理フラッシュの完全バックアップではありません。保存領域の調査用データです。
 
+The acquired view is now used by the separate [Capture V1 implementation](SCREEN_CAPTURE.md)
+to allocate storage inside the old app footprint. Flash Reader V3 itself remains read-only.
+
 ## Device trial
 
 Candidate: `build/flash-reader/T3P_RUST_FLASH_READER_V3_3.0.3.bin`.

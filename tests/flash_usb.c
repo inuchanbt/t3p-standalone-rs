@@ -2,6 +2,11 @@
 #include <assert.h>
 #include <string.h>
 #include "../native/t3p_flash_usb.c"
+#ifdef T3P_CAPTURE_DEVICE
+uint32_t t3p_capture_status,t3p_capture_jedec,t3p_capture_sfdp;
+int t3p_capture_store_export_read(uint32_t at,uint8_t *p,uint32_t n)
+{for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(at+i);return 0;}
+#endif
 static uint32_t regs[0x1600/4];
 static unsigned forbidden,rx_held,rx_size,tx_arms;
 static uint8_t rx_copy[64];
@@ -68,7 +73,13 @@ int main(void) {
     regs[(CSR-SIE)/4]=0;regs[8/4]=1;poll();assert(regs[0]==37&&!address_pending);
     uint8_t cfg[8]={0,9,1,0,0,0,0,0};packet(cfg,8);assert(configured==1);
     uint8_t set[8]={0x21,9,0,3,0,0,64,0};packet(set,8);assert(stage==1);
-    uint8_t request[64]={'T','3','P','Q'};packet(request,64);assert(!stage&&answer[6]==40);
+    uint8_t request[64]={'T','3',
+#ifdef T3P_CAPTURE_DEVICE
+        'C',
+#else
+        'P',
+#endif
+        'Q'};packet(request,64);assert(!stage&&answer[6]==40);
     uint8_t get[8]={0xa1,1,0,3,0,0,64,0};packet(get,8);assert(stage==2&&dma[0]=='T');
     /* SETUP_END aborts a previous IN transfer and accepts a new request. */
     for(unsigned i=0;i<8;i++)dma[i]=rx_copy[i]=set[i];rx_size=8;rx_held=1;
@@ -81,8 +92,17 @@ int main(void) {
     packet(get,8);assert(stalls==4); /* feature access before configuration */
     packet(cfg,8);packet(set,8); /* malformed length must still stall */
     set[6]=64;packet(set,8);assert(stage==1);
-    unsigned requests=reader.requests;regs[0x18/4]=4;poll();assert(!stage);
+#ifdef T3P_CAPTURE_DEVICE
+    unsigned requests=setups;
+#else
+    unsigned requests=reader.requests;
+#endif
+    regs[0x18/4]=4;poll();assert(!stage);
+#ifdef T3P_CAPTURE_DEVICE
+    assert(setups==requests);
+#else
     assert(reader.requests==requests);
+#endif
     regs[0x18/4]=0x20;poll();assert(!configured&&!stage);
     /* A busy endpoint must retain a private copy until TX is available. */
     uint8_t data[]={0x12,1,2};regs[(CSR-SIE)/4]=2;unsigned arms=tx_arms;

@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--sim", type=Path)
     parser.add_argument("--output-name", default=IMAGE_NAME, help="Output filename within build/")
     parser.add_argument("--build-dir", type=Path, default=ROOT / "build")
+    parser.add_argument("--device-view", type=Path, help="Qualified V3 acquisition, required for capture builds")
     args = parser.parse_args()
     if Path(args.output_name).name != args.output_name or not args.output_name.lower().endswith(".bin"):
         parser.error("--output-name must be a .bin filename")
@@ -44,6 +45,8 @@ def main():
     elf = out / "t3p-meter-demo.elf"
     elf_sha = sha(elf.read_bytes())
     build_audit = json.loads((out / "audit.json").read_bytes())
+    if "persistent capture partition" in build_audit['status']:
+        require(args.device_view is not None, 'Capture build requires --device-view')
     require(elf_sha == build_audit["elf_sha256"], "ELF does not match build audit")
     inspect_layout(elf)
     check = [sys.executable, "-u", ROOT / "check_pi32.py", "--build-dir", out]
@@ -63,6 +66,8 @@ def main():
         check.append("--capture-probe")
     if "USB HID mapped flash reader" in build_audit["status"]:
         check.append("--flash-reader")
+    if "persistent capture partition" in build_audit["status"]:
+        check.append("--capture-device")
     if "CC1 Rd attach test" in build_audit["status"]:
         check.append("--pd-rd-test")
     if "CC1 GoodCRC test" in build_audit["status"]:
@@ -83,6 +88,15 @@ def main():
     require(original == stock, "Stock no-op repackage failed")
 
     encoded, expected_plain, (app_start, app_end) = rebuild_in_memory(stock, plain, key, payload)
+    capture = "persistent capture partition" in build_audit['status']
+    if capture:
+        from capture_layout import repack, verify_device, verify_crcs_after_capture
+        from jltech.cipher import jl_enc_cipher
+        require(args.device_view is not None, 'Capture build requires --device-view')
+        verify_device(args.device_view.read_bytes())
+        encoded, expected_plain, (app_start, app_end) = repack(encoded, expected_plain, key, payload, jl_enc_cipher)
+        verify_crcs_after_capture(expected_plain)
+        payload = payload[:app_end-app_start]
     require(len(encoded) == len(stock), "Container length changed")
     unpacker = args.bsp / "vendor/jl-misctools/firmware/fwunpack_newfw.py"
     with TemporaryDirectory(dir=out) as scratch:
@@ -127,6 +141,8 @@ def main():
         "simulated_rgb_pixels_matched": 57600,
         "demo_input_only": "demo input only" in build_audit["status"],
         "measurement_input_simulated": "measurement candidate" in build_audit["status"],
+        "capture_partition": ["0x90000", "0x150000"] if capture else None,
+        "capture_writes_excluded_from_app_and_area_crcs": capture,
     }
     report_name = "demo-update" if args.output_name == IMAGE_NAME else Path(args.output_name).stem
     (out / f"{report_name}-unpack.log").write_bytes(result.stdout)

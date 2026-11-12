@@ -528,6 +528,6 @@ unsafe extern "C" fn meter_snapshot() {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn meter_demo_render(top: u32, pixels: *mut [u16; SIDE * STRIP_ROWS]) {
+pub(crate) unsafe extern "C" fn meter_demo_render(top: u32, pixels: *mut [u16; SIDE * STRIP_ROWS]) {
     unsafe { render_demo_strip(&*(&raw const VIEW), top as usize, &mut *pixels) };
 }

@@ -1,5 +1,13 @@
 # Replay fixtures / リプレイ用データ
 
+## Capture V1
+
+`check_capture_device.py` builds six C checks: the NOR/controller model, capture-button timing, capture HID protocol, existing button behavior, the shared V3 EP0 transport in capture mode, and the complete board capture loop. The board loop checks snapshot stability, refusal during PD/restore work, full/locked/failed results and return to measurement. The NOR model exercises separate SPI transactions, WEL, page boundaries, raw versus decoded blank data, partition bounds, readback, reboot selection, unknown SFDP, corrupt descriptors and protected flash. No physical device is opened. Python checks validate CRC/sequence/view rejection and independently decode BMP pixels with Pillow; partial commits and changed second acquisitions are not published. `--device-view` additionally checks the SHA-256 and headers of the local twice-acquired V3 view. That private input remains ignored.
+
+Capture status previews use constructed `EF4015`/`SFDP` values. **These are not this unit's measured JEDEC/SFDP values**, and are never supplied to the live storage driver. The Pi32v2 check exercises the linked Rust writer against a NOR model at its C storage boundary, then checks the BMP against all 57,600 RGB565 pixels of the frozen host frame. Physical SPI framing is covered separately by the C model; neither test establishes hardware programming or power-off retention.
+
+撮影の検証画像・JEDEC値は作成データです。取得済みの実機データは保存領域とマッピングの確認に使い、書き込み処理の実機成功を示すデータとは区別します。
+
 These files contain FUSB302-style RX records: the SOP token, little-endian PD header, data-object-aligned payload and CRC32. They are test inputs, not a substitute for a CY4500-EPR recording. Files in the user's `xy4500_epr_log/` directory remain local and are not committed.
 
 SOP トークン、PD ヘッダー、データオブジェクト境界に揃えたペイロード、CRC32 を並べた検証用データです。CY4500-EPR の記録そのものではありません。ユーザーのログ保存先はローカルに残しています。

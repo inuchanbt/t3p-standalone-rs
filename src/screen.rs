@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 mod cable;
+#[cfg(feature = "capture-device")]
+pub(crate) mod capture_status;
 #[cfg(feature = "flash-reader")]
 pub(crate) mod flash_reader;
 #[cfg(feature = "capture-probe")]
@@ -331,7 +333,7 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         1,
         MUTED,
     );
-    p.text(186, 226, b"RAM ONLY", 1, MUTED);
+    p.text(186, 226, if cfg!(feature = "capture-device") { b"3S SAVE" } else { b"RAM ONLY" }, 1, MUTED);
 }
 
 fn card(p: &mut Strip<'_>, x: usize, y: usize, w: usize, h: usize, title: &[u8], color: u16) {

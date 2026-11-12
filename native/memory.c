@@ -16,3 +16,10 @@ void *memcpy(void *restrict to, const void *restrict from, size_t len)
     while (len--) *out++ = *in++;
     return to;
 }
+
+int memcmp(const void *left, const void *right, size_t len)
+{
+    const unsigned char *a=left,*b=right;
+    while(len--){if(*a!=*b)return (int)*a-(int)*b;a++;b++;}
+    return 0;
+}

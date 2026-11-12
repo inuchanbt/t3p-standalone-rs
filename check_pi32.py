@@ -30,9 +30,15 @@ def main():
     parser.add_argument("--system", action="store_true")
     parser.add_argument("--capture-probe", action="store_true")
     parser.add_argument("--flash-reader", action="store_true")
+    parser.add_argument("--capture-device", action="store_true")
+    parser.add_argument("--capture-only", action="store_true",help="Run new capture paths only; packaging still runs the full suite")
+    parser.add_argument("--writer-only", action="store_true",help="Focus on the linked capture writer during development")
     parser.add_argument("--pd-rd-test", action="store_true")
     parser.add_argument("--pd-ack-test", action="store_true")
     args = parser.parse_args()
+    if args.writer_only:args.capture_device=args.capture_only=True
+    if args.capture_device:
+        args.system=True
     if args.capture_probe:
         args.system = True
     if args.system:
@@ -101,6 +107,72 @@ def main():
         actual_path.write_bytes(actual)
         raise ValueError(f"Pi32v2 demo frame differs from the host preview. See {actual_path}")
     print(f"Pi32v2: {SIDE * SIDE:,} RGB pixels match ({cpu.steps:,} simulated instructions)")
+    if args.capture_device:
+        for result in (() if args.writer_only else (0,1,-1,-2,-3)):
+            pixels=bytearray(HEADER)
+            words=symbols['__runtime_heap_start']
+            cpu.mem.write(words,struct.pack('<4I',result&0xffffffff,2 if result==-1 else 0,0xef4015,0x50444653))
+            for top in range(0,SIDE,STRIP_ROWS):
+                cpu.call(symbols['meter_capture_notice'],[words,top,strip])
+                for pixel, in struct.iter_unpack('<H',cpu.mem.read(strip,SIDE*STRIP_ROWS*2)):
+                    pixels.extend((((pixel>>11)&31)*255//31,((pixel>>5)&63)*255//63,(pixel&31)*255//31))
+            if pixels!=(out/f'preview-capture-status-{result}.ppm').read_bytes():
+                raise ValueError(f'Pi32v2 capture status {result} mismatch')
+        if not args.writer_only:print('Pi32v2 capture saving/saved/locked/full/busy views match')
+        # Exercise the actual linked Rust writer and renderer against a NOR
+        # model at its C storage boundary. MMIO framing is tested separately
+        # against native/t3p_capture_store.c in tests/capture_store.c.
+        import capture_export
+        nor=bytearray(b'\xff'*0xc0000)
+        storage_calls={name:0 for name in ('read','program','flush')};write_ranges=[];io_trace=bytearray()
+        old_step=cpu.step
+        hooks={symbols[name]:name for name in ('t3p_capture_store_read','t3p_capture_store_program',
+                                               't3p_capture_store_flush','t3p_capture_store_export_read')}
+        def storage_step():
+            # Match the same FM-1 RETS alias handled by T3PFlashMemory.
+            pc=cpu.pc+0x08000000 if 0x04000100<=cpu.pc<0x04165e40 else cpu.pc
+            name=hooks.get(pc)
+            if name is None:return old_step()
+            storage_calls['program' if name.endswith('_program') else 'flush' if name.endswith('_flush') else 'read']+=1
+            if name!='t3p_capture_store_flush':
+                at,p,n=cpu.R[:3]
+                if at>len(nor) or n>len(nor)-at:raise ValueError('Native capture exceeded storage bounds')
+                if name=='t3p_capture_store_program':
+                    write_ranges.append((at,n))
+                    data=cpu.mem.read(p,n)
+                    io_trace.extend(struct.pack('<BII',1,at,n)+data)
+                    for i,b in enumerate(data):
+                        if nor[at+i]&b!=b:raise ValueError('Native capture attempted 0-to-1 programming')
+                        nor[at+i]=b
+                else:
+                    data=nor[at:at+n];cpu.mem.write(p,data)
+                    io_trace.extend(struct.pack('<BII',0,at,n)+data)
+            else:io_trace.extend(struct.pack('<BII',2,0,0))
+            cpu.R[0]=0;cpu.pc=cpu.rets
+        cpu.step=storage_step
+        try:
+            result=cpu.call(symbols['meter_capture_save'],[strip],limit=40_000_000)[0]
+        finally:cpu.step=old_step
+        if result!=1:
+            (out/'native-capture-failure.json').write_text(json.dumps(dict(result=result,header=nor[:64].hex(),
+                storage_calls=storage_calls,last_writes=write_ranges[-20:]),indent=2))
+            (out/'OFFLINE-native-capture-failure.bin').write_bytes(nor)
+            raise ValueError(f'Native capture writer result {result}; see native-capture-failure.json')
+        name,n,checksum,_=capture_export.record(bytes(nor[:64]))
+        bmp=capture_export.bmp(nor[64:64+n],checksum)
+        rgb=expected[len(HEADER):];reference=bytearray()
+        for r,g,b in zip(rgb[::3],rgb[1::3],rgb[2::3]):
+            reference+=struct.pack('<H',((r>>3)<<11)|((g>>2)<<5)|(b>>3))
+        if bmp[66:]!=reference:raise ValueError('Native capture differs from frozen displayed snapshot')
+        (out/'OFFLINE-native-capture.BMP').write_bytes(bmp)
+        (out/'OFFLINE-native-capture-io.bin').write_bytes(io_trace)
+        (out/'native-capture-verification.json').write_text(json.dumps(dict(
+            format='OFFLINE NATIVE WRITER TEST; not a device capture',
+            filename=name,stored_bytes=n,bmp_bytes=len(bmp),rgb565_pixels_matched=57600,
+            storage_calls=storage_calls,program_calls=len(write_ranges),
+            committed_header_and_payload_crcs=True),indent=2)+'\n')
+        print('Pi32v2 native capture commits SCRN0001.BMP; host USB decoder matches all 57,600 frozen RGB565 pixels')
+        if args.capture_only:return
     if args.flash_reader:
         probe_input=symbols['__runtime_heap_start']
         ready=[1,1,123,0,2,0,0x5000,0x1fa000,25,0x1000680,0x400000,1,8,0x83c,4,0x40,0]

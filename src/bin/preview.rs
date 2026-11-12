@@ -385,6 +385,10 @@ fn main() -> io::Result<()> {
     write!(output, "P6\n{SIDE} {SIDE}\n255\n")?;
     for top in (0..SIDE).step_by(STRIP_ROWS) {
         render_demo_strip(&view, top, &mut pixels);
+        #[cfg(feature = "capture-device")]
+        if let Some(result)=flags.iter().find_map(|f| f.to_str()?.strip_prefix("--capture-status=")?.parse::<i32>().ok()) {
+            t3p_standalone::render_capture_status_strip(result,if result == -1 {2}else{0},0xef4015,0x50444653,top,&mut pixels);
+        }
         #[cfg(feature = "flash-reader")]
         if flags.iter().any(|f| f == "--flash-reader") {
             let mut words=if flags.iter().any(|f| f == "--reader-locked") {[0;17]} else {[1,1,123,0,2,0,0x5000,0x1fa000,25,0x1000680,0x400000,1,8,0x83c,4,0x40,0]};
