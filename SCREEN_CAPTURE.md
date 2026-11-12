@@ -144,3 +144,29 @@ Candidate: `build/capture-probe/T3P_RUST_METER_CAPTURE_PREFLIGHT_V1_3.0.3.bin`
 (1,540,096 bytes).
 
 SHA-256: `f2f941e135f34c3839154cb9c53d6f5da415a5d15c5cc5c56a6695420a362066`
+
+## Device preflight photographs (2026-11-12)
+
+The user supplied all four V1 pages. Their transcription is retained in
+`tests/capture_preflight_device.words`. This confirms startup and display of
+the preflight on this unit; it does not verify capture, writes or USB export.
+
+BOOT FLAGS is 5: the root and root[0] header were copied successfully. AUX
+is N/A because context[2] is `0x0C000000`, outside main SRAM, so the guard
+correctly refused the optional RAM copy. This is not a failed flash read.
+
+Context[1] is `0x5000`, context[2] is `0x0C000000`, and SFC OFFSET is
+`0xF4005000`. These agree exactly with the SDK mapping formula modulo 2^32:
+`0x5000 - 0x0C000000 = 0xF4005000`. Under this mapping, the application
+entry `0x0C000100` corresponds to physical `0x5100`, matching the packaged
+application offset. This is evidence for this boot, not all loader modes.
+
+HEADER[2] is `0x1FF000`, matching the stock header's FlashSize field and
+the existing recovery audit's key_mac boundary. It is not free space.
+HEADER[3] decodes to bytes `21 10 A4 FF`; the SDK layout's alignment byte
+is therefore 0x10 (4096 bytes), subject to stock ABI confirmation.
+The reported NDEC endpoints are preserved raw; their meaning is not used
+to authorize writes. No writable partition is established by these photos
+alone. Remaining work is partition ownership/raw access validation and the
+native flash/USB implementations. No new firmware was generated for this
+evidence-only update.
