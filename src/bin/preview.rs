@@ -387,7 +387,8 @@ fn main() -> io::Result<()> {
         render_demo_strip(&view, top, &mut pixels);
         #[cfg(feature = "flash-reader")]
         if flags.iter().any(|f| f == "--flash-reader") {
-            let words=if flags.iter().any(|f| f == "--reader-locked") {[0;8]} else {[1,1,123,0,2,0,0x5000,0x1fa000]};
+            let mut words=if flags.iter().any(|f| f == "--reader-locked") {[0;17]} else {[1,1,123,0,2,0,0x5000,0x1fa000,25,0x1000680,0x400000,1,8,0x83c,4,0x40,0]};
+            if flags.iter().any(|f| f == "--reader-usb") {words[16]=1;}
             t3p_standalone::render_flash_reader_strip(&words,top,&mut pixels);
         }
         #[cfg(feature = "capture-probe")]

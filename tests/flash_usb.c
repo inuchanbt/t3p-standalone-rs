@@ -29,7 +29,7 @@ int t3p_bsp_delay(struct t3p_bsp *b,uint32_t n){
 int t3p_bsp_rectangle(void *b,uint16_t a,uint16_t z,uint16_t c,uint16_t d,const uint16_t *p,uint32_t n)
 {(void)b;(void)a;(void)z;(void)c;(void)d;(void)p;(void)n;return 0;}
 void t3p_bsp_backlight(struct t3p_bsp *b,int e){(void)b;(void)e;}
-void meter_flash_reader_render(const uint32_t w[8],uint32_t t,uint16_t p[1920]){(void)w;(void)t;(void)p;}
+void meter_flash_reader_render(const uint32_t w[17],uint32_t t,uint16_t p[1920]){(void)w;(void)t;(void)p;}
 struct t3p_boot_snapshot t3p_boot_snapshot;
 static void packet(const uint8_t *p,unsigned n) {
     for(unsigned i=0;i<n;i++)dma[i]=p[i];regs[(CSR-SIE)/4]=1;regs[0x58/4]=n;poll();
@@ -38,8 +38,15 @@ int main(void) {
     struct t3p_bsp b={.io={.read32=read_reg,.write32=write_reg}};assert(!start(&b));
     assert(!(regs[(PORT+0x30-SIE)/4]&0x100));
     assert((regs[(PORT+0x14-SIE)/4]&3)==1);
+    /* Match stock SIE enable and SDK EP0/bus event-source setup. Polling
+     * CPU code does not justify disabling the peripheral event gates. */
+    assert(regs[(USB-SIE)/4]&0x800);
+    assert(regs[0x1c/4]==1&&regs[0x2c/4]==0x24);
+    regs[0x18/4]=4;poll();assert(resets==2&&!configured&&!stage);
     uint8_t q[8]={0x80,6,0,1,0,0,18,0};packet(q,8);
     assert(dma[0]==18&&dma[1]==1&&regs[(USB+8-SIE)/4]==18&&stage==2);
+    assert(setups==1&&setup_word0==0x1000680&&setup_word1==0x120000);
+    assert(last_csr==1&&last_count==8&&(bus_events&4));
     uint8_t empty=0;packet(&empty,0);assert(!stage);
     uint8_t addr[8]={0,5,37,0,0,0,0,0};packet(addr,8);
     assert(address_pending&&regs[0]==0);

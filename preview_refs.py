@@ -30,6 +30,7 @@ def main():
     if args.flash_reader:
         frames['preview-flash-reader-ready']=['--flash-reader']
         frames['preview-flash-reader-locked']=['--flash-reader','--reader-locked']
+        frames['preview-flash-reader-usb']=['--flash-reader','--reader-usb']
     if args.capture_probe:
         for section in range(4):
             frames[f"preview-capture-probe-{section}"] = [f"--capture-probe={section}"]

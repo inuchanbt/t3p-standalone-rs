@@ -12,7 +12,8 @@ static struct t3p_flash_reader reader;
 static volatile uint8_t dma[64] __attribute__((aligned(4)));
 static uint8_t answer[64],configured,stage,address_pending,address_value;
 static uint32_t resets,stalls;
-void meter_flash_reader_render(const uint32_t words[8],uint32_t top,uint16_t pixels[1920]);
+static uint32_t setups,setup_word0,setup_word1,last_csr,last_count,bus_events;
+void meter_flash_reader_render(const uint32_t words[17],uint32_t top,uint16_t pixels[1920]);
 static uint32_t rd(uint32_t a){return bus->io.read32(bus->io.context,a);}
 static void wr(uint32_t a,uint32_t v){bus->io.write32(bus->io.context,a,v);}
 static void change(uint32_t a,uint32_t clear,uint32_t set){wr(a,(rd(a)&~clear)|set);}
@@ -23,7 +24,7 @@ static void send(const uint8_t *p,unsigned n)
     for(unsigned i=0;i<n;i++)dma[i]=p[i];
     wr(USB+8,n);wr(CSR,0x4a);stage=2;
 }
-static const uint8_t device[]={18,1,0,2,0,0,0,64,0x83,0x04,0x50,0x57,0x01,0x09,1,2,0,1};
+static const uint8_t device[]={18,1,0,2,0,0,0,64,0x83,0x04,0x50,0x57,0x02,0x09,1,2,0,1};
 static const uint8_t report[]={0x06,0x31,0xff,0x09,1,0xa1,1,0x15,0,0x26,0xff,0,
                              0x75,8,0x95,64,0x09,1,0xb1,2,0xc0};
 static const uint8_t configuration[]={9,2,34,0,1,1,0,0x80,50,
@@ -41,6 +42,9 @@ static void reset(void)
 }
 static void setup(const uint8_t q[8])
 {
+    setups++;
+    setup_word0=(uint32_t)q[0]|(uint32_t)q[1]<<8|(uint32_t)q[2]<<16|(uint32_t)q[3]<<24;
+    setup_word1=(uint32_t)q[4]|(uint32_t)q[5]<<8|(uint32_t)q[6]<<16|(uint32_t)q[7]<<24;
     unsigned type=q[0],req=q[1],value=word(q+2),index=word(q+4),length=word(q+6);
     stage=address_pending=0;
     if(type==0x80&&req==6&&index==0) {
@@ -51,7 +55,7 @@ static void setup(const uint8_t q[8])
         if(p){send(p,length<n?length:n);return;}
     }
     if(type==0x80&&req==6&&(index==0||index==0x409)&&((value==0x301)||(value==0x302))) {
-        const char *s=value==0x301?"T3P Experimental":"T3P Flash Reader V1";
+        const char *s=value==0x301?"T3P Experimental":"T3P Flash Reader V2";
         uint8_t p[64]={0,3};unsigned n=2;
         while(*s&&n<62){p[n++]=(uint8_t)*s++;p[n++]=0;}p[0]=(uint8_t)n;
         send(p,length<n?length:n);return;
@@ -85,15 +89,18 @@ static void setup(const uint8_t q[8])
 static void poll(void)
 {
     uint32_t intr=rd(SIE+0x18),tx=rd(SIE+8);
+    bus_events|=intr;
     (void)rd(SIE+0xc);(void)rd(SIE+0x10);(void)rd(SIE+0x14);
     if(intr&4){reset();return;}
     if(intr&0x20){configured=stage=address_pending=0;return;}
     uint32_t csr=rd(CSR);
+    if(csr)last_csr=csr;
     if(csr&4){wr(CSR,0);stage=address_pending=0;return;}
     if(csr&0x10){wr(CSR,0x80);stage=address_pending=0;csr=rd(CSR);}
     if(address_pending&&(tx&1)&&!(csr&2)) {wr(SIE,address_value);address_pending=0;}
     if(!(csr&1))return;
     unsigned n=rd(SIE+0x58)&0x7f;
+    last_count=n;
     if(stage==1) {
         if(n!=64){stall();return;}
         uint8_t q[64];for(unsigned i=0;i<64;i++)q[i]=dma[i];
@@ -121,8 +128,12 @@ static int start(struct t3p_bsp *b)
     change(PORT+0xc,0,3);change(PORT+0x30,0x104,0);
     change(USB,0x4076,0);wr(USB+4,0);change(PORT+0x30,0,1);
     change(PORT+0x1c,3,0);change(PORT+0x14,3,1);change(USB,0,0x3c);
-    wr(SIE+0x1c,0);wr(SIE+0x20,0);wr(SIE+0x24,0);wr(SIE+0x28,0);
-    wr(SIE+0x2c,0);wr(SIE+4,0x40);reset();
+    /* The peripheral event gates are required even while CPU IRQs stay
+     * disabled. Stock 104372 enables CON0.SIEIE; the SDK slave init also
+     * enables USB bus and EP0 event sources. V1 incorrectly cleared all. */
+    wr(SIE+0x1c,1);wr(SIE+0x20,0);wr(SIE+0x24,0);wr(SIE+0x28,0);
+    wr(SIE+0x2c,0x24);wr(SIE+4,0x40);reset();
+    change(USB,0,0x800);
     return 0;
 }
 void t3p_flash_usb_run(struct t3p_bsp *b)
@@ -134,7 +145,8 @@ void t3p_flash_usb_run(struct t3p_bsp *b)
     for(;;) {
         poll();uint32_t now=t3p_bsp_millis(b);
         if((uint32_t)(now-last)<1000)continue;last=now;
-        uint32_t words[]={reader.ready,configured,reader.requests,reader.errors,resets,stalls,reader.physical_base,reader.length};
+        uint32_t words[]={reader.ready,configured,reader.requests,reader.errors,resets,stalls,reader.physical_base,reader.length,
+                          setups,setup_word0,setup_word1,last_csr,last_count,rd(USB),bus_events,rd(SIE+4),(now/4000)%2};
         for(unsigned top=0;top<240;top+=8){
             poll();meter_flash_reader_render(words,top,pixels);
             if(t3p_bsp_rectangle(b,0,239,top,top+7,pixels,1920))return;

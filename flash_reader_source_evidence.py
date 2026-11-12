@@ -21,6 +21,7 @@ def main():
               (0x10434e,'c2 ef 03 00','clear DP/DM pullup'),
               (0x104352,'02 ef 01 00','enable DP pullup'),
               (0x104356,'00 ef 3c 50','USB reset/PHY bits'),
+              (0x104372,'00 ef 00 5e','enable USB CON0.SIEIE peripheral event gate'),
               (0x104ec2,'c5 ff 00 20 fd 00','SIE register base'),
               (0x104f04,'50 e8 1a 10','USB reset interrupt bit'),
               (0x104f18,'40 20','reset address to zero'),

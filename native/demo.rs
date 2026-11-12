@@ -8,7 +8,7 @@ use crate::{Meter, Overview, SIDE, STRIP_ROWS, demo_reading, render_demo_strip};
 
 #[cfg(feature = "flash-reader")]
 #[unsafe(no_mangle)]
-unsafe extern "C" fn meter_flash_reader_render(words:*const [u32;8],top:u32,pixels:*mut [u16;SIDE*STRIP_ROWS]) {
+unsafe extern "C" fn meter_flash_reader_render(words:*const [u32;17],top:u32,pixels:*mut [u16;SIDE*STRIP_ROWS]) {
     if words.is_null() || pixels.is_null() { return; }
     unsafe { crate::render_flash_reader_strip(&*words,top as usize,&mut *pixels); }
 }

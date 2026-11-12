@@ -103,8 +103,9 @@ def main():
     print(f"Pi32v2: {SIDE * SIDE:,} RGB pixels match ({cpu.steps:,} simulated instructions)")
     if args.flash_reader:
         probe_input=symbols['__runtime_heap_start']
-        for name, words in (("ready",[1,1,123,0,2,0,0x5000,0x1fa000]),("locked",[0]*8)):
-            cpu.mem.write(probe_input,struct.pack('<8I',*words))
+        ready=[1,1,123,0,2,0,0x5000,0x1fa000,25,0x1000680,0x400000,1,8,0x83c,4,0x40,0]
+        for name, words in (("ready",ready),("locked",[0]*17),("usb",ready[:-1]+[1])):
+            cpu.mem.write(probe_input,struct.pack('<17I',*words))
             pixels=bytearray(HEADER)
             for top in range(0,SIDE,STRIP_ROWS):
                 cpu.call(symbols['meter_flash_reader_render'],[probe_input,top,strip])
@@ -112,7 +113,7 @@ def main():
                     pixels.extend((((pixel>>11)&31)*255//31,((pixel>>5)&63)*255//63,(pixel&31)*255//31))
             if pixels!=(out/f'preview-flash-reader-{name}.ppm').read_bytes():
                 raise ValueError(f'Pi32v2 flash reader {name} mismatch')
-        print('Pi32v2 flash reader ready/locked views match')
+        print('Pi32v2 flash reader ready/locked/USB diagnostic views match')
         # Exercise the linked native protocol and real mapped-byte callback,
         # independently of the host C compiler tests. 32-bit Pi32 ABI.
         import flash_read

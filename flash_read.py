@@ -1,4 +1,4 @@
-"""Read T3P Flash Reader V1's CPU mapped view through HID feature reports.
+"""Read T3P Flash Reader V2's CPU mapped view through HID feature reports.
 
 This is NOT a raw or complete physical flash backup. No erase/write commands.
 Install Python package hidapi for hardware access; --help has no dependencies.
@@ -12,7 +12,7 @@ import struct
 import time
 import zlib
 
-PRODUCT='T3P Flash Reader V1'
+PRODUCT='T3P Flash Reader V2'
 
 def request(op, offset=0, length=0, sequence=0):
     q=bytearray(64);q[:4]=b'T3PQ';q[4]=op;q[6]=length
