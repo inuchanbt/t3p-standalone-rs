@@ -3,6 +3,9 @@
 #include "t3p_bsp.h"
 #include "t3p_signal.h"
 #include "t3p_button.h"
+#ifdef T3P_FLASH_READER
+#include "t3p_flash_reader.h"
+#endif
 #ifdef T3P_CAPTURE_PROBE
 #include "t3p_capture_probe.h"
 #endif
@@ -151,6 +154,12 @@ void t3p_board_start(void)
 #endif
     if (t3p_bsp_lcd_init(&board)) t3p_signal_failure(3);
     init_key();
+
+#ifdef T3P_FLASH_READER
+    t3p_flash_usb_run(&board);
+    t3p_signal_failure(4);
+    return;
+#endif
 
 #ifdef T3P_CAPTURE_PROBE
     /* Read-only preflight, before meter/PD initialization. A long press exits.

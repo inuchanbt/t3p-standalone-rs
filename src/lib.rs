@@ -2,6 +2,8 @@
 #![no_std]
 
 pub mod capture;
+#[cfg(feature = "flash-reader")]
+pub use screen::flash_reader::render as render_flash_reader_strip;
 #[cfg(feature = "capture-probe")]
 pub use screen::capture_probe::render as render_capture_probe_strip;
 

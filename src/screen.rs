@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 mod cable;
+#[cfg(feature = "flash-reader")]
+pub(crate) mod flash_reader;
 #[cfg(feature = "capture-probe")]
 pub(crate) mod capture_probe;
 #[cfg(feature = "system")]

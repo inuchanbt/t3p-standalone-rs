@@ -1,5 +1,9 @@
 # Screen capture development / 画面キャプチャ開発
 
+The [read-only USB acquisition trial](FLASH_READER.md) now implements a bounded
+CPU-mapped view transport for partition research. Its hardware test is pending;
+it does not yet provide raw whole-flash backup or persistent screenshot saving.
+
 Status: **persistent capture is not yet available on the device**. The user
 selected persistent storage, not a RAM-only replacement. This branch contains
 a tested portable image journal/export core and a **read-only storage preflight

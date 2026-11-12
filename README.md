@@ -1,5 +1,7 @@
 # T3P Standalone
 
+The [read-only USB flash-view trial](FLASH_READER.md) transfers the CPU-mapped view to a PC. Device enumeration/acquisition still needs testing; this is not a full raw physical flash backup.
+
 [日本語](README.ja.md)
 
 Experimental Rust firmware for the ATORCH T3P USB power meter, building on [KWS-X1 Standalone](https://github.com/kralonur/kws-x1-standalone-rs) and the local DOOM on T3P board research.

@@ -111,6 +111,7 @@ def main():
     pd_mode.add_argument("--pd-charger", action="store_true", help="Build the active CC1 charger scan candidate")
     pd_mode.add_argument("--system", action="store_true", help="Add SYSTEM diagnostics to the charger build")
     pd_mode.add_argument("--capture-probe", action="store_true", help="Read-only capture storage preflight; capture backend remains disabled")
+    pd_mode.add_argument("--flash-reader", action="store_true", help="Read-only CPU mapped flash view over USB HID")
     pd_mode.add_argument("--pd-rd-test", action="store_true", help="Build the CC1 Rd attach test candidate")
     pd_mode.add_argument("--pd-ack-test", action="store_true", help="Build the CC1 GoodCRC test candidate")
     args = parser.parse_args()
@@ -138,6 +139,8 @@ def main():
         variant = "system"
     if args.capture_probe:
         variant = "capture-probe"
+    if args.flash_reader:
+        variant = "flash-reader"
     out = ROOT / "build" / variant
     out.mkdir(parents=True, exist_ok=True)
 
@@ -154,6 +157,8 @@ def main():
 
     rust_ir = out / "meter-thumb.ll"
     rust_features = ["--cfg", 'feature="board"']
+    if args.flash_reader:
+        rust_features += ["--cfg", 'feature="flash-reader"']
     if args.capture_probe:
         rust_features += ["--cfg", 'feature="capture-probe"']
     if args.system:
@@ -192,6 +197,8 @@ def main():
         sources.append(bsp / "t3p_temperature.c")
     if args.capture_probe:
         sources.append(bsp / "t3p_capture_probe.c")
+    if args.flash_reader:
+        sources += [bsp / "t3p_flash_reader.c", bsp / "t3p_flash_usb.c"]
     if rd_test:
         sources.append(bsp / "t3p_rd_test.c")
     for source in sources:
@@ -203,6 +210,8 @@ def main():
                 "-x", "assembler", "-c", source, "-o", obj)
         else:
             flags = ["-DT3P_MEASURE"] if args.measurement else []
+            if args.flash_reader:
+                flags.append("-DT3P_FLASH_READER")
             if args.pd_diagnostic:
                 flags.append("-DT3P_PD_DIAGNOSTIC")
             if pd_profiles:
@@ -226,6 +235,9 @@ def main():
     runtime = args.llvm / "lib/clang/23/lib/pi32v2/libclang_rt.builtins.a"
     elf = out / "t3p-meter-demo.elf"
     keep_demo = ["--undefined=meter_demo_sample"] if args.measurement else []
+    if args.flash_reader:
+        keep_demo += ["--undefined=" + name for name in
+                      ("meter_demo_sample", "meter_snapshot", "meter_demo_render")]
     if args.system:
         keep_demo.append("--undefined=t3p_temperature_compensate")
     run(bins / "ld.lld.exe", "-T", bsp / "runtime_layout.ld", "--gc-sections", "--no-relax", *keep_demo,
@@ -254,6 +266,8 @@ def main():
     if args.pd_ack_test:
         report["status"] += "; CC1 GoodCRC test"
     report["rust"] = RUST_VERSION
+    if args.flash_reader:
+        report["status"] = "Pi32v2 ELF audited offline; USB HID mapped flash reader; hardware trial pending"
     report["llvm"] = LLVM_VERSION
     report["elf_sha256"] = hashlib.sha256(elf.read_bytes()).hexdigest()
     (out / "audit.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

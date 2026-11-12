@@ -61,6 +61,8 @@ def main():
         check.append("--system")
     if "capture storage read-only preflight" in build_audit["status"]:
         check.append("--capture-probe")
+    if "USB HID mapped flash reader" in build_audit["status"]:
+        check.append("--flash-reader")
     if "CC1 Rd attach test" in build_audit["status"]:
         check.append("--pd-rd-test")
     if "CC1 GoodCRC test" in build_audit["status"]:

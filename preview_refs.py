@@ -12,14 +12,14 @@ def main():
     parser.add_argument("--preview", type=Path, default=ROOT / "target/debug/preview.exe")
     mode = parser.add_mutually_exclusive_group()
     for name in ("measurement", "pd-profiles", "pd-cable-read", "pd-charger",
-                 "pd-rd-test", "pd-ack-test", "system", "capture-probe"):
+                 "pd-rd-test", "pd-ack-test", "system", "capture-probe", "flash-reader"):
         mode.add_argument(f"--{name}", action="store_true")
     args = parser.parse_args()
     if args.capture_probe:
         args.system = True
     if args.system:
         args.pd_charger = True
-    variant = next((name for name in ("capture-probe", "system", "pd-charger", "pd-cable-read", "pd-profiles",
+    variant = next((name for name in ("flash-reader", "capture-probe", "system", "pd-charger", "pd-cable-read", "pd-profiles",
                                     "pd-ack-test", "pd-rd-test", "measurement")
                     if getattr(args, name.replace("-", "_"))), "")
     out = ROOT / "build" / variant
@@ -27,6 +27,9 @@ def main():
     profiles = args.pd_profiles or args.pd_cable_read or args.pd_charger
     common = ["--profiles-ui"] if profiles else []
     frames = {"preview": [], "demo-graph": ["--power"]}
+    if args.flash_reader:
+        frames['preview-flash-reader-ready']=['--flash-reader']
+        frames['preview-flash-reader-locked']=['--flash-reader','--reader-locked']
     if args.capture_probe:
         for section in range(4):
             frames[f"preview-capture-probe-{section}"] = [f"--capture-probe={section}"]

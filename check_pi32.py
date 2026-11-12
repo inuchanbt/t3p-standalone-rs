@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--pd-charger", action="store_true")
     parser.add_argument("--system", action="store_true")
     parser.add_argument("--capture-probe", action="store_true")
+    parser.add_argument("--flash-reader", action="store_true")
     parser.add_argument("--pd-rd-test", action="store_true")
     parser.add_argument("--pd-ack-test", action="store_true")
     args = parser.parse_args()
@@ -56,7 +57,7 @@ def main():
             return super().read(address, count)
 
     out = args.build_dir
-    shared = out if args.pd_profiles else ROOT / "build"
+    shared = out if (args.pd_profiles or args.flash_reader) else ROOT / "build"
     expected = (shared / "preview.ppm").read_bytes()
     # The pinned simulator refers to an unpublished absolute path for its
     # memory-op IDs. Recover those IDs from its committed hardware fixtures.
@@ -80,7 +81,7 @@ def main():
     cpu.mem = T3PFlashMemory()
     symbols = cpu.load_elf((out / "t3p-meter-demo.elf").read_bytes())
     cpu.sp = symbols["__runtime_stack_end"]
-    strip = symbols["strip"]
+    strip = symbols["t3p_flash_usb_run.pixels"] if args.flash_reader else symbols["strip"]
     for tick in range(0, 62_001, 100):
         cpu.call(symbols["meter_demo_sample"], [tick])
     cpu.call(symbols["meter_snapshot"], [])
@@ -100,6 +101,36 @@ def main():
         actual_path.write_bytes(actual)
         raise ValueError(f"Pi32v2 demo frame differs from the host preview. See {actual_path}")
     print(f"Pi32v2: {SIDE * SIDE:,} RGB pixels match ({cpu.steps:,} simulated instructions)")
+    if args.flash_reader:
+        probe_input=symbols['__runtime_heap_start']
+        for name, words in (("ready",[1,1,123,0,2,0,0x5000,0x1fa000]),("locked",[0]*8)):
+            cpu.mem.write(probe_input,struct.pack('<8I',*words))
+            pixels=bytearray(HEADER)
+            for top in range(0,SIDE,STRIP_ROWS):
+                cpu.call(symbols['meter_flash_reader_render'],[probe_input,top,strip])
+                for pixel, in struct.iter_unpack('<H',cpu.mem.read(strip,SIDE*STRIP_ROWS*2)):
+                    pixels.extend((((pixel>>11)&31)*255//31,((pixel>>5)&63)*255//63,(pixel&31)*255//31))
+            if pixels!=(out/f'preview-flash-reader-{name}.ppm').read_bytes():
+                raise ValueError(f'Pi32v2 flash reader {name} mismatch')
+        print('Pi32v2 flash reader ready/locked views match')
+        # Exercise the linked native protocol and real mapped-byte callback,
+        # independently of the host C compiler tests. 32-bit Pi32 ABI.
+        import flash_read
+        r=probe_input;q=r+64;a=q+64
+        state=[0xc000000,0x5000,0x1fa000,0xdc7e4407,0xf4005000,
+               0xf92e465,0xffec8ee,0,0,0,symbols['mapped_read']]
+        cpu.mem.write(r,struct.pack('<11I',*state)+b'\x01\0\0\0')
+        for op,offset,length,seq in ((0,0,0,1),(1,0x100,40,2),(1,0x1f9fff,2,3)):
+            cpu.mem.write(q,flash_read.request(op,offset,length,seq))
+            cpu.call(symbols['t3p_flash_reader_request'],[r,q,a])
+            response=cpu.mem.read(a,64)
+            if seq==3:
+                if response[5]!=3:raise ValueError('Pi32v2 out-of-range read accepted')
+            else:
+                data=flash_read.decode(response,offset,seq)
+                if op==1 and data!=cpu.mem.read(0xc000100,40):
+                    raise ValueError('Pi32v2 mapped reader byte mismatch')
+        print('Pi32v2 native info, mapped bytes, CRC and bounds rejection match')
     if args.capture_probe:
         words = [0x12340000 + i for i in range(36)]
         # Leave one full strip between output pixels and the immutable input.
