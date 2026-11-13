@@ -16,6 +16,16 @@ and USB diagnostics on Pi32v2 in six acceptance/refusal cases. Only the read-onl
 SPI transaction results are substituted; this is an ABI/compiled-guard check,
 not a silicon or cache-timing test. Run the C fixture generator and native build first.
 
+Capture V3 corrects the DCU idle polarity in the driver and NOR model using the
+pinned reference-ROM branch: bit 31 set means idle. C regressions cover immediate
+idle, delayed idle, and a missing idle indication before JEDEC or SFDP with no
+write authorization. The Pi32v2 check additionally executes four actual linked
+SRAM entry/exit cases against independent MMIO values, comparing the three
+successful waits with executable reference-ROM instructions in the simulator.
+The permanent-pending case must time out without changing controller registers.
+No ROM code is linked into the firmware or called on the device. Stock 3.0.3
+suspend/resume call bytes are independently pinned by the source evidence check.
+
 `check_capture_device.py` builds six C checks: the NOR/controller model, capture-button timing, capture HID protocol, existing button behavior, the shared V3 EP0 transport in capture mode, and the complete board capture loop. The board loop checks snapshot stability, refusal during PD/restore work, full/locked/failed results and return to measurement. The NOR model exercises separate SPI transactions, WEL, page boundaries, raw versus decoded blank data, partition bounds, readback, reboot selection, unknown SFDP, corrupt descriptors and protected flash. No physical device is opened. Python checks validate CRC/sequence/view rejection and independently decode BMP pixels with Pillow; partial commits and changed second acquisitions are not published. `--device-view` additionally checks the SHA-256 and headers of the local twice-acquired V3 view. That private input remains ignored.
 
 Capture status previews use constructed `EF4015`/`SFDP` values. **These are not this unit's measured JEDEC/SFDP values**, and are never supplied to the live storage driver. The Pi32v2 check exercises the linked Rust writer against a NOR model at its C storage boundary, then checks the BMP against all 57,600 RGB565 pixels of the frozen host frame. Physical SPI framing is covered separately by the C model; neither test establishes hardware programming or power-off retention.

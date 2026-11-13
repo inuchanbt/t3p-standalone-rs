@@ -21,6 +21,7 @@ static struct t3p_bsp model_clock;
 static uint32_t ticks;
 static unsigned model_port;
 static unsigned busy_after_id,identified;
+static unsigned dcu_delay,dcu_reads,cache_idle;
 static void finish_command(void)
 {
     if(command==6){wel=1;enables++;}
@@ -48,7 +49,14 @@ uint32_t capture_mmio_read(uint32_t at)
     if(at==SFC+16)return 0xf4005000;
     if(at==SFC+4)return 0x18;
     if(at==SFC+0x24)return 0;
-    if(at==0xffe400)return busy_after_id==1&&identified?0x80000000u:0;
+    /* Independent reference-ROM semantics: DCU.31=1 idle, SFC.31=1 busy.
+     * V2 modeled DCU backwards, masking the production regression. */
+    if(at==0xffe400){
+        dcu_reads++;
+        cache_idle=!(busy_after_id==1&&identified)&&!dcu_delay;
+        if(dcu_delay)dcu_delay--;
+        return cache_idle?0x80000000u:0;
+    }
     if(at==0xfe1104)return model_port?2:0;
     if(at==0xfd0604){ticks+=1000;return ticks&65535;}
     abort();
@@ -62,6 +70,7 @@ void capture_mmio_write(uint32_t at,uint32_t value)
     }
     if(at==MODEL_GPIO+8){gpio_dir=value;return;}
     if(at==SFC){
+        if((sfc_con&3)==3&&(value&3)!=3)assert(cache_idle);
         /* The reference resumes bit 1, then bit 0, in separate writes. */
         assert((sfc_con&3)||!(value&1));
         /* Busy is read-only; a read/modify/write cannot latch it forever. */
@@ -99,6 +108,7 @@ static void setup(void)
     sfdp_data[10]=1;sfdp_data[11]=11;sfdp_data[12]=32;sfdp_data[15]=255;
     sfdp_data[36]=sfdp_data[37]=sfdp_data[38]=255;sfdp_data[60]=12;sfdp_data[61]=0x20;sfdp_data[72]=0x80;
     protected_flash=wel=busy_after_id=identified=0;erases=enables=0;
+    dcu_delay=dcu_reads=cache_idle=0;
     id_bytes[0]=0xef;id_bytes[1]=0x40;id_bytes[2]=0x15;
 }
 static void legacy_setup(void)
@@ -115,6 +125,7 @@ int main(int argc,char **argv)
     setup();assert(!t3p_capture_store_init(&model_clock));assert(!erases&&!enables);
     assert(t3p_capture_jedec==0xef4015&&t3p_capture_sfdp==0x50444653);
     assert(!t3p_capture_diagnostics[0]&&!t3p_capture_diagnostics[1]);
+    assert(dcu_reads>=3); /* JEDEC, SFDP header, BFPT: repeated idle entry. */
     unsigned before=transfers;uint8_t check[300];
     assert(t3p_capture_store_program(T3P_CAPTURE_BYTES-1,check,2));
     assert(t3p_capture_store_read(UINT32_MAX,check,1));assert(transfers==before);
@@ -133,6 +144,14 @@ int main(int argc,char **argv)
     assert(flash[T3P_CAPTURE_START+190]==0x42);
     for(unsigned i=0;i<T3P_CAPTURE_START;i++)assert(flash[i]==0xa5);
     for(unsigned i=T3P_CAPTURE_START+T3P_CAPTURE_BYTES;i<sizeof flash;i++)assert(flash[i]==0xa5);
+    /* A real pending cache must be polled until idle, not skipped. The first
+     * transition remains read-only and never authorizes a write at boot. */
+    setup();dcu_delay=7;assert(!t3p_capture_store_init(&model_clock));
+    assert(dcu_reads>=10&&!enables&&!erases);
+    setup();dcu_delay=UINT32_MAX;before=transfers;
+    assert(t3p_capture_store_init(&model_clock));
+    assert(t3p_capture_diagnostics[0]==2&&t3p_capture_diagnostics[1]==1&&!t3p_capture_jedec);
+    assert(transfers==before&&t3p_capture_store_prepare()&&!enables&&!erases);
     /* Unknown SFDP and corrupt partition descriptors never authorize writes. */
     setup();sfdp_data[36]=0;assert(t3p_capture_store_init(&model_clock));assert(t3p_capture_store_prepare());assert(!enables&&!erases);
     setup();directory[8]^=1;assert(t3p_capture_store_init(&model_clock));assert(t3p_capture_store_prepare());assert(!enables&&!erases);directory[8]^=1;

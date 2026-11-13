@@ -1,13 +1,14 @@
 # Persistent screen capture / 画面キャプチャ
 
-`--capture-device` (Capture V2) implements a native flash backend, a frozen-frame
+`--capture-device` (Capture V3) implements a native flash backend, a frozen-frame
 save gesture and BMP export through the V3 EP0 USB HID transport. It includes
 SYSTEM V2 and the existing CHARGER V5 functions. The current candidate is for
 hardware validation. Capture V1 booted with the reduced allocation and its USB
 INFO returned JEDEC `856015`, STORE `2`, SFDP `0`, last result `-1` on this unit.
-It refused the save before erase/program. **The cause of that missing SFDP
-signature is unresolved; program/erase, power-off retention and image export
-remain unverified on hardware. V2 is a correction/diagnostics trial.**
+It refused the save before erase/program. V2 boot/USB diagnostics subsequently
+identified a false cache-idle timeout before SFDP transfer. V3 corrects the
+reversed DCU idle condition. **V3 execution, actual SFDP acquisition,
+program/erase, power-off retention and image export remain hardware trials.**
 
 永続保存を優先する方針です。RAMだけの撮影版には変更していません。
 保存処理とUSB取り出しを実装し、オフラインで検証しています。実機での成功は
@@ -44,11 +45,11 @@ python capture_export.py --info
 python capture_export.py --output build/captures/session-01
 ```
 
-The device identifies as `T3P Capture V2` (VID/PID 0483:5750). The host also accepts
-Capture V1. Only these products are
+The device identifies as `T3P Capture V3` (VID/PID 0483:5750). The host also accepts
+Capture V1/V2. Only these products are
 selected; the stock software and Flash Reader V3 are not treated as capture devices.
 The protocol has INFO, bounded READ and cached DIAGNOSTICS only:
-**no host program/erase command**. V2 `--info` reports the failed initialization
+**no host program/erase command**. V2/V3 `--info` reports the failed initialization
 step, cache/SFC/SPI timeout, SFDP header and BFPT length/pointer/density/page word.
 Unread fields are `null`, not invented values. DIAGNOSTICS returns the boot record
 even while locked and performs no SPI transaction or write. V1 INFO remains usable.
@@ -77,7 +78,7 @@ at physical `0x16AE40`; its unused portion is still covered by the old app and
 area CRCs. Capture V1 explicitly reduces those allocations and inserts a reserved
 JLFS extent so original resources keep their positions.
 
-| Physical interval (end exclusive) | Capture V1 owner |
+| Physical interval (end exclusive) | Capture build owner |
 | --- | --- |
 | `0x000000..0x005000` | Existing protected boot prefix, unchanged |
 | `0x005000..0x085000` | Reduced app area: directory + 524,032-byte app allocation |
@@ -96,8 +97,8 @@ reserved fields and existing resource offsets. A CRC-protected private manifest
 occupies unused inner-directory padding at physical `0x50C0`. Both application
 CRC spans end at `0x85000`. Packaging checks them again after changing **every
 capture byte**, then independently unpacks the update and compares the boot files
-and all 44 non-app files. This is offline evidence; hardware boot validation of
-this new layout is still required.
+and all 44 non-app files. V1/V2 booted with this layout on hardware; successful
+erase/program and power-off retention remain unverified.
 
 ```text
 python capture_partition_audit.py --device-view build/flash-reader/device-v3-full.mapped.bin
@@ -128,6 +129,10 @@ configuration is preserved; capture reads/programming use raw SPI, so transparen
 SFC decoding cannot corrupt screenshot bytes. V2 restores SFC bit 1 before bit 0
 in separate writes, matching the reference resume sequence; V1 combined them.
 This discrepancy is corrected, but has not been established as the real fault.
+V3 fixes a separately identified error: DCU CON (`0xFFE400`) bit 31 is **1 when
+idle**, whereas SFC CON0 bit 31 is **1 when busy**. The DCU loop now waits while
+its bit is clear; the independent SFC busy loop still waits while its bit is set.
+Both have bounded timeouts before SFC is disabled. The failed wait is not bypassed.
 No stale mapped capture data is used
 for readback/export, and application instructions are never modified.
 TIMER0 is also polled from the SRAM island during storage work, using the BSP's
@@ -168,7 +173,7 @@ cargo build --offline --features capture-device --bin preview
 python preview_refs.py --capture-device --preview PATH_TO_PREVIEW_EXE
 python build.py --capture-device
 python tests/check_capture_probe_pi32.py --build-dir build/capture-device
-python pack_demo.py --build-dir build/capture-device --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V2_3.0.3.bin
+python pack_demo.py --build-dir build/capture-device --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V3_3.0.3.bin
 ```
 
 Packaging runs the full Pi32v2 measurement/PD/CABLE/CHARGER/SYSTEM comparisons,
@@ -181,7 +186,9 @@ image preservation, corrupted data, occupied slots, full storage and high entrop
 The separate Pi32v2 probe check executes the linked C layout/profile guards and
 USB diagnostics in six cases, with synthetic read-only SPI transaction results.
 It covers legacy/modern acceptance and wrong-ID/zero/corrupted/density refusal;
-it does not emulate peripheral timing or establish the cause of the device fault.
+V3 also executes four linked SRAM entry/exit cases using modeled MMIO values
+and compares successful waits with pinned reference-ROM instructions in the
+simulator. These checks do not establish actual peripheral/cache timing.
 
 The target writer also produces `OFFLINE-native-capture-io.bin`. Replay its exact
 read/program/flush sequence through the actual C page-buffer backend with:
@@ -263,3 +270,61 @@ relocations. Packaging independently decrypted the complete update, checked
 both CRC spans after capture-area mutation, preserved the boot prefix, and
 matched all 44 non-application files. These results do not establish V2 device
 execution, successful saving, retention or actual image export.
+
+## V2 hardware diagnosis and V3 correction (2026-11-14)
+
+Before any long press, two V2 INFO/DIAGNOSTICS acquisitions on 2026-11-13
+matched: USB product `T3P Capture V2`, JEDEC `856015`, STORE `2`, last result `0`,
+step `3` (SFDP transfer), I/O error `1` (cache idle timeout). The SFDP header and
+parameter fields were unread, not zero-valued device data. The local record is
+`build/capture-device/device-v2-pre-save-diagnostics-2026-11-13.json` (ignored).
+This establishes V2 boot/USB operation. No save/erase/program was attempted.
+
+The V2 DCU loop waited **while bit 31 was set**. In the pinned SDK reference
+ROM, `DcuWaitIdle` at `0xFB262..0xFB270` synchronizes, reads `0xFFE400`, and loops
+while the signed result is greater than -1 (bit 31 **clear**). Its SFC suspend
+routine at `0xFB2D6` reaches this wait through `0xFB272`, then waits for the
+separate SFC busy bit to clear before disabling SFC. The SDK cache header's
+commented register form independently states the same DCU polarity.
+Thus V2 mistook an idle indication for a timeout. Its C model also had the idle
+polarity reversed, which hid the defect; V3 corrects both.
+
+`capture_store_source_evidence.py` pins the reference ROM SHA-256, 14 wait/SFC/SPI
+instructions, and four instructions from the exact stock 3.0.3 application.
+The stock instructions execute from its copied RAM area and call suspend/resume
+export slots `0xFFDBC`/`0xFFDC0` with argument zero. The reference ROM is **not a
+device ROM dump**; its internal addresses are evidence only, never assumed as
+callable device APIs or linked into the firmware. The application image hash and
+RAM-to-file mapping are checked separately.
+
+Regression checks now require idle-high entry, pending-to-idle polling,
+and refusal with no controller/SPI writes if idle never arrives. They cover
+timeouts both before JEDEC and before SFDP, then repeat read/program/readback
+transactions under the corrected model. The Pi32v2 check executes the actual
+linked SRAM `enter`/`leave` functions for already idle, delayed idle, disabled
+and idle, and permanently pending conditions. For the first three it also runs
+the pinned reference wait instructions in the simulator and compares poll counts.
+This independently checks the condition, compiled branch and register restoration;
+barrier/peripheral timing is still simulated, not hardware-validated.
+As a regression control, the exact V2 source from commit `6f5630e` fails the
+new idle-high C test at initialization, while V3 passes the same checks.
+The local expected-failure record is `build/capture-device/regression-v2/result.json`.
+
+V3 candidate: `build/capture-device/T3P_RUST_METER_CAPTURE_V3_3.0.3.bin`.
+Size: 1,540,096 bytes. SHA-256:
+`8d069e43cc4b5e2042843ae18b43f85dcdcd80963f90a1751f2fe9ed144f879b`.
+The checksum sidecar and independent package audit are stored alongside it.
+
+V3 verification passed: 48 Rust tests, 22 C checks, eight Python checks,
+six linked Pi32v2 profile/USB cases, four linked SRAM entry/exit cases,
+63 host reference frames, and the full Pi32v2 capture/measurement/graph/PD/
+CABLE/CHARGER/SYSTEM suite. The new linked writer's 4,352-call trace also passed
+the corrected C NOR replay. All ten SPI-island functions remain in owned SRAM
+with seven RAM-only relocations. Independent full decryption and CRC checks
+passed; the boot prefix and all 44 non-application files matched the originals.
+No V3 firmware was flashed or executed on the device during these checks.
+
+After flashing, connect in ordinary measurement mode **before long-press saving**
+and read `capture_export.py --info`. The expected next milestone is STORE `0`
+with acquired SFDP, followed by a saved image, power-off retention and two-pass
+BMP export. Further chip/controller faults remain real failures.

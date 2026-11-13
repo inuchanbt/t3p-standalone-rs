@@ -66,10 +66,12 @@ static RAM int enter(void)
     saved_sfc=R(SFC);
     saved_spi[0]=R(SPI);saved_spi[1]=R(SPI+4);saved_spi[2]=R(SPI+20);
     saved_gpio[0]=R(GPIO+4);saved_gpio[1]=R(GPIO+8);
-    /* Drain cache traffic before disabling XIP; IRQs remain disabled by
-     * the standalone entry. This firmware never starts the second core. */
+    /* Drain cache traffic before disabling XIP. DCU bit 31 is IDLE=1,
+     * as in the pinned reference DcuWaitIdle (fb262..fb270); it has the
+     * opposite polarity to SFC CON0 bit 31 (BUSY=1) below. IRQs remain
+     * disabled by startup, and this firmware never starts the second core. */
     SYNC();unsigned timeout=196608;
-    while(R(0xffe400)&0x80000000u)if(!--timeout){t3p_capture_diagnostics[1]=1;return -1;}
+    while(!(R(0xffe400)&0x80000000u))if(!--timeout){t3p_capture_diagnostics[1]=1;return -1;}
     timeout=196608;
     while(R(SFC)&0x80000000u)if(!--timeout){t3p_capture_diagnostics[1]=2;return -1;}
     W(SFC,R(SFC)&~1u);W(SFC,R(SFC)&~2u);
