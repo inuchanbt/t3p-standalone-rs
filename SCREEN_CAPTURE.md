@@ -2,8 +2,8 @@
 
 `--capture-device` (Capture V4) implements a native flash backend, a frozen-frame
 save gesture and BMP export through the V3 EP0 USB HID transport. It includes
-SYSTEM V2 and the existing CHARGER V5 functions. The current candidate is for
-hardware validation. Capture V1 booted with the reduced allocation and its USB
+SYSTEM V2 and the existing CHARGER V5 functions. The candidate has been tested
+on this unit as described below. Capture V1 booted with the reduced allocation and its USB
 INFO returned JEDEC `856015`, STORE `2`, SFDP `0`, last result `-1` on this unit.
 It refused the save before erase/program. V2 boot/USB diagnostics subsequently
 identified a false cache-idle timeout before SFDP transfer. V3 corrects the
@@ -13,12 +13,12 @@ with SFDP signature `50444653`, pointer `30` and density word `00FFFFFF`.
 This guard result implies at least one BFPT byte differs from the reference;
 the V3 diagnostics cannot identify which byte. The subsequent SFDP Probe V1
 acquisition identified four changed bytes, and V4 adds that exact observed
-profile alongside the manufacturer's table. **V4 program/erase, power-off
-retention and image export remain unverified on hardware.**
+profile alongside the manufacturer's table. **V4 save, USB BMP export and
+image retention through a complete power-off/reconnect succeeded on this unit.**
 
 永続保存を優先する方針です。RAMだけの撮影版には変更していません。
-保存処理とUSB取り出しを実装し、オフラインで検証しています。実機での成功は
-候補を書き込んだ後に確認します。温度・シリアルはSYSTEM V2の取得状況のままです。
+この個体で撮影・USB取り出し・完全電源断後の保持を確認しました。
+温度・シリアルはSYSTEM V2の取得状況のままです。
 
 ## SFDP acquisition and Capture V4 / 実測表と保存対応
 
@@ -66,8 +66,8 @@ header/BFPT byte of both profiles and reject all 14 unobserved combinations
 of the four differing bytes. The observed profile also runs buffered
 program/readback and the linked Rust writer trace through the independent
 C NOR model. No status/protection writes, QPI/DTR setup, ROM call or change
-to partition/erase selection was added. Physical programming/retention/export
-still requires testing the V4 firmware on the unit.
+to partition/erase selection was added. Subsequent V4 device checks below
+confirm a saved frame, USB export and retention through complete power removal.
 
 `--capture-sfdp-probe` builds **SFDP Probe V1**, a separate read-only acquisition
 candidate used to obtain the evidence above. The flash `operate`/WREN/program/erase implementation and its function
@@ -110,8 +110,8 @@ bytes, pointers, hashes, header differences and exact BFPT differences from the
 published P25Q16H V2.1 reference. The unknown vendor-table bytes are retained
 without inventing expected contents. Existing output names are never replaced.
 The acquired bytes above now define the additional Capture V4 profile.
-Successful saving, power-off retention and BMP export still need separate
-device checks.
+The subsequent V4 device checks below separately confirm saving, power-off
+retention and BMP export.
 
 取得版を書き込んだ後は、通常の測定画面でPCにつないだままにします。長押しは不要です。
 SFDPの二度読み・表全体の取得・既存の対応表との差分を確認し、Capture V4に実測パターンを追加しました。
@@ -481,14 +481,15 @@ The V4 writer's 4,352-call trace passes the C NOR replay under the observed
 profile: 103 page programs, maximum four per page. All 63 host frames and the
 full linked capture/measurement/graph/PD/CABLE/CHARGER/SYSTEM suite pass.
 Independent full decryption and four CRC checks match the boot prefix and all
-44 non-application files. These are offline storage/programming tests; the
-real hardware result above establishes SFDP acquisition only.
+44 non-application files. These are offline storage/programming tests. At
+package generation, the hardware evidence covered SFDP acquisition only;
+the live save/export/retention follow-ups below were obtained subsequently.
 
 After flashing V4, leave the normal measurement screen connected to the PC,
 without a save gesture, and inspect `capture_export.py --info`. The compiled
 guard accepts the acquired table with STORE `0` and initialization step `0`.
-Device boot/USB/guard behavior, then actual save, power-off retention and BMP
-export need their own hardware confirmation. Unknown failures stay real
+Each unit needs its own boot/USB/guard, save, power-off retention and BMP
+export confirmation; the tested unit's results follow below. Unknown failures stay real
 failures and never authorize global unlock or automatic slot recycling.
 
 V4 device follow-up, **2026-11-16 00:31 JST**: the unit enumerated as
@@ -505,4 +506,48 @@ erased FF; header inspection does not establish a completely blank slot. The
 host uses export-read and cannot flush/program/erase. The private records are
 `build/capture-device/device-v4-pre-save-diagnostics-20261116-003117.json` and
 `build/capture-device/device-v4-pre-save-slot-headers-20261116-003231.json`.
-Actual save, power-off retention and BMP export still need device verification.
+At this pre-save stage, actual save, power-off retention and BMP export still
+needed device verification. The subsequent save/export result follows below.
+
+V4 save/export follow-up, **2026-11-16 00:38 JST**: the user reported
+`SAVED TO FLASH`. Two matching INFO/DIAGNOSTICS reads returned STORE `0`,
+last result `1`, ready step `0` and I/O error `0`. The host acquired the committed
+slot-0 image `SCRN0001.BMP` through read-only USB, with an identical independent
+second header/payload acquisition and valid header/payload/protocol CRCs.
+The 19,434-byte encoded payload decodes to a 115,266-byte, 240x240 RGB565 BMP.
+Pillow independently opened the BMP as 240x240 RGB, with 16-bit RGB565 masks
+checked directly in its header. The rendered preview shows the actual meter
+OVERVIEW screen. No hardware image or raw acquisition is committed.
+
+BMP SHA-256:
+`08c4160aac9625bc18692507e9e504e91ac3d1fcfef618086768b773f7c6b648`.
+Private acquisition record:
+`build/capture-device/device-v4-save-export-20261116-003829.json`.
+Private BMP/sidecar/PNG preview:
+`build/captures/hardware-v4-before-power-cycle-20261116-003829/`.
+Device INFO/DIAGNOSTICS were unchanged after export. This establishes live
+saving and USB BMP export on this unit, before removing power. The next check
+is complete power removal and comparison with this exact image after reconnect.
+
+V4 retention follow-up, **2026-11-16 00:44 JST**: the user confirmed complete
+power removal and reconnection without another capture or firmware update.
+The device returned STORE `0`, ready step `0` and I/O error `0`; last save
+result changed from `1` to `0`, consistent with a fresh application boot.
+Two matching INFO/DIAGNOSTICS acquisitions were followed by another read-only
+USB export with matching independent header/payload reads and valid CRCs.
+
+The committed capture set remained exactly `SCRN0001.BMP` in slot 0, with the
+same 19,434-byte encoded payload and 115,266-byte BMP. Its SHA-256 remains
+`08c4160aac9625bc18692507e9e504e91ac3d1fcfef618086768b773f7c6b648`.
+The post-cycle BMP was also compared directly with the pre-cycle file:
+**every byte matched**. Device metadata was unchanged after export.
+Private record:
+`build/capture-device/device-v4-power-cycle-retention-20261116-004426.json`.
+Private BMP/sidecar/PNG:
+`build/captures/hardware-v4-after-power-cycle-20261116-004426/`.
+
+This confirms live capture, USB BMP retrieval and retention through one
+user-confirmed complete power-off/reconnect on this unit. No host program,
+erase or flush command was issued; the device save was triggered by the
+user's single three-second button hold. Physical interruption during an active
+save remains distinct from the completed-save power-cycle test above.
