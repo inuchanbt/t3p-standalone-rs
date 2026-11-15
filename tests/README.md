@@ -1,5 +1,24 @@
 # Replay fixtures / リプレイ用データ
 
+## SFDP Probe V1
+
+`check_sfdp_probe.py` reuses the independent C SPI/NOR model for the read-only
+build. Three C checks cover full SPI acquisitions, changed second passes,
+timeouts, cached USB bounds and the shared EP0 transport. Five Python checks
+cover complete advertised-table coverage, exact reference differences, matching
+manufacturer transcripts, USB acquisition/CRC validation and exclusive outputs.
+The models use constructed data and manufacturer bytes; they are not actual
+device acquisitions. Read-only callbacks refuse even a forced ready status.
+
+`check_capture_probe_pi32.py --build-dir build/capture-sfdp-probe --sfdp-probe`
+runs six linked profile/USB cases, verifies snapshot operations trigger no SPI,
+and executes linked prepare/program/flush refusal callbacks. It also retains
+four actual linked SRAM entry/exit cases. `capture_ram_audit.py` rejects any
+`operate`, `program_io` or `status` symbol in the probe object or ELF and checks
+eight SRAM functions plus all island relocations. Probe packaging still runs
+the full UI/writer/PD regression suite: the Rust writer uses substituted
+storage callbacks there, not the probe's disabled physical write backend.
+
 ## Capture V1
 
 Capture V2 adds the manufacturer's P25Q16H V2.1 nine-DWORD fixture

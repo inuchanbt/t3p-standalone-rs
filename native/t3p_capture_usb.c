@@ -12,7 +12,13 @@ void t3p_capture_usb_request(const uint8_t q[64],uint8_t a[64])
     uint32_t at=get(q+8);put(a+8,at);put(a+16,get(q+12));
     unsigned bad=q[0]!='T'||q[1]!='3'||q[2]!='C'||q[3]!='Q'||q[5]||q[7];
     for(unsigned i=16;i<64;i++)bad|=q[i];
-    if(bad||q[4]>2)a[5]=1;
+    if(bad||q[4]>
+#ifdef T3P_CAPTURE_SFDP_PROBE
+       4
+#else
+       2
+#endif
+    )a[5]=1;
     else if(!q[4]){
         if(q[6]||at)a[5]=1;
         else {
@@ -25,6 +31,16 @@ void t3p_capture_usb_request(const uint8_t q[64],uint8_t a[64])
          * write activity triggered by a USB diagnostics request. */
         if(q[6]||at)a[5]=1;
         else {for(unsigned i=0;i<10;i++)put(a+24+4*i,t3p_capture_diagnostics[i]);a[6]=40;}
+#ifdef T3P_CAPTURE_SFDP_PROBE
+    }else if(q[4]==4){
+        if(q[6]||at)a[5]=1;
+        else {uint32_t info[10];t3p_capture_sfdp_info(info);
+            for(unsigned i=0;i<10;i++)put(a+24+4*i,info[i]);a[6]=40;}
+    }else if(q[4]==3){
+        if(!q[6]||q[6]>40||at>T3P_CAPTURE_SFDP_BYTES||q[6]>T3P_CAPTURE_SFDP_BYTES-at)a[5]=3;
+        else if(t3p_capture_sfdp_read(at,a+24,q[6]))a[5]=4;
+        else a[6]=q[6];
+#endif
     }else if(t3p_capture_status)a[5]=2;
     else if(!q[6]||q[6]>40||at>T3P_CAPTURE_BYTES||q[6]>T3P_CAPTURE_BYTES-at)a[5]=3;
     else if(t3p_capture_store_export_read(at,a+24,q[6])){a[5]=4;for(unsigned i=24;i<64;i++)a[i]=0;}

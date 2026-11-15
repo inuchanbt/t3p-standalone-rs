@@ -20,7 +20,8 @@ pub fn render(
         0 => b"SAVING - PLEASE WAIT",
         _ => b"SAVE FAILED / LOCKED",
     };
-    p.text(8, 55, message, 1, if result > 0 { AMPS } else { VOLTS });
+    p.text(8, 55, if cfg!(feature = "capture-sfdp-probe") { b"READ ONLY SFDP PROBE" } else { message },
+        1, if result > 0 { AMPS } else { VOLTS });
     if result > 0 {
         let mut name = *b"SCRN0000.BMP";
         let mut n = result as u32;
@@ -48,7 +49,7 @@ pub fn render(
             TEXT,
         );
     }
-    p.text(8, 187, b"PC: CAPTURE_EXPORT.PY", 1, AMPS);
-    p.text(8, 206, b"HOLD 3S SAVE / HOLD 1S ON RELEASE", 1, MUTED);
-    p.text(8, 222, b"6 SLOTS / USB READ ONLY", 1, MUTED);
+    p.text(8, 187, if cfg!(feature = "capture-sfdp-probe") { b"PC: SFDP_READ.PY" } else { b"PC: CAPTURE_EXPORT.PY" }, 1, AMPS);
+    p.text(8, 206, if cfg!(feature = "capture-sfdp-probe") { b"FLASH SAVE DISABLED" } else { b"HOLD 3S SAVE / HOLD 1S ON RELEASE" }, 1, MUTED);
+    p.text(8, 222, if cfg!(feature = "capture-sfdp-probe") { b"USB READ ONLY / SFDP" } else { b"6 SLOTS / USB READ ONLY" }, 1, MUTED);
 }

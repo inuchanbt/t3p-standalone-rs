@@ -4,8 +4,10 @@ pub const SYSTEM_PAGE: u32 = crate::pd::PD_PAGE_COUNT;
 pub const SYSTEM_SECTIONS: u8 = 3;
 #[cfg(not(feature = "capture-device"))]
 pub const FIRMWARE_VERSION: &[u8] = b"T3P RS SYSTEM V2";
-#[cfg(feature = "capture-device")]
+#[cfg(all(feature = "capture-device", not(feature = "capture-sfdp-probe")))]
 pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAPTURE V3";
+#[cfg(feature = "capture-sfdp-probe")]
+pub const FIRMWARE_VERSION: &[u8] = b"T3P RS SFDP PROBE";
 pub const BASE_IMAGE_VERSION: &[u8] = b"3.0.3";
 
 /// Native snapshot, matching native/t3p_system.h. Unknown values use flags,

@@ -8,7 +8,10 @@
 #define T3P_CAPTURE_STORE_HOST 1
 #include "../native/t3p_capture_store.c"
 #include "puya_p25q16h_sfdp.h"
-static uint8_t flash[0x200000],directory[256],reserved_header[32],sfdp_data[128];
+static uint8_t flash[0x200000],directory[256],reserved_header[32],sfdp_data[4096];
+#ifdef T3P_CAPTURE_SFDP_PROBE
+static unsigned sfdp_transactions,change_after,fail_after;
+#endif
 /* Literal independent addresses from BR35 JL_SPI0/JL_PORTF definitions. */
 #define MODEL_SPI 0xfe0700u
 #define MODEL_GPIO 0xfe1000u
@@ -24,6 +27,9 @@ static unsigned busy_after_id,identified;
 static unsigned dcu_delay,dcu_reads,cache_idle;
 static void finish_command(void)
 {
+#ifdef T3P_CAPTURE_SFDP_PROBE
+    if(command==0x5a)sfdp_transactions++;
+#endif
     if(command==6){wel=1;enables++;}
     if(command==0x9f)identified=1;
     if(command==0x20||command==2){
@@ -41,7 +47,11 @@ static void finish_command(void)
 }
 uint32_t capture_mmio_read(uint32_t at)
 {
-    if(at==MODEL_SPI)return (regs_spi[0]|0x8000)&~(busy_after_id==3&&command==0x5a?0x8000u:0u);
+    if(at==MODEL_SPI)return (regs_spi[0]|0x8000)&~((busy_after_id==3&&command==0x5a)
+#ifdef T3P_CAPTURE_SFDP_PROBE
+        ||(fail_after&&sfdp_transactions>=fail_after&&command==0x5a)
+#endif
+        ?0x8000u:0u);
     if(at>=MODEL_SPI&&at<=MODEL_SPI+20)return regs_spi[(at-MODEL_SPI)/4];
     if(at==MODEL_GPIO+4)return gpio_out;
     if(at==MODEL_GPIO+8)return gpio_dir;
@@ -85,7 +95,11 @@ void capture_mmio_write(uint32_t at,uint32_t value)
         assert(!receive);address_value=(address_value<<8)|(value&255);
     }else if(receive){
         if(command==3)regs_spi[2]=flash[address_value++];
-        else if(command==0x5a){assert(address_value<sizeof sfdp_data);regs_spi[2]=sfdp_data[address_value++];}
+        else if(command==0x5a){assert(address_value<sizeof sfdp_data);regs_spi[2]=sfdp_data[address_value++];
+#ifdef T3P_CAPTURE_SFDP_PROBE
+            if(change_after&&sfdp_transactions>=change_after&&address_value==0x181)regs_spi[2]^=1;
+#endif
+        }
         else if(command==5)regs_spi[2]=wel?2:0;
         else if(command==0x9f){assert(count<=3);regs_spi[2]=id_bytes[count-1];}
         else abort();
@@ -109,6 +123,9 @@ static void setup(void)
     sfdp_data[36]=sfdp_data[37]=sfdp_data[38]=255;sfdp_data[60]=12;sfdp_data[61]=0x20;sfdp_data[72]=0x80;
     protected_flash=wel=busy_after_id=identified=0;erases=enables=0;
     dcu_delay=dcu_reads=cache_idle=0;
+#ifdef T3P_CAPTURE_SFDP_PROBE
+    sfdp_transactions=change_after=fail_after=0;
+#endif
     id_bytes[0]=0xef;id_bytes[1]=0x40;id_bytes[2]=0x15;
 }
 static void legacy_setup(void)
@@ -214,4 +231,5 @@ int main(int argc,char **argv)
         printf("linked writer -> C buffered NOR replay: %u calls, %u page programs, max %u per page\n",records,total,maximum);
     }
     puts("capture NOR framing, partition bounds, page splits, readback, reboot and write refusal passed");
+    return 0;
 }

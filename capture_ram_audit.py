@@ -19,7 +19,7 @@ def elf_tables(path):
     return data,rows,labels,symbols
 
 
-def inspect(obj,elf):
+def inspect(obj,elf,read_only=False):
     data,rows,labels,symbols=elf_tables(obj)
     island=labels.index('.data.flash_ram')
     checked=0
@@ -34,9 +34,15 @@ def inspect(obj,elf):
     if not checked:raise ValueError('No SRAM relocations audited')
     _,_,_,linked=elf_tables(elf)
     functions={s[0]:s[1] for s in linked if s[3]&15==2}
-    names=('identify','enter','leave','byte','cs','address','status','read_raw','operate','clock_tick')
+    names=('identify','enter','leave','byte','cs','address','read_raw','clock_tick')
+    if read_only:
+        if any(s[0] in ('operate','program_io','status') for s in symbols+linked):
+            raise ValueError('Read-only probe contains flash mutation machinery')
+    else:
+        names+=('status','operate')
     for name in names:
         if not 0x101a80<=functions.get(name,0)<0x132e00:
             raise ValueError(f'SPI function {name} is not in owned SRAM')
     return dict(ram_functions_checked=len(names),ram_only_relocations_checked=checked,
+                flash_mutation_implementation_excluded=read_only,
                 rom_calls=False,flash_constants_reachable_while_suspended=False)

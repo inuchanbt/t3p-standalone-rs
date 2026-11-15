@@ -27,7 +27,12 @@ uint32_t t3p_capture_status=1,t3p_capture_jedec,t3p_capture_sfdp;
 uint32_t t3p_capture_diagnostics[10];
 static uint32_t cs_mask, saved_sfc, saved_spi[3], saved_gpio[2];
 static uint32_t virgin, page_at=~0u;
+#ifndef T3P_CAPTURE_SFDP_PROBE
 static uint8_t page[256];
+#else
+static uint8_t sfdp_snapshot[T3P_CAPTURE_SFDP_BYTES];
+static uint32_t sfdp_snapshot_bytes,sfdp_snapshot_crc;
+#endif
 static unsigned dirty;
 static struct t3p_bsp *timer_owner;
 
@@ -96,11 +101,13 @@ static RAM int address(unsigned command,uint32_t at)
     if(byte(command,0)<0||byte(at>>16,0)<0||byte(at>>8,0)<0||byte(at,0)<0)return -1;
     return 0;
 }
+#ifndef T3P_CAPTURE_SFDP_PROBE
 static RAM int status(void)
 {
     clock_tick();
     cs(0);int s=byte(5,0);if(s>=0)s=byte(255,1);cs(1);return s;
 }
+#endif
 static RAM int read_raw(uint32_t at,uint8_t *out,uint32_t n,unsigned sfdp)
 {
     if(enter())return -1;
@@ -109,6 +116,7 @@ static RAM int read_raw(uint32_t at,uint8_t *out,uint32_t n,unsigned sfdp)
     while(n--&&!result){int b=byte(255,1);if(b<0)result=-1;else *out++=(uint8_t)b;}
     cs(1);clock_tick();leave();return result;
 }
+#ifndef T3P_CAPTURE_SFDP_PROBE
 static RAM int operate(uint32_t at,const uint8_t *data,unsigned n)
 {
     if(enter())return -1;
@@ -130,6 +138,7 @@ uncertain:
 done:
     cs(1);leave();return result;
 }
+#endif
 static uint32_t get(const uint8_t *p)
 {return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static uint32_t crc(const uint8_t *p,unsigned n)
@@ -154,13 +163,51 @@ static RAM int identify(uint8_t id[3])
 /* Volatile entry pointers force full-address calls across the XIP/SRAM gap;
  * the Pi32v2 backend otherwise shortens local calls to a 2 MiB range. */
 static int (*volatile raw_io)(uint32_t,uint8_t *,uint32_t,unsigned)=read_raw;
+#ifndef T3P_CAPTURE_SFDP_PROBE
 static int (*volatile program_io)(uint32_t,const uint8_t *,unsigned)=operate;
+#endif
 static int (*volatile identify_io)(uint8_t *)=identify;
+#ifdef T3P_CAPTURE_SFDP_PROBE
+static int acquire_sfdp(void)
+{
+    /* A full first SPI read, then independent 256-byte SPI reads. Do not
+     * expose partial/unstable data or mistake repeated USB reads for SPI. */
+    uint8_t check[256];
+    t3p_capture_diagnostics[0]=10;
+    if(raw_io(0,sfdp_snapshot,sizeof sfdp_snapshot,1))return -1;
+    t3p_capture_diagnostics[0]=11;
+    for(unsigned at=0;at<sizeof sfdp_snapshot;at+=sizeof check){
+        if(raw_io(at,check,sizeof check,1))return -1;
+        for(unsigned i=0;i<sizeof check;i++)if(check[i]!=sfdp_snapshot[at+i]){
+            t3p_capture_diagnostics[1]=4;return -1;
+        }
+    }
+    sfdp_snapshot_crc=crc(sfdp_snapshot,sizeof sfdp_snapshot);
+    sfdp_snapshot_bytes=sizeof sfdp_snapshot;return 0;
+}
+void t3p_capture_sfdp_info(uint32_t info[10])
+{
+    for(unsigned i=0;i<10;i++)info[i]=0;
+    info[0]=0x31444653u; /* SFD1, metadata format v1 */
+    info[1]=sfdp_snapshot_bytes;info[2]=sfdp_snapshot_crc;
+    info[3]=sfdp_snapshot_bytes?2:0; /* matching independent SPI acquisitions */
+    info[4]=1; /* erase/program implementation excluded */
+    info[5]=t3p_capture_jedec;
+}
+int t3p_capture_sfdp_read(uint32_t at,uint8_t *out,uint32_t n)
+{
+    if(!sfdp_snapshot_bytes||!n||at>sfdp_snapshot_bytes||n>sfdp_snapshot_bytes-at)return -1;
+    for(unsigned i=0;i<n;i++)out[i]=sfdp_snapshot[at+i];return 0;
+}
+#endif
 int t3p_capture_store_init(struct t3p_bsp *clock)
 {
     timer_owner=clock;
     t3p_capture_status=1;page_at=~0u;dirty=0;virgin=0;
     t3p_capture_jedec=t3p_capture_sfdp=0;
+#ifdef T3P_CAPTURE_SFDP_PROBE
+    sfdp_snapshot_bytes=sfdp_snapshot_crc=0;
+#endif
     for(unsigned i=0;i<10;i++)t3p_capture_diagnostics[i]=0;
     t3p_capture_diagnostics[0]=1;
     if(R(SFC+16)!=0xf4005000u||(R(SFC+4)&1)||R(SFC+0x24))return -1;
@@ -192,6 +239,9 @@ int t3p_capture_store_init(struct t3p_bsp *clock)
     t3p_capture_sfdp=get(s);
     t3p_capture_diagnostics[0]=4;
     if(get(s)!=0x50444653u)return -1;
+#ifdef T3P_CAPTURE_SFDP_PROBE
+    if(acquire_sfdp())return -1;
+#endif
     t3p_capture_diagnostics[0]=5;
     if(s[5]!=1||s[8]!=0||s[10]!=1||s[11]<9||s[15]!=255)return -1;
     uint32_t pt=(uint32_t)s[12]|(uint32_t)s[13]<<8|(uint32_t)s[14]<<16;
@@ -218,18 +268,26 @@ int t3p_capture_store_init(struct t3p_bsp *clock)
             0xff,0xff,0x00,0xff,0xff,0xff,0x00,0xff,0x0c,0x20,0x0f,0x52,0x10,0xd8,0x08,0x81};
         for(unsigned i=0;i<sizeof expected;i++)if(s[i]!=expected[i])return -1;
     }else if(((get(s+40)>>4)&15)!=8)return -1;
+#ifdef T3P_CAPTURE_SFDP_PROBE
+    t3p_capture_diagnostics[0]=12;return -1; /* locked even if the profile matches */
+#else
     t3p_capture_diagnostics[0]=0;
     t3p_capture_status=0;return 0;
+#endif
 }
 static int bounds(uint32_t at,uint32_t n)
 {return !t3p_capture_status&&at<=T3P_CAPTURE_BYTES&&n<=T3P_CAPTURE_BYTES-at;}
 int t3p_capture_store_flush(void)
 {
+#ifdef T3P_CAPTURE_SFDP_PROBE
+    return -1;
+#else
     if(!dirty)return t3p_capture_status?-1:0;
     if(!bounds(page_at,256)||program_io(T3P_CAPTURE_START+page_at,page,256)){t3p_capture_status=3;return -1;}
     uint8_t check[256];if(raw_io(T3P_CAPTURE_START+page_at,check,256,0)){t3p_capture_status=3;return -1;}
     for(unsigned i=0;i<256;i++)if(check[i]!=page[i]){t3p_capture_status=3;return -1;}
     dirty=0;return 0;
+#endif
 }
 int t3p_capture_store_read(uint32_t at,uint8_t *out,uint32_t n)
 {
@@ -244,6 +302,9 @@ int t3p_capture_store_export_read(uint32_t at,uint8_t *out,uint32_t n)
 }
 int t3p_capture_store_program(uint32_t at,const uint8_t *p,uint32_t n)
 {
+#ifdef T3P_CAPTURE_SFDP_PROBE
+    (void)at;(void)p;(void)n;return -1;
+#else
     if(!bounds(at,n))return -1;
     while(n--){uint32_t base=at&~255u;
         if(base!=page_at){if(t3p_capture_store_flush()||raw_io(T3P_CAPTURE_START+base,page,256,0))return -1;page_at=base;}
@@ -251,9 +312,13 @@ int t3p_capture_store_program(uint32_t at,const uint8_t *p,uint32_t n)
         if((page[pos]&*p)!=*p)return -1;
         page[pos]=*p++;dirty=1;
     }return 0;
+#endif
 }
 int t3p_capture_store_prepare(void)
 {
+#ifdef T3P_CAPTURE_SFDP_PROBE
+    return -1;
+#else
     if(t3p_capture_status||t3p_capture_store_flush())return -1;
     /* This is invoked by a SAVE gesture, never at boot/USB enumeration.
      * Only slots proved to be fresh packaged FF are initialized. Unknown,
@@ -271,4 +336,5 @@ int t3p_capture_store_prepare(void)
         break; /* Initialize at most one new slot for this SAVE. */
     }
     page_at=~0u;return 0;
+#endif
 }

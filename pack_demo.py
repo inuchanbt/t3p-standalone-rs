@@ -143,6 +143,7 @@ def main():
         "measurement_input_simulated": "measurement candidate" in build_audit["status"],
         "capture_partition": ["0x90000", "0x150000"] if capture else None,
         "capture_writes_excluded_from_app_and_area_crcs": capture,
+        "sfdp_probe_flash_mutation_code_excluded": "erase/program implementation excluded" in build_audit['status'],
     }
     report_name = "demo-update" if args.output_name == IMAGE_NAME else Path(args.output_name).stem
     (out / f"{report_name}-unpack.log").write_bytes(result.stdout)

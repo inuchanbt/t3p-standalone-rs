@@ -11,6 +11,12 @@ extern uint32_t t3p_capture_status, t3p_capture_jedec, t3p_capture_sfdp;
 /* Read-only probe record: step, low-level error, BFPT length/pointer,
  * four SFDP header words, density, page-size word. Zero step means ready. */
 extern uint32_t t3p_capture_diagnostics[10];
+#ifdef T3P_CAPTURE_SFDP_PROBE
+#define T3P_CAPTURE_SFDP_BYTES 4096u
+/* Cached two-pass SPI acquisition only. USB never starts an SPI transaction. */
+void t3p_capture_sfdp_info(uint32_t info[10]);
+int t3p_capture_sfdp_read(uint32_t offset,uint8_t *out,uint32_t count);
+#endif
 int t3p_capture_store_init(struct t3p_bsp *clock);
 int t3p_capture_store_prepare(void);
 int t3p_capture_store_read(uint32_t offset, uint8_t *out, uint32_t count);

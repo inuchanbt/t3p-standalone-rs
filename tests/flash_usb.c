@@ -5,6 +5,10 @@
 #ifdef T3P_CAPTURE_DEVICE
 uint32_t t3p_capture_status,t3p_capture_jedec,t3p_capture_sfdp;
 uint32_t t3p_capture_diagnostics[10];
+#ifdef T3P_CAPTURE_SFDP_PROBE
+void t3p_capture_sfdp_info(uint32_t info[10]){memset(info,0,40);info[0]=0x31444653;info[4]=1;}
+int t3p_capture_sfdp_read(uint32_t at,uint8_t *p,uint32_t n){(void)at;(void)p;(void)n;return -1;}
+#endif
 int t3p_capture_store_export_read(uint32_t at,uint8_t *p,uint32_t n)
 {for(unsigned i=0;i<n;i++)p[i]=(uint8_t)(at+i);return 0;}
 #endif

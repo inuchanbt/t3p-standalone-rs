@@ -25,6 +25,7 @@ from flash_read import decode
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--build-dir',type=Path,default=ROOT/'build/capture-device')
+    p.add_argument('--sfdp-probe',action='store_true',help='Read-only SFDP acquisition variant')
     a=p.parse_args();out=a.build_dir
     sim=ROOT/'local/pi32v2-isa-66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f'
     sys.path.insert(0,str(sim/'tools/llvm'))
@@ -75,6 +76,9 @@ def main():
     cases.append(('wrong density',bad,0x856015,2,7))
     modern=bytearray(legacy);modern[11]=11;modern[0x58]=0x80
     cases.append(('modern page-size word',modern,0xef4015,0,0))
+    if a.sfdp_probe:
+        cases=[(name,data+bytes([255])*(4096-len(data)),jedec,
+                status or 2,step or 12) for name,data,jedec,status,step in cases]
     results=[]
     for name,sfdp,jedec,status,step in cases:
         symbols=cpu.load_elf(elf);cpu.sp=symbols['__runtime_stack_end']
@@ -91,7 +95,7 @@ def main():
                 cpu.mem.write(cpu.R[0],jedec.to_bytes(3,'big'))
             elif pc==symbols['read_raw']:
                 at,dest,n,kind=cpu.R[:4]
-                assert kind==1 and n in (24,36,44) and at+n<=len(sfdp)
+                assert kind==1 and n in ((24,36,44,256,4096) if a.sfdp_probe else (24,36,44)) and at+n<=len(sfdp)
                 transactions.append((at,n));cpu.mem.write(dest,sfdp[at:at+n])
             else:return old()
             cpu.R[0]=0;cpu.pc=cpu.rets
@@ -107,6 +111,27 @@ def main():
         cpu.call(symbols['t3p_capture_usb_request'],[request,answer])
         assert decode(cpu.mem.read(answer,64),0,73,b'T3CR',2)==words
         assert transactions==before
+        if a.sfdp_probe:
+            # Both new operations serve only the cached snapshot. They never
+            # perform SPI, and remain available with an unqualified profile.
+            q[4]=4;cpu.mem.write(request,q)
+            cpu.call(symbols['t3p_capture_usb_request'],[request,answer])
+            meta=struct.unpack('<10I',decode(cpu.mem.read(answer,64),0,73,b'T3CR',2))
+            valid=sfdp[:4]==b'SFDP'
+            assert meta[0]==0x31444653 and meta[1]==(4096 if valid else 0) and meta[4]==1
+            assert meta[3]==(2 if valid else 0) and meta[5]==jedec
+            if valid:
+                q[4]=3;q[6]=40;struct.pack_into('<I',q,8,48);cpu.mem.write(request,q)
+                cpu.call(symbols['t3p_capture_usb_request'],[request,answer])
+                assert decode(cpu.mem.read(answer,64),48,73,b'T3CR',2)==sfdp[48:88]
+            assert transactions==before
+            # Execute the actual linked refusal callbacks, including a forged
+            # ready status; no SPI operation may be reached.
+            cpu.mem.write(symbols['t3p_capture_status'],bytes(4))
+            for fn,args in (('t3p_capture_store_prepare',[]),('t3p_capture_store_program',[0,request,1]),
+                            ('t3p_capture_store_flush',[])):
+                assert cpu.call(symbols[fn],args)[0]==0xffffffff
+            assert transactions==before
         results.append(dict(case=name,status=status,step=step,synthetic_read_transactions=transactions))
     enter_results=[]
     rom=(ROOT.parent/'doom_on_t3p/local/jieli-sdk/SDK/cpu/br35/tools/rom.image').read_bytes()

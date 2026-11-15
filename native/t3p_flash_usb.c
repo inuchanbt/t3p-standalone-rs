@@ -71,7 +71,9 @@ static void setup(const uint8_t q[8])
     }
     if(type==0x80&&req==6&&(index==0||index==0x409)&&((value==0x301)||(value==0x302))) {
         const char *s=value==0x301?"T3P Experimental":
-#ifdef T3P_CAPTURE_DEVICE
+#if defined(T3P_CAPTURE_SFDP_PROBE)
+            "T3P SFDP Probe V1";
+#elif defined(T3P_CAPTURE_DEVICE)
             "T3P Capture V3";
 #else
             "T3P Flash Reader V3";

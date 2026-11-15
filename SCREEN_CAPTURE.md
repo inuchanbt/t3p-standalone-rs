@@ -7,12 +7,90 @@ hardware validation. Capture V1 booted with the reduced allocation and its USB
 INFO returned JEDEC `856015`, STORE `2`, SFDP `0`, last result `-1` on this unit.
 It refused the save before erase/program. V2 boot/USB diagnostics subsequently
 identified a false cache-idle timeout before SFDP transfer. V3 corrects the
-reversed DCU idle condition. **V3 execution, actual SFDP acquisition,
-program/erase, power-off retention and image export remain hardware trials.**
+reversed DCU idle condition. V3 boot and USB subsequently succeeded: the real
+unit reached the strict nine-DWORD profile comparison (step 9, no I/O error),
+with SFDP signature `50444653`, pointer `30` and density word `00FFFFFF`.
+This guard result implies at least one BFPT byte differs from the reference;
+the existing diagnostics cannot identify which byte. **Program/erase,
+power-off retention and image export remain unverified on hardware.**
 
 永続保存を優先する方針です。RAMだけの撮影版には変更していません。
 保存処理とUSB取り出しを実装し、オフラインで検証しています。実機での成功は
 候補を書き込んだ後に確認します。温度・シリアルはSYSTEM V2の取得状況のままです。
+
+## Current acquisition step / SFDP取得専用版
+
+Capture V4 saving support is **not yet qualified**. Capture V3 exports only the
+first 16 SFDP header bytes, BFPT pointer/length and two selected words. Its
+partition READ cannot read SFDP and is correctly locked on this unit. A device
+firmware change is therefore required before the actual table can be compared;
+the manufacturer fixture must not be presented as acquired device data.
+
+`--capture-sfdp-probe` builds **SFDP Probe V1**, a separate read-only acquisition
+candidate. The flash `operate`/WREN/program/erase implementation and its function
+pointer are excluded at compile time. Prepare/program/flush callbacks always
+refuse, even if a status variable were forced to ready. Normal Capture V3's
+strict profile guard remains unchanged. The probe stays locked even when a
+manufacturer or modern profile matches. It is not the final Capture V4 firmware.
+
+At boot, the probe reads SFDP addresses `0..0xFFF` with command `5A`, then reads
+the same extent independently in sixteen 256-byte SPI transactions. Only an
+identical pair is exposed as a cached snapshot with CRC32 and two-pass metadata.
+Incomplete reads, SPI timeouts and changed second acquisitions expose no snapshot.
+USB serves this cache without SPI transactions. INFO/DIAGNOSTICS remain compatible;
+new operation 3 reads at most 40 cached SFDP bytes and operation 4 returns `SFD1`
+metadata (length, CRC32, matching SPI passes, read-only flag, JEDEC, reserved zeros).
+There is no USB command for writes, protection changes or starting a save.
+
+```text
+python build.py --capture-sfdp-probe
+cargo build --offline --features capture-sfdp-probe --bin preview
+python preview_refs.py --capture-sfdp-probe --preview <preview.exe>
+python tests/check_sfdp_probe.py --cc <host-clang.exe>
+python tests/check_capture_probe_pi32.py --build-dir build/capture-sfdp-probe --sfdp-probe
+python pack_demo.py --build-dir build/capture-sfdp-probe --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_SFDP_PROBE_V1_3.0.3.bin
+```
+
+After flashing the acquisition candidate, leave it on the normal measurement
+screen, connect the HID port to the PC and **do not perform a save gesture**.
+The product is `T3P SFDP Probe V1`; the SYSTEM app label is `T3P RS SFDP PROBE`.
+
+```text
+python sfdp_read.py --info
+python sfdp_read.py --output build/capture-sfdp-probe/device-sfdp-01.bin
+```
+
+The PC tool independently reads the cached snapshot twice, checks metadata and
+CRC32, and requires **every advertised parameter header/table** to fit inside
+the acquired extent. A table outside 4 KiB is reported as incomplete, never
+silently treated as complete. The binary and JSON include all advertised table
+bytes, pointers, hashes, header differences and exact BFPT differences from the
+published P25Q16H V2.1 reference. The unknown vendor-table bytes are retained
+without inventing expected contents. Existing output names are never replaced.
+Only after acquiring this unit's actual bytes can a supported profile and final
+Capture V4 saving candidate be decided. Successful saving, power-off retention
+and BMP export will still need separate device checks.
+
+取得版を書き込んだ後は、通常の測定画面でPCにつないだままにします。長押しは不要です。
+SFDPの二度読み・表全体の取得・既存の対応表との差分を確認してから、保存対応を確定します。
+この取得版ではフラッシュ保存を無効にしています。
+
+SFDP Probe V1 package: `build/capture-sfdp-probe/T3P_RUST_METER_SFDP_PROBE_V1_3.0.3.bin`.
+Size 1,540,096 bytes; SHA-256
+`33c403a6c83cd118882b601f60118dd51cb0765d3af5036b5d1a642740b7693f`.
+The checksum sidecar and independent unpack audit accompany the image locally.
+The linked payload spans 169,020 bytes; static RAM is 21,216 bytes. Eight
+SPI-island functions and seven RAM-only relocations passed the audit, with
+the mutation machinery absent. Verification passed 48 Rust tests, three new
+C checks, five new Python checks, six linked profile/USB/refusal cases and
+four SRAM entry/exit cases. The normal six-C/four-Python capture regression,
+shared flash-reader regression and pinned stock-source evidence check also
+passed. All 63 host frames and the full linked capture/measurement/graph/PD/
+CABLE/CHARGER/SYSTEM suite passed. Independent full unpack/CRC checks matched
+the boot prefix and all 44 non-application files. These are offline checks;
+probe execution and actual full-table acquisition still require the device
+to be flashed and connected. This package does not establish Capture V4
+storage support or successful physical erase/program.
 
 ## Operation / 操作
 
@@ -324,7 +402,13 @@ with seven RAM-only relocations. Independent full decryption and CRC checks
 passed; the boot prefix and all 44 non-application files matched the originals.
 No V3 firmware was flashed or executed on the device during these checks.
 
-After flashing, connect in ordinary measurement mode **before long-press saving**
-and read `capture_export.py --info`. The expected next milestone is STORE `0`
-with acquired SFDP, followed by a saved image, power-off retention and two-pass
-BMP export. Further chip/controller faults remain real failures.
+The subsequent V3 device check (2026-11-15, repeated at 23:00 JST) returned
+identical INFO/DIAGNOSTICS pairs: STORE `2`, JEDEC `856015`, SFDP `50444653`,
+step `9`, I/O error `0`, BFPT length `9`, pointer `30`, density `00FFFFFF`,
+page word unavailable and last save result `0`. No save was requested. The
+local raw records remain under ignored `build/capture-device/` and
+`build/capture-sfdp-probe/live-before-probe-20261115-230004.json`.
+The cache/SPI-read path now works, but the actual legacy table is unqualified.
+The next device step is the read-only SFDP acquisition described above, before
+changing the supported table or attempting a save. Do not treat the missing
+page-size DWORD or a failed exact match as permission to bypass qualification.

@@ -333,7 +333,8 @@ fn header(p: &mut Strip<'_>, view: &Overview) {
         1,
         MUTED,
     );
-    p.text(186, 226, if cfg!(feature = "capture-device") { b"3S SAVE" } else { b"RAM ONLY" }, 1, MUTED);
+    p.text(186, 226, if cfg!(feature = "capture-sfdp-probe") { b"USB SFDP" }
+        else if cfg!(feature = "capture-device") { b"3S SAVE" } else { b"RAM ONLY" }, 1, MUTED);
 }
 
 fn card(p: &mut Strip<'_>, x: usize, y: usize, w: usize, h: usize, title: &[u8], color: u16) {
