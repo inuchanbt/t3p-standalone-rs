@@ -490,3 +490,19 @@ guard accepts the acquired table with STORE `0` and initialization step `0`.
 Device boot/USB/guard behavior, then actual save, power-off retention and BMP
 export need their own hardware confirmation. Unknown failures stay real
 failures and never authorize global unlock or automatic slot recycling.
+
+V4 device follow-up, **2026-11-16 00:31 JST**: the unit enumerated as
+`T3P Capture V4` (0483:5750, FF31/usage 1/interface 0). Two INFO/DIAGNOSTICS
+acquisitions matched: STORE `0`, step `0`/ready, I/O error `0`, JEDEC `856015`,
+SFDP `50444653`, nine-DWORD BFPT at `30`, density `00FFFFFF`, page word
+unavailable and last result `0`. This confirms V4 boot, USB and live chip-profile
+qualification. No save was requested by these host reads.
+
+At 00:32 JST, the six 64-byte slot headers also matched on a second acquisition.
+None contained a committed screenshot record, and every header exactly matched
+the corresponding bytes in the packaged V4 image. These raw headers are not
+erased FF; header inspection does not establish a completely blank slot. The
+host uses export-read and cannot flush/program/erase. The private records are
+`build/capture-device/device-v4-pre-save-diagnostics-20261116-003117.json` and
+`build/capture-device/device-v4-pre-save-slot-headers-20261116-003231.json`.
+Actual save, power-off retention and BMP export still need device verification.
