@@ -186,6 +186,49 @@ V4's successful retention test above does not verify the new buffering path.
 The next hardware step is to flash the comparison build, confirm its ready
 status before saving, and acquire a completed timing record before power-off.
 
+V5 pre-save device follow-up, **2026-11-16 04:42 JST**: the attached unit
+enumerated as `T3P Capture V5` (0483:5750, FF31/usage 1/interface 0), rather than
+the comparison product. Two independent INFO/DIAGNOSTICS/TIMINGS snapshots
+matched: STORE `0`, JEDEC `856015`, SFDP `50444653`, diagnostic step/error `0`,
+nine-DWORD BFPT at `30`, density `00FFFFFF` and page word unavailable. All three
+optimization flags were true, with the clock owner present, generation `0`,
+no completed attempt and elapsed fields `null`. The user had not triggered a
+SAVE. This verifies V5 boot, USB and the live profile gate, not physical saving
+or timing yet. The private record is
+`build/capture-v5/device-pre-save-20261115-194229.json` (filename in UTC).
+The hardware comparison order was adjusted to acquire V5 first.
+
+V5 first save/export, **2026-11-16 04:44 JST**: the user triggered one SAVE and
+reported `SAVED TO FLASH`. Two independent cached snapshots matched with STORE
+`0`, no diagnostic error, last result `1`, timing generation `1`, completed and
+clock available. The six exclusive phases summed to **3,334 ms**:
+
+| Measured V5 phase | Milliseconds |
+| --- | ---: |
+| SAVING/result notice rendering and LCD transfer | 796 |
+| Prepare: erase plus complete raw blank check | 1,569 |
+| Journal validation and header setup | 5 |
+| Frozen-image rendering | 38 |
+| Encoding and buffered writes | 639 |
+| Final verification, metadata and commit | 287 |
+
+Overlapping I/O subtotals were erase 552 ms, blank checking 1,014 ms, page
+program 264 ms, page readback 155 ms and other reads 305 ms. They must not be
+added to the phase total. The save recorded 32 erase attempts, all 131,072
+blank-read requested bytes, one blank claim, 76 page-program attempts and thirty
+render calls. All optimization flags were true. This is one device-timer
+measurement, excluding the three-second gesture and four-second result hold;
+the instrumented V4-path hardware comparison has not yet been acquired.
+
+The single committed `SCRN0001.BMP` was exported in two matching acquisitions.
+Its encoded payload is 18,794 bytes; all 115,266 BMP bytes passed decoding/CRC
+checks, with SHA-256
+`49cffc0e7f97f38c3b567016a89846ffaa8f096bd50f6ed01a1f59aafbd4915a`.
+The cached snapshots were unchanged after export. Private evidence is
+`build/capture-v5/device-optimized-first-save-20261115-194420.json` and
+`build/captures/hardware-v5-before-power-cycle-20261116/` (record filename in UTC).
+Power-off retention of this V5 image is a separate next check.
+
 ## SFDP acquisition and Capture V4 / 実測表と保存対応
 
 Capture V3 exports only the
