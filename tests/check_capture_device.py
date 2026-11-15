@@ -2,9 +2,11 @@
 import argparse
 from binascii import crc_hqx
 from io import BytesIO
+import hashlib
 import json
 from pathlib import Path
 import struct
+import re
 import subprocess
 import sys
 import tempfile
@@ -14,6 +16,7 @@ ROOT=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(ROOT))
 import capture_layout as layout
 import capture_export as host
+import sfdp_read
 from flash_read import decode
 from PIL import Image
 
@@ -45,6 +48,22 @@ class FakeReader:
 
 
 class Checks(unittest.TestCase):
+    def test_observed_profile_transcript_and_exact_guard(self):
+        text=(ROOT/'tests/t3p_856015_sfdp.h').read_text()
+        body=re.search(r't3p_856015_bfpt\[\]=\{([^}]+)',text)[1]
+        actual=bytes(int(n,16) for n in re.findall(r'0x([0-9a-f]+)',body))
+        self.assertEqual(hashlib.sha256(actual).hexdigest(),
+                         '2e71d6dbc5696d1ec4fb214ee353f4329d31f8dd1827c10b625bc6b40d57b079')
+        expected=sfdp_read.REFERENCE_BFPT
+        self.assertEqual([(i,a,b) for i,(a,b) in enumerate(zip(expected,actual)) if a!=b],
+                         [(2,0xf1,0xf9),(16,0xee,0xfe),(26,0,0x44),(27,0xff,0xeb)])
+        self.assertEqual(actual[4:8],expected[4:8]);self.assertEqual(actual[28:36],expected[28:36])
+        self.assertEqual((int.from_bytes(actual[:4],'little')>>17)&3,0)
+        text=(ROOT/'native/t3p_capture_store.c').read_text()
+        body=re.search(r'observed\[\]=\{([^}]+)',text)[1]
+        guard=bytes(int(n,16) for n in re.findall(r'0x([0-9a-f]+)',body))
+        self.assertEqual(guard,actual)
+
     def test_layout_and_checksums_are_separate(self):
         p,bounds=fixture();self.assertEqual(bounds,(0x5100,0x85000))
         layout.verify_crcs_after_capture(p)
@@ -113,7 +132,20 @@ class Checks(unittest.TestCase):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--cc',required=True);p.add_argument('--device-view',type=Path)
     p.add_argument('--native-io',type=Path,help='Replay storage calls from the linked Pi32v2 writer through the C NOR backend')
+    p.add_argument('--device-sfdp',type=Path,help='Verify the private two-pass SPI/USB SFDP acquisition against the public BFPT transcript')
     a=p.parse_args()
+    if a.device_sfdp:
+        data=a.device_sfdp.read_bytes();record=json.loads(Path(str(a.device_sfdp)+'.json').read_bytes())
+        digest=hashlib.sha256(data).hexdigest()
+        assert digest==record['sha256']=='0ea357f52b1e02511d347995cec9226e056e5b4b65172471f00f7896faac7549'
+        assert record['identical_second_usb_acquisition'] and record['snapshot']['matching_spi_acquisitions']==2
+        assert record['snapshot']['flash_mutation_code_excluded'] and record['snapshot']['jedec']==0x856015
+        assert record['snapshot']['crc32']==zlib.crc32(data)
+        result=sfdp_read.tables(data)
+        assert result['all_advertised_tables_acquired'] and result['parameter_headers']==2
+        assert data[:24]==sfdp_read.REFERENCE_HEADER
+        assert result['tables'][0]['sha256']=='2e71d6dbc5696d1ec4fb214ee353f4329d31f8dd1827c10b625bc6b40d57b079'
+        print('Private acquired SFDP matches its two-pass evidence and public BFPT transcript.')
     out=ROOT/'build/capture-device';out.mkdir(parents=True,exist_ok=True)
     plain,_=fixture();f=out/'layout-fixture.bin';f.write_bytes(plain[0x5000:0x5100]+plain[0x85000:0x85020])
     for name in ('capture_store','capture_button','capture_usb','button','flash_usb','board_capture_device'):

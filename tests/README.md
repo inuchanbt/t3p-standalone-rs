@@ -11,7 +11,7 @@ The models use constructed data and manufacturer bytes; they are not actual
 device acquisitions. Read-only callbacks refuse even a forced ready status.
 
 `check_capture_probe_pi32.py --build-dir build/capture-sfdp-probe --sfdp-probe`
-runs six linked profile/USB cases, verifies snapshot operations trigger no SPI,
+runs eight linked profile/USB cases, verifies snapshot operations trigger no SPI,
 and executes linked prepare/program/flush refusal callbacks. It also retains
 four actual linked SRAM entry/exit cases. `capture_ram_audit.py` rejects any
 `operate`, `program_io` or `status` symbol in the probe object or ELF and checks
@@ -20,6 +20,18 @@ the full UI/writer/PD regression suite: the Rust writer uses substituted
 storage callbacks there, not the probe's disabled physical write backend.
 
 ## Capture V1
+
+Capture V4 adds the actual unit's BFPT transcript in `t3p_856015_sfdp.h`, separate
+from the manufacturer fixture. Full SFDP acquisition is private and can be
+checked with `check_capture_device.py --device-sfdp PATH.bin --cc CLANG`.
+This verifies both SPI/USB acquisition markers, full snapshot SHA-256/CRC32,
+all advertised table extents and the exact public BFPT transcript. The C guard
+accepts either complete known legacy table and rejects every mutated header/
+BFPT byte plus all 14 unobserved combinations of the four differences.
+Buffered read/program/readback and the linked writer replay use the observed
+profile in the NOR model. Eight linked profile/USB cases now include the actual
+table and an unobserved mixture; the four SRAM entry checks are unchanged.
+These checks do not establish physical erase/program, retention or BMP export.
 
 Capture V2 adds the manufacturer's P25Q16H V2.1 nine-DWORD fixture
 (`puya_p25q16h_sfdp.h`), rejects mutation of every published header/BFPT byte and
@@ -31,7 +43,7 @@ the host's CRC/sequence/length validation and unavailable fields represented by
 timeout or signature condition occurred on the chip.
 
 `python tests/check_capture_probe_pi32.py` additionally runs the linked C guard
-and USB diagnostics on Pi32v2 in six acceptance/refusal cases. Only the read-only
+and USB diagnostics on Pi32v2 in eight acceptance/refusal cases. Only the read-only
 SPI transaction results are substituted; this is an ABI/compiled-guard check,
 not a silicon or cache-timing test. Run the C fixture generator and native build first.
 

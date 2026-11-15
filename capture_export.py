@@ -11,7 +11,7 @@ import struct
 import zlib
 from flash_read import Reader
 
-PRODUCTS=('T3P Capture V1','T3P Capture V2','T3P Capture V3')
+PRODUCTS=('T3P Capture V1','T3P Capture V2','T3P Capture V3','T3P Capture V4')
 SLOT=0x20000
 
 
@@ -108,7 +108,7 @@ def main():
     if not a.info and a.output is None:p.error('Use --info or --output DIRECTORY')
     import hid
     devices=[d for d in hid.enumerate(0x483,0x5750) if d.get('product_string') in PRODUCTS]
-    if len(devices)!=1:raise SystemExit(f'Expected one T3P Capture V1/V2/V3; found {len(devices)}')
+    if len(devices)!=1:raise SystemExit(f'Expected one T3P Capture V1/V2/V3/V4; found {len(devices)}')
     dev=hid.device()
     try:
         dev.open_path(devices[0]['path']);r=CaptureReader(dev);info=r.info()

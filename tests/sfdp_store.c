@@ -27,6 +27,9 @@ int main(int argc,char **argv)
     assert(t3p_capture_store_program(0,check,1)==-1);
     assert(t3p_capture_store_flush()==-1);
     assert(transfers==before&&!enables&&!erases);
+    legacy_setup();memcpy(sfdp_data+0x30,t3p_856015_bfpt,sizeof t3p_856015_bfpt);
+    assert(t3p_capture_store_init(&model_clock)==-1&&t3p_capture_diagnostics[0]==12);
+    t3p_capture_sfdp_info(info);assert(info[1]==4096&&info[3]==2&&!enables&&!erases);
     legacy_setup();sfdp_data[0x38]^=1;
     assert(t3p_capture_store_init(&model_clock)==-1&&t3p_capture_diagnostics[0]==9);
     t3p_capture_sfdp_info(info);assert(info[1]==4096&&info[3]==2);

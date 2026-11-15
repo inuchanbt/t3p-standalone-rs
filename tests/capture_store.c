@@ -8,6 +8,7 @@
 #define T3P_CAPTURE_STORE_HOST 1
 #include "../native/t3p_capture_store.c"
 #include "puya_p25q16h_sfdp.h"
+#include "t3p_856015_sfdp.h"
 static uint8_t flash[0x200000],directory[256],reserved_header[32],sfdp_data[4096];
 #ifdef T3P_CAPTURE_SFDP_PROBE
 static unsigned sfdp_transactions,change_after,fail_after;
@@ -195,6 +196,29 @@ int main(int argc,char **argv)
     }
     legacy_setup();id_bytes[1]^=1;assert(t3p_capture_store_init(&model_clock));
     assert(t3p_capture_store_prepare()&&!enables&&!erases);
+    /* The acquired variant must exercise the same buffered 1-1-1 storage
+     * path. No DTR/QPI setup or status/protection write is modeled/allowed. */
+    legacy_setup();memcpy(sfdp_data+0x30,t3p_856015_bfpt,sizeof t3p_856015_bfpt);
+    assert(!t3p_capture_store_init(&model_clock)&&!enables&&!erases);
+    assert(!t3p_capture_store_prepare()&&erases==32);
+    for(unsigned i=0;i<256;i++)check[i]=(uint8_t)i;
+    assert(!t3p_capture_store_program(0,check,256)&&!t3p_capture_store_flush());
+    memset(check,0,256);assert(!t3p_capture_store_read(0,check,256));
+    for(unsigned i=0;i<256;i++)assert(check[i]==(uint8_t)i);
+    for(unsigned i=0;i<sizeof puya_header+sizeof t3p_856015_bfpt;i++){
+        legacy_setup();memcpy(sfdp_data+0x30,t3p_856015_bfpt,sizeof t3p_856015_bfpt);
+        sfdp_data[i<sizeof puya_header?i:i-sizeof puya_header+0x30]^=1;
+        assert(t3p_capture_store_init(&model_clock));
+        assert(t3p_capture_store_prepare()&&!enables&&!erases);
+    }
+    /* Reject every unobserved mixture of the four changed bytes. */
+    const unsigned changed[]={2,16,26,27};
+    for(unsigned mix=1;mix<15;mix++){
+        legacy_setup();for(unsigned i=0;i<4;i++)if(mix&(1u<<i))
+            sfdp_data[0x30+changed[i]]=t3p_856015_bfpt[changed[i]];
+        assert(t3p_capture_store_init(&model_clock));
+        assert(t3p_capture_store_prepare()&&!enables&&!erases);
+    }
     /* Protected flash is not globally unlocked; failed erase is an I/O error. */
     setup();assert(!t3p_capture_store_init(&model_clock));protected_flash=1;
     assert(t3p_capture_store_prepare());assert(t3p_capture_status==3&&erases==1);
@@ -205,7 +229,8 @@ int main(int argc,char **argv)
     if(argc==3){
         /* Replay every storage call from the linked Pi32v2 Rust writer,
          * including reads that must flush C's pending page before verify. */
-        model_port=0;gpio_out=1;setup();
+        model_port=0;gpio_out=1;legacy_setup();
+        memcpy(sfdp_data+0x30,t3p_856015_bfpt,sizeof t3p_856015_bfpt);
         assert(!t3p_capture_store_init(&model_clock));
         assert(!t3p_capture_store_prepare());
         memset(flash+T3P_CAPTURE_START,255,T3P_CAPTURE_BYTES);

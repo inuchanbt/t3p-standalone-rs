@@ -1,6 +1,6 @@
 # Persistent screen capture / 画面キャプチャ
 
-`--capture-device` (Capture V3) implements a native flash backend, a frozen-frame
+`--capture-device` (Capture V4) implements a native flash backend, a frozen-frame
 save gesture and BMP export through the V3 EP0 USB HID transport. It includes
 SYSTEM V2 and the existing CHARGER V5 functions. The current candidate is for
 hardware validation. Capture V1 booted with the reduced allocation and its USB
@@ -11,26 +11,68 @@ reversed DCU idle condition. V3 boot and USB subsequently succeeded: the real
 unit reached the strict nine-DWORD profile comparison (step 9, no I/O error),
 with SFDP signature `50444653`, pointer `30` and density word `00FFFFFF`.
 This guard result implies at least one BFPT byte differs from the reference;
-the existing diagnostics cannot identify which byte. **Program/erase,
-power-off retention and image export remain unverified on hardware.**
+the V3 diagnostics cannot identify which byte. The subsequent SFDP Probe V1
+acquisition identified four changed bytes, and V4 adds that exact observed
+profile alongside the manufacturer's table. **V4 program/erase, power-off
+retention and image export remain unverified on hardware.**
 
 永続保存を優先する方針です。RAMだけの撮影版には変更していません。
 保存処理とUSB取り出しを実装し、オフラインで検証しています。実機での成功は
 候補を書き込んだ後に確認します。温度・シリアルはSYSTEM V2の取得状況のままです。
 
-## Current acquisition step / SFDP取得専用版
+## SFDP acquisition and Capture V4 / 実測表と保存対応
 
-Capture V4 saving support is **not yet qualified**. Capture V3 exports only the
+Capture V3 exports only the
 first 16 SFDP header bytes, BFPT pointer/length and two selected words. Its
 partition READ cannot read SFDP and is correctly locked on this unit. A device
 firmware change is therefore required before the actual table can be compared;
 the manufacturer fixture must not be presented as acquired device data.
 
+The real unit's SFDP was acquired at **2026-11-15 23:19:27 JST** with SFDP
+Probe V1: both independent SPI passes matched, both USB acquisitions matched,
+and all advertised headers/tables were covered. The private 4096-byte snapshot
+is `build/capture-sfdp-probe/device-sfdp-20261115-231927.bin` plus its JSON record.
+Snapshot SHA-256:
+`0ea357f52b1e02511d347995cec9226e056e5b4b65172471f00f7896faac7549`.
+The 24-byte SFDP/parameter headers match the published reference exactly.
+BFPT `FF00` is nine DWORDs at `30`; the vendor table `FF85` is three DWORDs
+at `60`. Its uninterpreted bytes remain in the private acquisition only.
+
+The observed BFPT SHA-256 is
+`2e71d6dbc5696d1ec4fb214ee353f4329d31f8dd1827c10b625bc6b40d57b079`.
+Only its 36 capability bytes are transcribed into `tests/t3p_856015_sfdp.h`.
+They are device evidence, separate from the manufacturer reference fixture.
+
+| SFDP address | Reference | Observed | Meaning |
+| --- | --- | --- | --- |
+| `32` | `F1` | `F9` | DWORD 1 bit 19: DTR read support |
+| `40` | `EE` | `FE` | DWORD 5 bit 4: 4-4-4 fast-read support |
+| `4A` | `00` | `44` | DWORD 7: 4-4-4 read mode/wait settings |
+| `4B` | `FF` | `EB` | DWORD 7: 4-4-4 read opcode |
+
+These fields are described by [P25Q16H V2.1, pp.55-56](https://www.puyasemi.com/download_path/%E6%95%B0%E6%8D%AE%E6%89%8B%E5%86%8C/Flash/P25Q16H_Datasheet_V2.1.pdf).
+They advertise capabilities; they do not show that the device is operating in
+DTR/QPI mode. The capture driver uses standard 1-1-1 `03` read, `02` page
+program and `20` sector erase, and never enables those fast-read modes.
+Density `00FFFFFF` (2 MiB), three-byte addressing and all erase descriptors
+are identical. The actual nine-DWORD table has no page-size DWORD 11; the
+256-byte page-program size comes from the same manufacturer's pp.4,39.
+No missing field is fabricated as acquired SFDP data.
+
+V4 accepts **either whole 36-byte table**, plus the unchanged exact legacy
+header/vendor-header/JEDEC checks and density/address/erase guards. It does
+not mask away differences or accept other mixtures. C tests mutate every
+header/BFPT byte of both profiles and reject all 14 unobserved combinations
+of the four differing bytes. The observed profile also runs buffered
+program/readback and the linked Rust writer trace through the independent
+C NOR model. No status/protection writes, QPI/DTR setup, ROM call or change
+to partition/erase selection was added. Physical programming/retention/export
+still requires testing the V4 firmware on the unit.
+
 `--capture-sfdp-probe` builds **SFDP Probe V1**, a separate read-only acquisition
-candidate. The flash `operate`/WREN/program/erase implementation and its function
+candidate used to obtain the evidence above. The flash `operate`/WREN/program/erase implementation and its function
 pointer are excluded at compile time. Prepare/program/flush callbacks always
-refuse, even if a status variable were forced to ready. Normal Capture V3's
-strict profile guard remains unchanged. The probe stays locked even when a
+refuse, even if a status variable were forced to ready. The probe stays locked even when a
 manufacturer or modern profile matches. It is not the final Capture V4 firmware.
 
 At boot, the probe reads SFDP addresses `0..0xFFF` with command `5A`, then reads
@@ -67,18 +109,21 @@ silently treated as complete. The binary and JSON include all advertised table
 bytes, pointers, hashes, header differences and exact BFPT differences from the
 published P25Q16H V2.1 reference. The unknown vendor-table bytes are retained
 without inventing expected contents. Existing output names are never replaced.
-Only after acquiring this unit's actual bytes can a supported profile and final
-Capture V4 saving candidate be decided. Successful saving, power-off retention
-and BMP export will still need separate device checks.
+The acquired bytes above now define the additional Capture V4 profile.
+Successful saving, power-off retention and BMP export still need separate
+device checks.
 
 取得版を書き込んだ後は、通常の測定画面でPCにつないだままにします。長押しは不要です。
-SFDPの二度読み・表全体の取得・既存の対応表との差分を確認してから、保存対応を確定します。
+SFDPの二度読み・表全体の取得・既存の対応表との差分を確認し、Capture V4に実測パターンを追加しました。
 この取得版ではフラッシュ保存を無効にしています。
 
 SFDP Probe V1 package: `build/capture-sfdp-probe/T3P_RUST_METER_SFDP_PROBE_V1_3.0.3.bin`.
 Size 1,540,096 bytes; SHA-256
 `33c403a6c83cd118882b601f60118dd51cb0765d3af5036b5d1a642740b7693f`.
 The checksum sidecar and independent unpack audit accompany the image locally.
+This archived probe image was built at commit `362758e`, before adding the
+observed profile. A current source build remains read-only but can finish at
+step 12 rather than step 9 for this now-recognized profile.
 The linked payload spans 169,020 bytes; static RAM is 21,216 bytes. Eight
 SPI-island functions and seven RAM-only relocations passed the audit, with
 the mutation machinery absent. Verification passed 48 Rust tests, three new
@@ -88,9 +133,9 @@ shared flash-reader regression and pinned stock-source evidence check also
 passed. All 63 host frames and the full linked capture/measurement/graph/PD/
 CABLE/CHARGER/SYSTEM suite passed. Independent full unpack/CRC checks matched
 the boot prefix and all 44 non-application files. These are offline checks;
-probe execution and actual full-table acquisition still require the device
-to be flashed and connected. This package does not establish Capture V4
-storage support or successful physical erase/program.
+probe execution and actual full-table acquisition subsequently succeeded as
+recorded above. The probe did not erase or program flash and does not establish
+successful physical erase/program for Capture V4.
 
 ## Operation / 操作
 
@@ -123,11 +168,11 @@ python capture_export.py --info
 python capture_export.py --output build/captures/session-01
 ```
 
-The device identifies as `T3P Capture V3` (VID/PID 0483:5750). The host also accepts
-Capture V1/V2. Only these products are
+The device identifies as `T3P Capture V4` (VID/PID 0483:5750). The host also accepts
+Capture V1/V2/V3. Only these products are
 selected; the stock software and Flash Reader V3 are not treated as capture devices.
 The protocol has INFO, bounded READ and cached DIAGNOSTICS only:
-**no host program/erase command**. V2/V3 `--info` reports the failed initialization
+**no host program/erase command**. V2/V3/V4 `--info` reports the failed initialization
 step, cache/SFC/SPI timeout, SFDP header and BFPT length/pointer/density/page word.
 Unread fields are `null`, not invented values. DIAGNOSTICS returns the boot record
 even while locked and performs no SPI transaction or write. V1 INFO remains usable.
@@ -175,7 +220,7 @@ reserved fields and existing resource offsets. A CRC-protected private manifest
 occupies unused inner-directory padding at physical `0x50C0`. Both application
 CRC spans end at `0x85000`. Packaging checks them again after changing **every
 capture byte**, then independently unpacks the update and compares the boot files
-and all 44 non-app files. V1/V2 booted with this layout on hardware; successful
+and all 44 non-app files. V1/V2/V3 and SFDP Probe V1 booted with this layout on hardware; successful
 erase/program and power-off retention remain unverified.
 
 ```text
@@ -191,7 +236,9 @@ or DTR mode. JEDEC and SFDP are read from the chip; the SFDP gate requires a
 4 KiB erase opcode 20h. Normal BFPT tables supply page size in DWORD 11.
 V2 additionally accepts the exact nine-DWORD table published for PUYA P25Q16H
 (ID `856015`), including its vendor header and all 36 BFPT bytes; its documented
-page size is 256 bytes. A missing/zero SFDP signature never qualifies via ID alone.
+page size is 256 bytes. V4 additionally accepts the complete acquired variant
+described above with the same exact header/ID checks. A missing/zero SFDP
+signature never qualifies via ID alone.
 Unsupported chips stay LOCKED. Synthetic preview JEDEC
 values are never used as live data. `STORE=1` indicates a mapping/layout guard,
 `2` a controller/chip-profile guard, and `3` an I/O/readback fault.
@@ -243,7 +290,7 @@ screen as a completed record.
 
 ```text
 cargo test --offline --features capture-device
-python tests/check_capture_device.py --cc PATH_TO_HOST_CLANG --device-view build/flash-reader/device-v3-full.mapped.bin
+python tests/check_capture_device.py --cc PATH_TO_HOST_CLANG --device-view build/flash-reader/device-v3-full.mapped.bin --device-sfdp build/capture-sfdp-probe/device-sfdp-20261115-231927.bin
 python tests/check_flash_reader.py --cc PATH_TO_HOST_CLANG
 python capture_store_source_evidence.py
 python tests/check_system.py --cc PATH_TO_HOST_CLANG
@@ -251,7 +298,7 @@ cargo build --offline --features capture-device --bin preview
 python preview_refs.py --capture-device --preview PATH_TO_PREVIEW_EXE
 python build.py --capture-device
 python tests/check_capture_probe_pi32.py --build-dir build/capture-device
-python pack_demo.py --build-dir build/capture-device --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V3_3.0.3.bin
+python pack_demo.py --build-dir build/capture-device --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V4_3.0.3.bin
 ```
 
 Packaging runs the full Pi32v2 measurement/PD/CABLE/CHARGER/SYSTEM comparisons,
@@ -262,8 +309,9 @@ flash silicon, cache timing or power loss on the hardware. Rust journal tests
 include interrupted writes at every byte of a complete solid-image save, prior
 image preservation, corrupted data, occupied slots, full storage and high entropy.
 The separate Pi32v2 probe check executes the linked C layout/profile guards and
-USB diagnostics in six cases, with synthetic read-only SPI transaction results.
-It covers legacy/modern acceptance and wrong-ID/zero/corrupted/density refusal;
+USB diagnostics in eight cases, with substituted read-only SPI transaction results.
+It covers manufacturer/acquired/modern acceptance and wrong-ID/zero/corrupted/
+density/unobserved-mixture refusal;
 V3 also executes four linked SRAM entry/exit cases using modeled MMIO values
 and compares successful waits with pinned reference-ROM instructions in the
 simulator. These checks do not establish actual peripheral/cache timing.
@@ -408,7 +456,37 @@ step `9`, I/O error `0`, BFPT length `9`, pointer `30`, density `00FFFFFF`,
 page word unavailable and last save result `0`. No save was requested. The
 local raw records remain under ignored `build/capture-device/` and
 `build/capture-sfdp-probe/live-before-probe-20261115-230004.json`.
-The cache/SPI-read path now works, but the actual legacy table is unqualified.
-The next device step is the read-only SFDP acquisition described above, before
-changing the supported table or attempting a save. Do not treat the missing
-page-size DWORD or a failed exact match as permission to bypass qualification.
+This established that the cache/SPI-read path worked while the legacy table was
+still unqualified. It led to the successful full SFDP acquisition above and
+the additional exact profile in V4. The missing page-size DWORD or a failed
+exact match was never used as permission to bypass qualification.
+
+## Capture V4 package and verification
+
+Candidate: `build/capture-device/T3P_RUST_METER_CAPTURE_V4_3.0.3.bin`.
+Size: 1,540,096 bytes. SHA-256:
+`d1b0118df3781f4bf724483a3e7e8c3ae2e83aef12a355b357834f78ed6f03e4`.
+The checksum sidecar and independent full-unpack audit are stored alongside it.
+ELF SHA-256:
+`316b6fb0a6602b4b2fabf70b05f52a8f2047eb14a8b2c20a61f7ac347e15f673`.
+The linked payload spans 169,764 bytes and static RAM is 17,588 bytes. All ten
+SPI-island functions and seven RAM-only relocations pass the audit.
+
+Verification passed 48 Rust tests, six C capture checks and five Python capture
+checks, including comparison with the actual private SFDP acquisition. Eight
+linked profile/USB cases include acquired-table acceptance and mixed-table
+refusal, with four linked SRAM entry/exit cases. The read-only probe's three
+C/five Python regressions also pass after adding the observed profile.
+The V4 writer's 4,352-call trace passes the C NOR replay under the observed
+profile: 103 page programs, maximum four per page. All 63 host frames and the
+full linked capture/measurement/graph/PD/CABLE/CHARGER/SYSTEM suite pass.
+Independent full decryption and four CRC checks match the boot prefix and all
+44 non-application files. These are offline storage/programming tests; the
+real hardware result above establishes SFDP acquisition only.
+
+After flashing V4, leave the normal measurement screen connected to the PC,
+without a save gesture, and inspect `capture_export.py --info`. The compiled
+guard accepts the acquired table with STORE `0` and initialization step `0`.
+Device boot/USB/guard behavior, then actual save, power-off retention and BMP
+export need their own hardware confirmation. Unknown failures stay real
+failures and never authorize global unlock or automatic slot recycling.

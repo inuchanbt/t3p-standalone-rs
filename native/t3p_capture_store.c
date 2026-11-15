@@ -266,7 +266,22 @@ int t3p_capture_store_init(struct t3p_bsp *clock)
         const uint8_t expected[]={0xe5,0x20,0xf1,0xff,0xff,0xff,0xff,0x00,
             0x44,0xeb,0x08,0x6b,0x08,0x3b,0x80,0xbb,0xee,0xff,0xff,0xff,
             0xff,0xff,0x00,0xff,0xff,0xff,0x00,0xff,0x0c,0x20,0x0f,0x52,0x10,0xd8,0x08,0x81};
-        for(unsigned i=0;i<sizeof expected;i++)if(s[i]!=expected[i])return -1;
+        /* Actual T3P SFDP acquisition, 2026-11-15: BFPT SHA-256
+         * 2e71d6dbc5696d1ec4fb214ee353f4329d31f8dd1827c10b625bc6b40d57b079.
+         * Differences are DTR/4-4-4 read settings, unused by this 1-1-1
+         * driver. Match the WHOLE observed table, not a masked/partial match.
+         * Capacity, three-byte addressing and erase descriptors are unchanged.
+         * The nine-DWORD page size comes from P25Q16H V2.1 pp.4,39, not a
+         * nonexistent DWORD 11. No read-mode/protection registers are written. */
+        const uint8_t observed[]={0xe5,0x20,0xf9,0xff,0xff,0xff,0xff,0x00,
+            0x44,0xeb,0x08,0x6b,0x08,0x3b,0x80,0xbb,0xfe,0xff,0xff,0xff,
+            0xff,0xff,0x00,0xff,0xff,0xff,0x44,0xeb,0x0c,0x20,0x0f,0x52,0x10,0xd8,0x08,0x81};
+        unsigned reference_match=1,observed_match=1;
+        for(unsigned i=0;i<sizeof expected;i++){
+            if(s[i]!=expected[i])reference_match=0;
+            if(s[i]!=observed[i])observed_match=0;
+        }
+        if(!reference_match&&!observed_match)return -1;
     }else if(((get(s+40)>>4)&15)!=8)return -1;
 #ifdef T3P_CAPTURE_SFDP_PROBE
     t3p_capture_diagnostics[0]=12;return -1; /* locked even if the profile matches */

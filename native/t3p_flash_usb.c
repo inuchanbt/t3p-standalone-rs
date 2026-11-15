@@ -74,7 +74,7 @@ static void setup(const uint8_t q[8])
 #if defined(T3P_CAPTURE_SFDP_PROBE)
             "T3P SFDP Probe V1";
 #elif defined(T3P_CAPTURE_DEVICE)
-            "T3P Capture V3";
+            "T3P Capture V4";
 #else
             "T3P Flash Reader V3";
 #endif

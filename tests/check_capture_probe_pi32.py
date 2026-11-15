@@ -68,6 +68,13 @@ def main():
     legacy[:24]=table('puya_header');legacy[0x30:0x54]=table('puya_bfpt')
     cases=[]
     cases.append(('manufacturer legacy table',legacy,0x856015,0,0))
+    device_table=(ROOT/'tests/t3p_856015_sfdp.h').read_text()
+    body=re.search(r't3p_856015_bfpt\[\]=\{([^}]+)',device_table)[1]
+    device_bfpt=bytes(int(n,16) for n in re.findall(r'0x([0-9a-f]+)',body))
+    observed=bytearray(legacy);observed[0x30:0x54]=device_bfpt
+    cases.append(('acquired T3P legacy table',observed,0x856015,0,0))
+    mixed=bytearray(legacy);mixed[0x32]=0xf9
+    cases.append(('unobserved mixed table',mixed,0x856015,2,9))
     cases.append(('wrong chip ID',legacy,0xef4015,2,5))
     cases.append(('zero SFDP',bytearray(128),0x856015,2,4))
     bad=bytearray(legacy);bad[0x38]^=1
@@ -171,7 +178,7 @@ def main():
     (out/'OFFLINE-probe-pi32.json').write_text(json.dumps(dict(
         format='SYNTHETIC READ/MMIO; not hardware SPI',cases=results,
         sram_entry_cases=enter_results),indent=2)+'\n')
-    print('Pi32v2 capture: 6 compiled profile/USB cases and 4 actual SRAM entry cases passed')
+    print(f'Pi32v2 capture: {len(cases)} compiled profile/USB cases and 4 actual SRAM entry cases passed')
 
 
 if __name__=='__main__':main()
