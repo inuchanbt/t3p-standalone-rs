@@ -19,6 +19,9 @@ int t3p_capture_sfdp_read(uint32_t offset,uint8_t *out,uint32_t count);
 #endif
 int t3p_capture_store_init(struct t3p_bsp *clock);
 int t3p_capture_store_prepare(void);
+/* One-use full-slot blank proof from prepare. -1 absent, -2 backend fault.
+ * A program request or dirty flush revokes it before any mutation. */
+int t3p_capture_store_take_blank(void);
 int t3p_capture_store_read(uint32_t offset, uint8_t *out, uint32_t count);
 int t3p_capture_store_export_read(uint32_t offset, uint8_t *out, uint32_t count);
 int t3p_capture_store_program(uint32_t offset, const uint8_t *bytes, uint32_t count);

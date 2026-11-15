@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use t3p_standalone::capture::disk::{BLOCKS, BMP_BYTES, Disk};
 use t3p_standalone::capture::{self, Decoder, Error, SLOT_BYTES, STRIP_PIXELS, Storage, Writer};
 
@@ -55,6 +56,102 @@ fn save(s: &mut Nor, seed: u16) -> Result<capture::Record, Error> {
         w.strip(top, &[seed; STRIP_PIXELS])?;
     }
     w.finish()
+}
+
+struct ProvenNor {
+    inner: Nor,
+    proof: Option<u32>,
+    read_bytes: Cell<usize>,
+}
+impl Storage for ProvenNor {
+    fn len(&self) -> u32 {
+        self.inner.len()
+    }
+    fn read(&self, at: u32, bytes: &mut [u8]) -> Result<(), Error> {
+        self.read_bytes.set(self.read_bytes.get() + bytes.len());
+        self.inner.read(at, bytes)
+    }
+    fn program(&mut self, at: u32, bytes: &[u8]) -> Result<(), Error> {
+        self.proof = None;
+        self.inner.program(at, bytes)
+    }
+    fn take_verified_blank(&mut self) -> Result<Option<u32>, Error> {
+        Ok(self.proof.take())
+    }
+}
+
+#[test]
+fn one_use_blank_proof_avoids_only_the_redundant_scan() {
+    let mut p = ProvenNor {
+        inner: Nor::new(2),
+        proof: Some(0),
+        read_bytes: Cell::new(0),
+    };
+    let writer = Writer::begin(&mut p, *b"TEST").unwrap();
+    drop(writer);
+    assert_eq!(p.read_bytes.get(), 128);
+    assert_eq!(p.proof, None);
+    let mut fallback = ProvenNor {
+        inner: Nor::new(2),
+        proof: None,
+        read_bytes: Cell::new(0),
+    };
+    let writer = Writer::begin(&mut fallback, *b"TEST").unwrap();
+    drop(writer);
+    assert_eq!(fallback.read_bytes.get(), 128 + SLOT_BYTES as usize);
+}
+
+#[test]
+fn contradictory_or_out_of_bounds_proof_never_overwrites() {
+    let mut inner = Nor::new(2);
+    save(&mut inner, 0x1234).unwrap();
+    let prior = inner.bytes.clone();
+    let mut p = ProvenNor {
+        inner,
+        proof: Some(0),
+        read_bytes: Cell::new(0),
+    };
+    assert!(matches!(
+        Writer::begin(&mut p, *b"TEST"),
+        Err(Error::Corrupt)
+    ));
+    assert_eq!(p.inner.bytes, prior);
+    assert_eq!(p.proof, None);
+    p.proof = Some(2);
+    assert!(matches!(
+        Writer::begin(&mut p, *b"TEST"),
+        Err(Error::Bounds)
+    ));
+    assert_eq!(p.inner.bytes, prior);
+}
+
+#[test]
+fn every_byte_power_cut_with_blank_proof_preserves_prior_image() {
+    let mut inner = Nor::new(2);
+    save(&mut inner, 0x2345).unwrap();
+    let prior = inner.bytes[..SLOT_BYTES as usize].to_vec();
+    for budget in 0..220 {
+        let mut p = ProvenNor {
+            inner: inner.clone(),
+            proof: Some(1),
+            read_bytes: Cell::new(0),
+        };
+        p.inner.budget = budget;
+        let result = (|| {
+            let mut writer = Writer::begin(&mut p, *b"TEST")?;
+            for top in (0..240).step_by(8) {
+                writer.strip(top, &[0x4567; STRIP_PIXELS])?;
+            }
+            writer.finish()
+        })();
+        assert_eq!(&p.inner.bytes[..SLOT_BYTES as usize], prior.as_slice());
+        let records = capture::scan(&p).unwrap();
+        assert_eq!(
+            records.iter().flatten().count(),
+            if result.is_ok() { 2 } else { 1 }
+        );
+        assert_eq!(p.proof, None);
+    }
 }
 
 #[test]

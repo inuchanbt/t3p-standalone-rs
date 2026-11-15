@@ -11,7 +11,9 @@ import struct
 import zlib
 from flash_read import Reader
 
-PRODUCTS=('T3P Capture V1','T3P Capture V2','T3P Capture V3','T3P Capture V4')
+PRODUCTS=('T3P Capture V1','T3P Capture V2','T3P Capture V3','T3P Capture V4',
+          'T3P Capture V5','T3P Capture V5 Base')
+PROFILE_PRODUCTS=PRODUCTS[4:]
 SLOT=0x20000
 
 
@@ -19,7 +21,7 @@ class CaptureReader(Reader):
     query_magic=b'T3CQ'
     response_magic=b'T3CR'
     view=2
-    metadata_ops=(0,2)
+    metadata_ops=(0,2,3)
 
     def info(self):
         f=struct.unpack('<10I',self.exchange(0))
@@ -44,6 +46,33 @@ class CaptureReader(Reader):
                     sfdp_header=struct.pack('<4I',*f[4:8]).hex() if f[0]==0 or f[0]>=4 else None,
                     density_word=f'{f[8]:08X}' if f[0]==0 or f[0]>=7 else None,
                     page_word=f'{f[9]:08X}' if f[2]>=11 and (f[0]==0 or f[0]>=7) else None)
+
+    def timings(self):
+        for attempt in range(3):
+            first=self.exchange(3,0)
+            data=first+self.exchange(3,1)+self.exchange(3,2)
+            if self.exchange(3,0)==first:break
+        else:raise ValueError('Save timing snapshot changed during acquisition')
+        f=struct.unpack('<30I',data)
+        if f[0]!=0x31525043 or f[29]!=1 or f[28]>1 or f[27]&~0x107:
+            raise ValueError('Unknown capture timing format/flags')
+        if f[28] and (not f[1] or sum(f[4:10])!=f[3]):
+            raise ValueError('Invalid capture timing phase totals')
+        result=f[2] if f[2]<0x80000000 else f[2]-0x100000000
+        valid=bool(f[27]&0x100)
+        phases=dict(zip(('notice','prepare','journal','render','encode','finish'),f[4:10]))
+        io=dict(zip(('erase','blank_check','program','page_readback','other_read'),f[10:15]))
+        counters=dict(zip(('erase_attempts','page_program_attempts','blank_read_requested_bytes',
+            'other_read_requested_bytes','program_requested_bytes','page_readback_requested_bytes',
+            'data_read_transactions','program_erase_transactions','verified_blank_claims',
+            'storage_read_calls','storage_program_calls','render_calls'),f[15:27]))
+        return dict(available=bool(f[28] and valid),completed=bool(f[28]),generation=f[1],
+            save_result=result,timer_valid=valid,total_ms=f[3] if f[28] and valid else None,
+            phase_ms=phases if f[28] and valid else None,
+            io_ms=io if f[28] and valid else None,
+            io_ms_overlap_phase_ms=True,counters=counters if f[28] else None,
+            optimizations=dict(verified_blank_handoff=bool(f[27]&1),
+                streamed_blank_check=bool(f[27]&2),full_page_buffering=bool(f[27]&4)))
 
 
 def record(h):
@@ -108,11 +137,13 @@ def main():
     if not a.info and a.output is None:p.error('Use --info or --output DIRECTORY')
     import hid
     devices=[d for d in hid.enumerate(0x483,0x5750) if d.get('product_string') in PRODUCTS]
-    if len(devices)!=1:raise SystemExit(f'Expected one T3P Capture V1/V2/V3/V4; found {len(devices)}')
+    if len(devices)!=1:raise SystemExit(f'Expected one T3P Capture device; found {len(devices)}')
     dev=hid.device()
     try:
         dev.open_path(devices[0]['path']);r=CaptureReader(dev);info=r.info()
         if devices[0]['product_string'] in PRODUCTS[1:]:info['diagnostics']=r.diagnostics()
+        if devices[0]['product_string'] in PROFILE_PRODUCTS:
+            info['timings']=r.timings()
         print(json.dumps(info,indent=2),flush=True)
         if a.output:
             entries=export(r,a.output,info)

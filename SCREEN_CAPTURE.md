@@ -1,9 +1,10 @@
 # Persistent screen capture / 画面キャプチャ
 
-`--capture-device` (Capture V4) implements a native flash backend, a frozen-frame
+`--capture-device` (Capture V5) implements a native flash backend, a frozen-frame
 save gesture and BMP export through the V3 EP0 USB HID transport. It includes
-SYSTEM V2 and the existing CHARGER V5 functions. The candidate has been tested
-on this unit as described below. Capture V1 booted with the reduced allocation and its USB
+SYSTEM V2 and the existing CHARGER V5 functions. V5 adds timing and storage
+efficiency changes; its hardware status is recorded separately below. V4 was tested
+on this unit. Capture V1 booted with the reduced allocation and its USB
 INFO returned JEDEC `856015`, STORE `2`, SFDP `0`, last result `-1` on this unit.
 It refused the save before erase/program. V2 boot/USB diagnostics subsequently
 identified a false cache-idle timeout before SFDP transfer. V3 corrects the
@@ -19,6 +20,171 @@ image retention through a complete power-off/reconnect succeeded on this unit.**
 永続保存を優先する方針です。RAMだけの撮影版には変更していません。
 この個体で撮影・USB取り出し・完全電源断後の保持を確認しました。
 温度・シリアルはSYSTEM V2の取得状況のままです。
+
+## Capture V5 timing and storage changes / 保存時間の計測と改善
+
+The reported V4 delay was more than five seconds **after** the three-second
+button hold. V4 has no per-save clock record, so this report cannot be split
+into measured phases retroactively. `--capture-timing-baseline` keeps the V4
+storage algorithm and adds the same counters and timing calls as V5. It is an
+instrumented comparison, with some measurement overhead, rather than the exact
+uninstrumented V4 binary. It uses the same frozen-screen rendering, SPI baud,
+chip gate, erase unit and page/image/commit readbacks.
+
+V5 changes three parts of the SAVE path:
+
+- After erasing and physically checking every byte of a fresh 128 KiB slot,
+  the C backend offers a one-use verified-blank certificate to the Rust writer.
+  That replaces the immediate second full-slot blank scan. The writer still
+  validates existing committed records and rejects a contradictory/invalid slot.
+  Program requests (even rejected ones), dirty flushes, another prepare, faults
+  and restart revoke the certificate. Without a certificate the full independent
+  blank scan remains the fallback. A header alone never proves a slot blank.
+- Erase verification sends one normal `03h` read per 4 KiB sector and compares
+  all bytes with FF in SRAM, instead of 16 separate 256-byte reads. There are
+  still 32 sector erases and 131,072 verified bytes per newly initialized slot.
+  The existing SPI byte protocol and conservative baud setting are unchanged;
+  no DMA or faster SPI mode is introduced. The SRAM loop polls the clock at
+  least every 256 bytes and restores the original controllers before return.
+- The 256-byte page buffer survives rendering-strip boundaries. Full pages and
+  read barriers flush it, avoiding a partial-page program after each of the
+  thirty strips. Every physical program is still read back. The writer verifies
+  the entire encoded image, writes/reads metadata, then writes and reads `DONE`
+  last before reporting success. USB export cannot flush pending data.
+
+Existing images, dirty/unknown slots and protection bits retain their previous
+policy. Six occupied slots still return FULL; this change adds no recycling.
+Rendering and image compression still run synchronously. More stored images
+can increase journal-check time because existing payloads are still validated.
+
+`python capture_export.py --info` on either V5 product adds `timings` for the
+latest completed SAVE attempt, including failures. Before the first attempt
+after boot, `available` is false and elapsed fields are `null`. The record is
+RAM-only and resets at reboot; screenshots remain in flash. All reads are cached
+and do not touch SPI, erase, program or flush anything. A generation and a
+second read of page 0 detect changes during USB acquisition.
+
+| `phase_ms` field | Included work |
+| --- | --- |
+| `notice` | Initial SAVING and final result rendering/LCD transfer |
+| `prepare` | Erase and full-slot raw blank verification |
+| `journal` | Existing-image validation, slot choice, header buffering |
+| `render` | Thirty renders of the frozen measurement snapshot |
+| `encode` | Lossless encoding and buffered writes, including full-page flushes |
+| `finish` | Final image verification, metadata and final commit/readback |
+
+These six non-overlapping phases sum to `total_ms`. The BSP's existing TIMER0
+conversion supplies milliseconds; the SRAM accounting shares its previous-tick
+state, so the same timer interval is not counted twice. `total_ms` starts when
+the recognized SAVE request is processed and ends after the result frame is
+transferred. It **excludes the three-second gesture and the subsequent four-second
+result hold**. It includes both complete notice frames, so it is slightly broader
+than the visible interval from the initial title to the filename. It is not a
+calibrated external timing measurement.
+
+`io_ms` contains overlapping subtotals for erase, blank checking, physical page
+programming, page readback and other reads. Do **not** add them to the six phase
+times. `counters` describes attempted operations/requested bytes, including on
+failed attempts; it does not claim every requested byte transferred successfully.
+`optimizations` distinguishes the baseline (all false) from V5 (all true).
+
+Normal capture operation 3 is TIMINGS: offset is page 0, 1 or 2 and count must
+be zero. Each response carries ten little-endian words. Across the three pages:
+words 0..3 are `CPR1`, generation, signed save result, total milliseconds;
+4..9 are the phases above; 10..14 are the five I/O subtotals; 15..26 are erase
+attempts, page-program attempts, blank-read requested bytes, other-read requested
+bytes, program requested bytes, page-readback requested bytes, data-read
+transactions, program/erase transactions, blank claims, storage-read calls,
+storage-program calls and render calls. Word 27 flags bits 0/1/2 are the three
+optimizations and bit 8 means a clock owner is present; 28 marks a completed
+attempt and 29 is record version 1. SFDP Probe V1 keeps its separate operations
+3/4 and product identity; it is not treated as a Capture V5 device.
+
+Comparison build (use its own Cargo target directory and preview executable):
+
+```text
+cargo test --offline --features capture-timing-baseline
+cargo build --offline --features capture-timing-baseline --bin preview
+python preview_refs.py --capture-timing-baseline --build-dir build/capture-v5-baseline --preview PATH_TO_BASELINE_PREVIEW_EXE
+python build.py --capture-timing-baseline --build-dir build/capture-v5-baseline
+python pack_demo.py --build-dir build/capture-v5-baseline --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V5_BASELINE_3.0.3.bin
+```
+
+Before an upgrade, six V4 images were exported twice to
+`build/captures/pre-v5-upgrade-20261116/`; each acquisition matched and produced
+a valid BMP. Firmware updates can replace the capture extent. Export before
+flashing either comparison firmware. For comparable hardware times, use the
+same page and similar displayed content, the same power arrangement, and the
+first save after each fresh firmware installation. Read `--info` before a
+power cycle, then export and verify retention separately. Offline transfer counts
+and simulation instruction counts must not be presented as measured seconds.
+
+For the identical constructed 18,278-byte image, the linked writer and separate
+C NOR replay give the following counts. Both BMPs are byte-identical (115,266
+bytes; SHA-256 `2effc3bc237344a853dab4d9fb503421d9a958277d7e29388dc73fd6a4c0320f`).
+These counts exclude the prepare-stage reads/erases, which are tested separately.
+
+| Writer/replay work | Instrumented V4 path | V5 |
+| --- | ---: | ---: |
+| Storage read calls | 593 | 81 |
+| Requested storage read bytes | 149,814 | 18,742 |
+| Explicit strip flushes | 30 | 0 |
+| One-use blank claims | 0 | 1 |
+| Physical page programs in C replay | 103 | 74 |
+| Maximum programs per page | 4 | 3 |
+
+The encoded payload and requested program bytes (18,326) are unchanged. The
+prepare-stage model still erases 32 sectors and checks all 131,072 raw bytes,
+using 32 streamed reads instead of 512 short reads. Repeat the comparison with:
+
+```text
+python tests/check_capture_comparison.py --cc PATH_TO_HOST_CLANG
+```
+
+The JSON count record is `build/capture-v5/OFFLINE-comparison.json`. It contains
+no hardware elapsed-time claim. Actual Capture V5 timings and physical retention
+must be recorded after the user installs and exercises the reviewed package.
+
+V5 offline checks (2026-11-16 JST): both feature variants pass 41 Rust unit
+tests and ten capture/journal/export integration tests. The capture suite passes
+nine C checks plus two baseline variants and six Python checks, including
+generation changes between USB pages. The 14 SYSTEM/baseline C checks, two
+Flash Reader C/four Python checks and three SFDP Probe C/five Python checks also
+pass. Eight compiled profile/USB cases and four SRAM entry cases pass for each
+of V5, the comparison build and the read-only SFDP regression build. The latter
+retains all eight required SRAM functions and excludes mutation machinery.
+
+The V5 ELF uses 17,948 static RAM bytes and passes the SRAM-only relocation
+audit for eleven SPI-island functions and seven relocations. The baseline uses
+17,852 bytes and ten functions. Both retain the separate 32 KiB driver and
+16 KiB stack budgets. ELF SHA-256 values:
+
+- V5: `94f8e3a47bf4384246572f894f89d85e3ae2b2d0d290a204dc4f7d93d67ca852`
+- Comparison: `4471760aed49a34119111832b53df2364867f37e89bffdb1a64d325d91f08961`
+
+The final source was rebuilt in separate directories and both ELF files
+matched the versions under full simulator/package validation byte for byte.
+The pinned primary source check still verifies DCU idle polarity, fourteen
+reference instructions and four stock RAM suspend/resume instructions.
+
+Both distribution containers completed the full Pi32v2 comparison suite,
+including the linked native writer, capture result views, measurement/graphs,
+PD/EPR/history, CABLE, CHARGER and SYSTEM. Each was independently decrypted and
+unpacked after generation: four nested CRCs, the unchanged 20,480-byte boot
+prefix, all 44 non-application files, the reduced app interval and both
+mutated-capture CRC checks passed. Each image is **1,540,096 bytes**. Packages
+and adjacent `.bin.sha256`, audit JSON and unpack logs are in ignored `build/`:
+
+- V5: `build/capture-v5/T3P_RUST_METER_CAPTURE_V5_3.0.3.bin`;
+  SHA-256 `96b3fcd3cca9d249bc19bdb3b10ce984c38fbb2fd6623c61977e5e1fcab59620`.
+- Instrumented V4-path comparison:
+  `build/capture-v5-baseline/T3P_RUST_METER_CAPTURE_V5_BASELINE_3.0.3.bin`;
+  SHA-256 `5adb311880d1517124016b15662787073993fdbf0795b9e991868f30517bfcd9`.
+
+At this package checkpoint neither V5 product has been exercised on hardware.
+V4's successful retention test above does not verify the new buffering path.
+The next hardware step is to flash the comparison build, confirm its ready
+status before saving, and acquire a completed timing record before power-off.
 
 ## SFDP acquisition and Capture V4 / 実測表と保存対応
 
@@ -168,11 +334,11 @@ python capture_export.py --info
 python capture_export.py --output build/captures/session-01
 ```
 
-The device identifies as `T3P Capture V4` (VID/PID 0483:5750). The host also accepts
-Capture V1/V2/V3. Only these products are
+The device identifies as `T3P Capture V5` (VID/PID 0483:5750). The timing baseline
+identifies as `T3P Capture V5 Base`. The host also accepts Capture V1/V2/V3/V4. Only these products are
 selected; the stock software and Flash Reader V3 are not treated as capture devices.
-The protocol has INFO, bounded READ and cached DIAGNOSTICS only:
-**no host program/erase command**. V2/V3/V4 `--info` reports the failed initialization
+The protocol has INFO, bounded READ, cached DIAGNOSTICS and V5 cached TIMINGS only:
+**no host program/erase command**. V2 and later `--info` reports the failed initialization
 step, cache/SFC/SPI timeout, SFDP header and BFPT length/pointer/density/page word.
 Unread fields are `null`, not invented values. DIAGNOSTICS returns the boot record
 even while locked and performs no SPI transaction or write. V1 INFO remains usable.
@@ -220,8 +386,8 @@ reserved fields and existing resource offsets. A CRC-protected private manifest
 occupies unused inner-directory padding at physical `0x50C0`. Both application
 CRC spans end at `0x85000`. Packaging checks them again after changing **every
 capture byte**, then independently unpacks the update and compares the boot files
-and all 44 non-app files. V1/V2/V3 and SFDP Probe V1 booted with this layout on hardware; successful
-erase/program and power-off retention remain unverified.
+and all 44 non-app files. V1/V2/V3 and SFDP Probe V1 booted with this layout on hardware;
+V4 subsequently confirmed erase/program, export and complete power-off retention on this unit.
 
 ```text
 python capture_partition_audit.py --device-view build/flash-reader/device-v3-full.mapped.bin
@@ -290,15 +456,15 @@ screen as a completed record.
 
 ```text
 cargo test --offline --features capture-device
-python tests/check_capture_device.py --cc PATH_TO_HOST_CLANG --device-view build/flash-reader/device-v3-full.mapped.bin --device-sfdp build/capture-sfdp-probe/device-sfdp-20261115-231927.bin
+python tests/check_capture_device.py --cc PATH_TO_HOST_CLANG --build-dir build/capture-v5 --device-view build/flash-reader/device-v3-full.mapped.bin --device-sfdp build/capture-sfdp-probe/device-sfdp-20261115-231927.bin
 python tests/check_flash_reader.py --cc PATH_TO_HOST_CLANG
 python capture_store_source_evidence.py
 python tests/check_system.py --cc PATH_TO_HOST_CLANG
 cargo build --offline --features capture-device --bin preview
-python preview_refs.py --capture-device --preview PATH_TO_PREVIEW_EXE
-python build.py --capture-device
-python tests/check_capture_probe_pi32.py --build-dir build/capture-device
-python pack_demo.py --build-dir build/capture-device --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V4_3.0.3.bin
+python preview_refs.py --capture-device --build-dir build/capture-v5 --preview PATH_TO_PREVIEW_EXE
+python build.py --capture-device --build-dir build/capture-v5
+python tests/check_capture_probe_pi32.py --build-dir build/capture-v5
+python pack_demo.py --build-dir build/capture-v5 --device-view build/flash-reader/device-v3-full.mapped.bin --output-name T3P_RUST_METER_CAPTURE_V5_3.0.3.bin
 ```
 
 Packaging runs the full Pi32v2 measurement/PD/CABLE/CHARGER/SYSTEM comparisons,
@@ -320,11 +486,11 @@ The target writer also produces `OFFLINE-native-capture-io.bin`. Replay its exac
 read/program/flush sequence through the actual C page-buffer backend with:
 
 ```text
-python tests/check_capture_device.py --cc PATH_TO_HOST_CLANG --native-io build/capture-device/OFFLINE-native-capture-io.bin
+python tests/check_capture_device.py --cc PATH_TO_HOST_CLANG --build-dir build/capture-v5 --native-io build/capture-v5/OFFLINE-native-capture-io.bin
 ```
 
 This checks the boundary between the Rust journal and C buffering, including
-readback flushes and final commit. The constructed frame uses 4,352 storage calls
+readback flushes and final commit. The V4 constructed frame uses 4,352 storage calls
 and 103 page-program operations in the model (maximum four per page). These are
 offline counts, not measurements of the device.
 

@@ -5,6 +5,7 @@
  * No status-register writes, chip erase, VM access or protection changes.
  */
 #include "t3p_capture_store.h"
+#include "t3p_capture_profile.h"
 #define RAM __attribute__((section(".data.flash_ram"),noinline))
 #ifdef T3P_CAPTURE_STORE_HOST
 uint32_t capture_mmio_read(uint32_t);
@@ -27,6 +28,7 @@ uint32_t t3p_capture_status=1,t3p_capture_jedec,t3p_capture_sfdp;
 uint32_t t3p_capture_diagnostics[10];
 static uint32_t cs_mask, saved_sfc, saved_spi[3], saved_gpio[2];
 static uint32_t virgin, page_at=~0u;
+static uint32_t prepared_blank=~0u;
 #ifndef T3P_CAPTURE_SFDP_PROBE
 static uint8_t page[256];
 #else
@@ -116,6 +118,19 @@ static RAM int read_raw(uint32_t at,uint8_t *out,uint32_t n,unsigned sfdp)
     while(n--&&!result){int b=byte(255,1);if(b<0)result=-1;else *out++=(uint8_t)b;}
     cs(1);clock_tick();leave();return result;
 }
+#if !defined(T3P_CAPTURE_SFDP_PROBE) && !defined(T3P_CAPTURE_TIMING_BASELINE)
+static RAM int blank_raw(uint32_t at,uint32_t n)
+{
+    if(enter())return -1;
+    int result=address(3,at);
+    for(unsigned i=0;i<n&&!result;i++){
+        int b=byte(255,1);if(b!=255)result=-1;
+        if((i&255)==255)clock_tick();
+    }
+    cs(1);clock_tick();leave();return result;
+}
+static int (*volatile blank_io)(uint32_t,uint32_t)=blank_raw;
+#endif
 #ifndef T3P_CAPTURE_SFDP_PROBE
 static RAM int operate(uint32_t at,const uint8_t *data,unsigned n)
 {
@@ -203,6 +218,7 @@ int t3p_capture_sfdp_read(uint32_t at,uint8_t *out,uint32_t n)
 int t3p_capture_store_init(struct t3p_bsp *clock)
 {
     timer_owner=clock;
+    t3p_capture_profile_init(clock);prepared_blank=~0u;
     t3p_capture_status=1;page_at=~0u;dirty=0;virgin=0;
     t3p_capture_jedec=t3p_capture_sfdp=0;
 #ifdef T3P_CAPTURE_SFDP_PROBE
@@ -292,37 +308,76 @@ int t3p_capture_store_init(struct t3p_bsp *clock)
 }
 static int bounds(uint32_t at,uint32_t n)
 {return !t3p_capture_status&&at<=T3P_CAPTURE_BYTES&&n<=T3P_CAPTURE_BYTES-at;}
+static int data_read(uint32_t at,uint8_t *out,uint32_t n,unsigned readback)
+{
+    uint32_t start=t3p_capture_profile_stamp();
+    t3p_capture_profile_add(CAP_READ_TRANSACTIONS,1);
+    t3p_capture_profile_add(readback?CAP_READBACK_BYTES:CAP_READ_BYTES,n);
+    int r=raw_io(at,out,n,0);
+    t3p_capture_profile_add(readback?CAP_READBACK_MS:CAP_READ_MS,t3p_capture_profile_stamp()-start);
+    return r;
+}
+#ifndef T3P_CAPTURE_SFDP_PROBE
+static int data_program(uint32_t at,const uint8_t *data,unsigned n)
+{
+    uint32_t start=t3p_capture_profile_stamp();
+    t3p_capture_profile_add(CAP_PROGRAM_TRANSACTIONS,1);
+    t3p_capture_profile_add(n?CAP_PROGRAM_OPS:CAP_ERASE_OPS,1);
+    if(n)t3p_capture_profile_add(CAP_PROGRAM_BYTES,n);
+    int r=program_io(at,data,n);
+    t3p_capture_profile_add(n?CAP_PROGRAM_MS:CAP_ERASE_MS,t3p_capture_profile_stamp()-start);
+    return r;
+}
+static int check_blank(uint32_t at,uint32_t n)
+{
+    uint32_t start=t3p_capture_profile_stamp();
+    t3p_capture_profile_add(CAP_READ_TRANSACTIONS,1);
+    t3p_capture_profile_add(CAP_BLANK_BYTES,n);
+#ifdef T3P_CAPTURE_TIMING_BASELINE
+    uint8_t check[256];int r=n!=sizeof check?-1:raw_io(at,check,n,0);
+    if(!r)for(unsigned i=0;i<n;i++)if(check[i]!=255){r=-1;break;}
+#else
+    int r=blank_io(at,n);
+#endif
+    t3p_capture_profile_add(CAP_BLANK_MS,t3p_capture_profile_stamp()-start);
+    return r;
+}
+#endif
 int t3p_capture_store_flush(void)
 {
 #ifdef T3P_CAPTURE_SFDP_PROBE
     return -1;
 #else
     if(!dirty)return t3p_capture_status?-1:0;
-    if(!bounds(page_at,256)||program_io(T3P_CAPTURE_START+page_at,page,256)){t3p_capture_status=3;return -1;}
-    uint8_t check[256];if(raw_io(T3P_CAPTURE_START+page_at,check,256,0)){t3p_capture_status=3;return -1;}
+    prepared_blank=~0u;
+    if(!bounds(page_at,256)||data_program(T3P_CAPTURE_START+page_at,page,256)){t3p_capture_status=3;return -1;}
+    uint8_t check[256];if(data_read(T3P_CAPTURE_START+page_at,check,256,1)){t3p_capture_status=3;return -1;}
     for(unsigned i=0;i<256;i++)if(check[i]!=page[i]){t3p_capture_status=3;return -1;}
     dirty=0;return 0;
 #endif
 }
 int t3p_capture_store_read(uint32_t at,uint8_t *out,uint32_t n)
 {
+    t3p_capture_profile_add(CAP_READ_CALLS,1);
     if(!bounds(at,n)||t3p_capture_store_flush())return -1;
-    return raw_io(T3P_CAPTURE_START+at,out,n,0);
+    return data_read(T3P_CAPTURE_START+at,out,n,0);
 }
 int t3p_capture_store_export_read(uint32_t at,uint8_t *out,uint32_t n)
 {
     /* USB requests must never flush a pending program buffer. */
     if(!bounds(at,n)||dirty)return -1;
-    return raw_io(T3P_CAPTURE_START+at,out,n,0);
+    return data_read(T3P_CAPTURE_START+at,out,n,0);
 }
 int t3p_capture_store_program(uint32_t at,const uint8_t *p,uint32_t n)
 {
 #ifdef T3P_CAPTURE_SFDP_PROBE
     (void)at;(void)p;(void)n;return -1;
 #else
+    prepared_blank=~0u;
+    t3p_capture_profile_add(CAP_PROGRAM_CALLS,1);
     if(!bounds(at,n))return -1;
     while(n--){uint32_t base=at&~255u;
-        if(base!=page_at){if(t3p_capture_store_flush()||raw_io(T3P_CAPTURE_START+base,page,256,0))return -1;page_at=base;}
+        if(base!=page_at){if(t3p_capture_store_flush()||data_read(T3P_CAPTURE_START+base,page,256,0))return -1;page_at=base;}
         unsigned pos=at++&255;
         if((page[pos]&*p)!=*p)return -1;
         page[pos]=*p++;dirty=1;
@@ -331,6 +386,7 @@ int t3p_capture_store_program(uint32_t at,const uint8_t *p,uint32_t n)
 }
 int t3p_capture_store_prepare(void)
 {
+    prepared_blank=~0u;
 #ifdef T3P_CAPTURE_SFDP_PROBE
     return -1;
 #else
@@ -338,18 +394,32 @@ int t3p_capture_store_prepare(void)
     /* This is invoked by a SAVE gesture, never at boot/USB enumeration.
      * Only slots proved to be fresh packaged FF are initialized. Unknown,
      * dirty and valid old slots are never erased or recycled automatically. */
-    uint8_t check[256];
     for(unsigned slot=0;slot<6;slot++)if(virgin&(1u<<slot)){
         virgin&=~(1u<<slot); /* A failure cannot silently authorize another try. */
         for(unsigned at=slot*T3P_CAPTURE_SLOT;at<(slot+1)*T3P_CAPTURE_SLOT;at+=4096){
-            if(program_io(T3P_CAPTURE_START+at,0,0)){t3p_capture_status=3;return -1;}
-            for(unsigned off=0;off<4096;off+=256){
-                if(raw_io(T3P_CAPTURE_START+at+off,check,256,0)){t3p_capture_status=3;return -1;}
-                for(unsigned i=0;i<256;i++)if(check[i]!=255){t3p_capture_status=3;return -1;}
+            if(data_program(T3P_CAPTURE_START+at,0,0)){t3p_capture_status=3;return -1;}
+#ifdef T3P_CAPTURE_TIMING_BASELINE
+            const unsigned chunk=256;
+#else
+            const unsigned chunk=4096;
+#endif
+            for(unsigned off=0;off<4096;off+=chunk){
+                if(check_blank(T3P_CAPTURE_START+at+off,chunk)){t3p_capture_status=3;return -1;}
             }
         }
+#ifndef T3P_CAPTURE_TIMING_BASELINE
+        prepared_blank=slot;
+#endif
         break; /* Initialize at most one new slot for this SAVE. */
     }
     page_at=~0u;return 0;
 #endif
+}
+int t3p_capture_store_take_blank(void)
+{
+    uint32_t slot=prepared_blank;prepared_blank=~0u;
+    if(t3p_capture_status||dirty)return -2;
+    if(slot>=6)return -1;
+    t3p_capture_profile_add(CAP_BLANK_CLAIMS,1);
+    return (int)slot;
 }

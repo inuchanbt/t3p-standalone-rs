@@ -15,6 +15,9 @@ static uint32_t clock_ms,notice_at;
 static unsigned scenario,init_calls,usb_polls,prepares,saves,snapshots,frozen,notice_done,samples_after;
 uint32_t t3p_capture_status,t3p_capture_jedec,t3p_capture_sfdp;
 int32_t t3p_capture_result;
+void t3p_capture_profile_begin(void){}
+void t3p_capture_profile_phase(uint32_t p){(void)p;}
+void t3p_capture_profile_end(int32_t r){(void)r;}
 struct t3p_boot_snapshot t3p_boot_snapshot={.valid=T3P_BOOT_MAGIC};
 static uint32_t rd(void *ctx,uint32_t at)
 {(void)ctx;return at==PA_BASE&&clock_ms>=100&&clock_ms<3300?0:PA11;}

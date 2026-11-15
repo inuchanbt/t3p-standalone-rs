@@ -5,6 +5,7 @@
 #include "t3p_button.h"
 #ifdef T3P_CAPTURE_DEVICE
 #include "t3p_capture_store.h"
+#include "t3p_capture_profile.h"
 #include "t3p_capture_usb.h"
 int32_t meter_capture_save(uint16_t pixels[1920]);
 void meter_capture_notice(const uint32_t words[4],uint32_t,uint16_t pixels[1920]);
@@ -313,15 +314,19 @@ void t3p_board_start(void)
 #ifdef T3P_CAPTURE_DEVICE
         if(capture_pending){
             capture_pending=0;
+            t3p_capture_profile_begin();
             if(capture_notice||pd.state==T3P_PD_LISTENING||charger_state==CHARGER_ARMED||
                charger_state==CHARGER_RESTORE||pd.state==T3P_PD_CABLE_RESTORE)
                 t3p_capture_result=-3;
             else if(t3p_capture_status)t3p_capture_result=-1;
             else {
                 capture_message(0);
+                t3p_capture_profile_phase(CAP_PREPARE);
                 t3p_capture_result=t3p_capture_store_prepare()?-1:meter_capture_save(strip);
             }
+            t3p_capture_profile_phase(CAP_NOTICE);
             capture_message(t3p_capture_result);
+            t3p_capture_profile_end(t3p_capture_result);
             capture_notice=1;capture_notice_at=t3p_bsp_millis(&board);
             now=capture_notice_at;
         }

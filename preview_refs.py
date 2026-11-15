@@ -10,12 +10,13 @@ ROOT = Path(__file__).resolve().parent
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preview", type=Path, default=ROOT / "target/debug/preview.exe")
+    parser.add_argument("--build-dir", type=Path)
     mode = parser.add_mutually_exclusive_group()
     for name in ("measurement", "pd-profiles", "pd-cable-read", "pd-charger",
-                 "pd-rd-test", "pd-ack-test", "system", "capture-probe", "flash-reader", "capture-device", "capture-sfdp-probe"):
+                 "pd-rd-test", "pd-ack-test", "system", "capture-probe", "flash-reader", "capture-device", "capture-sfdp-probe", "capture-timing-baseline"):
         mode.add_argument(f"--{name}", action="store_true")
     args = parser.parse_args()
-    if args.capture_sfdp_probe:
+    if args.capture_sfdp_probe or args.capture_timing_baseline:
         args.capture_device=True
     if args.capture_device:
         args.system=True
@@ -23,10 +24,10 @@ def main():
         args.system = True
     if args.system:
         args.pd_charger = True
-    variant = next((name for name in ("capture-sfdp-probe", "capture-device", "flash-reader", "capture-probe", "system", "pd-charger", "pd-cable-read", "pd-profiles",
+    variant = next((name for name in ("capture-timing-baseline", "capture-sfdp-probe", "capture-device", "flash-reader", "capture-probe", "system", "pd-charger", "pd-cable-read", "pd-profiles",
                                     "pd-ack-test", "pd-rd-test", "measurement")
                     if getattr(args, name.replace("-", "_"))), "")
-    out = ROOT / "build" / variant
+    out = args.build_dir or ROOT / "build" / variant
     out.mkdir(parents=True, exist_ok=True)
     profiles = args.pd_profiles or args.pd_cable_read or args.pd_charger
     common = ["--profiles-ui"] if profiles else []

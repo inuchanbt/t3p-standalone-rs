@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "t3p_capture_usb.h"
 #include "t3p_capture_store.h"
+#include "t3p_capture_profile.h"
 int32_t t3p_capture_result;
 static uint32_t get(const uint8_t *p)
 {return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
@@ -16,7 +17,7 @@ void t3p_capture_usb_request(const uint8_t q[64],uint8_t a[64])
 #ifdef T3P_CAPTURE_SFDP_PROBE
        4
 #else
-       2
+       3
 #endif
     )a[5]=1;
     else if(!q[4]){
@@ -31,6 +32,12 @@ void t3p_capture_usb_request(const uint8_t q[64],uint8_t a[64])
          * write activity triggered by a USB diagnostics request. */
         if(q[6]||at)a[5]=1;
         else {for(unsigned i=0;i<10;i++)put(a+24+4*i,t3p_capture_diagnostics[i]);a[6]=40;}
+#ifndef T3P_CAPTURE_SFDP_PROBE
+    }else if(q[4]==3){
+        uint32_t info[10];
+        if(q[6]||t3p_capture_profile_page(at,info))a[5]=1;
+        else {for(unsigned i=0;i<10;i++)put(a+24+4*i,info[i]);a[6]=40;}
+#endif
 #ifdef T3P_CAPTURE_SFDP_PROBE
     }else if(q[4]==4){
         if(q[6]||at)a[5]=1;

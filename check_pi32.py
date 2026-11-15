@@ -128,11 +128,20 @@ def main():
         old_step=cpu.step
         hooks={symbols[name]:name for name in ('t3p_capture_store_read','t3p_capture_store_program',
                                                't3p_capture_store_flush','t3p_capture_store_export_read')}
+        if 't3p_capture_store_take_blank' in symbols:
+            hooks[symbols['t3p_capture_store_take_blank']]='t3p_capture_store_take_blank'
+            storage_calls['verified_blank_claim']=0
         def storage_step():
             # Match the same FM-1 RETS alias handled by T3PFlashMemory.
             pc=cpu.pc+0x08000000 if 0x04000100<=cpu.pc<0x04165e40 else cpu.pc
             name=hooks.get(pc)
             if name is None:return old_step()
+            if name=='t3p_capture_store_take_blank':
+                assert storage_calls['verified_blank_claim']==0
+                assert nor[:0x20000]==bytes([255])*0x20000
+                storage_calls['verified_blank_claim']+=1
+                io_trace.extend(struct.pack('<BII',3,0,0))
+                cpu.R[0]=0;cpu.pc=cpu.rets;return
             storage_calls['program' if name.endswith('_program') else 'flush' if name.endswith('_flush') else 'read']+=1
             if name!='t3p_capture_store_flush':
                 at,p,n=cpu.R[:3]

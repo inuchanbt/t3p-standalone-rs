@@ -103,6 +103,7 @@ def main():
                         "tools/rustup/toolchains/stable-x86_64-pc-windows-gnu/bin/rustc.exe")
     parser.add_argument("--stock-app", type=Path, default=ROOT.parent / "doom_on_t3p/local/unpacked/T3P Firmware Version 3.0.3.bin/files/app.bin")
     parser.add_argument("--jieli-clang", type=Path)
+    parser.add_argument("--build-dir", type=Path, help="Override the variant's build directory")
     parser.add_argument("--measurement", action="store_true", help="Build the uncalibrated measurement candidate")
     pd_mode = parser.add_mutually_exclusive_group()
     pd_mode.add_argument("--pd-diagnostic", action="store_true", help="Add read-only CC-controller diagnostics")
@@ -114,10 +115,11 @@ def main():
     pd_mode.add_argument("--flash-reader", action="store_true", help="Read-only CPU mapped flash view over USB HID")
     pd_mode.add_argument("--capture-device", action="store_true", help="Persistent capture partition and read-only HID export")
     pd_mode.add_argument("--capture-sfdp-probe", action="store_true", help="Read-only SFDP acquisition; flash mutation code excluded")
+    pd_mode.add_argument("--capture-timing-baseline", action="store_true", help="Instrumented V4 storage path for V5 timing comparison")
     pd_mode.add_argument("--pd-rd-test", action="store_true", help="Build the CC1 Rd attach test candidate")
     pd_mode.add_argument("--pd-ack-test", action="store_true", help="Build the CC1 GoodCRC test candidate")
     args = parser.parse_args()
-    if args.capture_sfdp_probe:
+    if args.capture_sfdp_probe or args.capture_timing_baseline:
         args.capture_device = True
     if args.capture_device:
         args.system = True
@@ -151,7 +153,9 @@ def main():
         variant = "capture-device"
     if args.capture_sfdp_probe:
         variant = "capture-sfdp-probe"
-    out = ROOT / "build" / variant
+    if args.capture_timing_baseline:
+        variant = "capture-timing-baseline"
+    out = args.build_dir or ROOT / "build" / variant
     out.mkdir(parents=True, exist_ok=True)
 
     if run(args.rustc, "--version", capture=True).strip() != f"rustc {RUST_VERSION}":
@@ -171,6 +175,8 @@ def main():
         rust_features += ["--cfg", 'feature="capture-device"']
     if args.capture_sfdp_probe:
         rust_features += ["--cfg", 'feature="capture-sfdp-probe"']
+    if args.capture_timing_baseline:
+        rust_features += ["--cfg", 'feature="capture-timing-baseline"']
     if args.flash_reader:
         rust_features += ["--cfg", 'feature="flash-reader"']
     if args.capture_probe:
@@ -214,7 +220,7 @@ def main():
     if args.flash_reader:
         sources += [bsp / "t3p_flash_reader.c", bsp / "t3p_flash_usb.c"]
     if args.capture_device:
-        sources += [bsp / "t3p_capture_store.c", bsp / "t3p_capture_usb.c", bsp / "t3p_flash_usb.c"]
+        sources += [bsp / "t3p_capture_store.c", bsp / "t3p_capture_profile.c", bsp / "t3p_capture_usb.c", bsp / "t3p_flash_usb.c"]
     if rd_test:
         sources.append(bsp / "t3p_rd_test.c")
     for source in sources:
@@ -230,6 +236,8 @@ def main():
                 flags += ["-DT3P_CAPTURE_DEVICE", "-fno-jump-tables"]
             if args.capture_sfdp_probe:
                 flags.append("-DT3P_CAPTURE_SFDP_PROBE")
+            if args.capture_timing_baseline:
+                flags.append("-DT3P_CAPTURE_TIMING_BASELINE")
             if args.flash_reader:
                 flags.append("-DT3P_FLASH_READER")
             if args.pd_diagnostic:
@@ -279,7 +287,8 @@ def main():
         report['app_flash_budget_bytes'] = APP_BYTES
         report['remaining_app_flash_bytes'] = APP_BYTES-report['flash_used_including_driver_budget']
         report['capture_ram_audit'] = inspect_capture_ram(out/'t3p_capture_store.c.o',elf,
-                                                       read_only=args.capture_sfdp_probe)
+                                                       read_only=args.capture_sfdp_probe,
+                                                       baseline=args.capture_timing_baseline)
     report["status"] = ("Pi32v2 ELF audited offline; uncalibrated measurement candidate"
                         if args.measurement else "Pi32v2 ELF audited offline; demo input only")
     if args.pd_diagnostic:
@@ -298,6 +307,8 @@ def main():
         report["status"] += "; persistent capture partition and USB export; hardware trial pending"
     if args.capture_sfdp_probe:
         report["status"] += "; read-only SFDP probe; erase/program implementation excluded"
+    if args.capture_timing_baseline:
+        report["status"] += "; instrumented V4 storage baseline for V5 comparison"
     if args.pd_rd_test:
         report["status"] += "; CC1 Rd attach test"
     if args.pd_ack_test:

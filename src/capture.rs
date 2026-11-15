@@ -25,8 +25,9 @@ pub enum Error {
 }
 
 /// Offsets are relative to an independently verified capture partition.
-/// program must be synchronous, preserve bytes outside the requested range,
-/// and reject any 0-to-1 bit transition. Erasing is intentionally not exposed.
+/// program may buffer, but every read must first make all prior programs
+/// durable and return physical data. Successful commit readback is a durability
+/// barrier. Preserve other bytes and reject 0-to-1 transitions. No erase API.
 pub trait Storage {
     fn len(&self) -> u32;
     fn is_empty(&self) -> bool {
@@ -34,6 +35,12 @@ pub trait Storage {
     }
     fn read(&self, offset: u32, bytes: &mut [u8]) -> Result<(), Error>;
     fn program(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Error>;
+    /// Consume a one-use proof that an entire slot was erased and read back
+    /// as FF, with no intervening program or buffered mutation. The default
+    /// keeps the full independent blank scan. Never infer this from a header.
+    fn take_verified_blank(&mut self) -> Result<Option<u32>, Error> {
+        Ok(None)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,11 +154,20 @@ impl<'a, S: Storage> Writer<'a, S> {
         if sequence > 9999 {
             return Err(Error::Sequence);
         }
-        let mut free = None;
-        for slot in 0..slots(s)? {
-            if blank(s, slot as u32)? {
-                free = Some(slot as u32);
-                break;
+        let mut free = s.take_verified_blank()?;
+        if let Some(slot) = free {
+            if slot >= slots(s)? as u32 {
+                return Err(Error::Bounds);
+            }
+            if records[slot as usize].is_some() {
+                return Err(Error::Corrupt);
+            }
+        } else {
+            for slot in 0..slots(s)? {
+                if blank(s, slot as u32)? {
+                    free = Some(slot as u32);
+                    break;
+                }
             }
         }
         let slot = free.ok_or(Error::Full)?;

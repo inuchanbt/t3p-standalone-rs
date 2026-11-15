@@ -5,6 +5,8 @@
 #ifdef T3P_CAPTURE_DEVICE
 uint32_t t3p_capture_status,t3p_capture_jedec,t3p_capture_sfdp;
 uint32_t t3p_capture_diagnostics[10];
+int t3p_capture_profile_page(uint32_t p,uint32_t out[10])
+{if(p>=3)return -1;memset(out,0,40);return 0;}
 #ifdef T3P_CAPTURE_SFDP_PROBE
 void t3p_capture_sfdp_info(uint32_t info[10]){memset(info,0,40);info[0]=0x31444653;info[4]=1;}
 int t3p_capture_sfdp_read(uint32_t at,uint8_t *p,uint32_t n){(void)at;(void)p;(void)n;return -1;}

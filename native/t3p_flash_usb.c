@@ -73,8 +73,10 @@ static void setup(const uint8_t q[8])
         const char *s=value==0x301?"T3P Experimental":
 #if defined(T3P_CAPTURE_SFDP_PROBE)
             "T3P SFDP Probe V1";
+#elif defined(T3P_CAPTURE_TIMING_BASELINE)
+            "T3P Capture V5 Base";
 #elif defined(T3P_CAPTURE_DEVICE)
-            "T3P Capture V4";
+            "T3P Capture V5";
 #else
             "T3P Flash Reader V3";
 #endif

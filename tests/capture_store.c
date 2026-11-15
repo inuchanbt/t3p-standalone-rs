@@ -7,6 +7,8 @@
 #include <string.h>
 #define T3P_CAPTURE_STORE_HOST 1
 #include "../native/t3p_capture_store.c"
+#include "../native/t3p_capture_profile.c"
+uint32_t t3p_bsp_millis(struct t3p_bsp *b){clock_tick();return b->milliseconds;}
 #include "puya_p25q16h_sfdp.h"
 #include "t3p_856015_sfdp.h"
 static uint8_t flash[0x200000],directory[256],reserved_header[32],sfdp_data[4096];
@@ -19,6 +21,7 @@ static unsigned sfdp_transactions,change_after,fail_after;
 static uint32_t regs_spi[6],gpio_out=1,gpio_dir=0xffffffff,sfc_con=0x5c7e4407;
 static uint8_t command,wel,protected_flash,id_bytes[3]={0xef,0x40,0x15};
 static uint32_t address_value,count,program_bytes,erases,enables,transfers;
+static uint32_t erase_stuck_at=UINT32_MAX;
 static unsigned page_programs[T3P_CAPTURE_BYTES/256];
 static uint8_t data[256];
 static struct t3p_bsp model_clock;
@@ -37,7 +40,14 @@ static void finish_command(void)
         assert(wel);wel=0;
         unsigned n=command==0x20?4096:program_bytes;
         assert(address_value>=T3P_CAPTURE_START&&address_value+n<=T3P_CAPTURE_START+T3P_CAPTURE_BYTES);
-        if(command==0x20){assert(!(address_value&4095));erases++;if(!protected_flash)memset(flash+address_value,255,4096);}
+        if(command==0x20){
+            assert(!(address_value&4095));erases++;
+            if(!protected_flash){
+                memset(flash+address_value,255,4096);
+                if(erase_stuck_at>=address_value&&erase_stuck_at-address_value<4096)
+                    flash[erase_stuck_at]=0xfe;
+            }
+        }
         else {
             assert(program_bytes&&program_bytes<=256&&((address_value&255)+program_bytes<=256));
             page_programs[(address_value-T3P_CAPTURE_START)/256]++;
@@ -123,6 +133,8 @@ static void setup(void)
     sfdp_data[10]=1;sfdp_data[11]=11;sfdp_data[12]=32;sfdp_data[15]=255;
     sfdp_data[36]=sfdp_data[37]=sfdp_data[38]=255;sfdp_data[60]=12;sfdp_data[61]=0x20;sfdp_data[72]=0x80;
     protected_flash=wel=busy_after_id=identified=0;erases=enables=0;
+    erase_stuck_at=UINT32_MAX;
+    memset(page_programs,0,sizeof page_programs);
     dcu_delay=dcu_reads=cache_idle=0;
 #ifdef T3P_CAPTURE_SFDP_PROBE
     sfdp_transactions=change_after=fail_after=0;
@@ -242,6 +254,7 @@ int main(int argc,char **argv)
             uint32_t n=(uint32_t)h[5]|(uint32_t)h[6]<<8|(uint32_t)h[7]<<16|(uint32_t)h[8]<<24;
             assert(n<=sizeof expected);records++;
             if(h[0]==2){assert(!at&&!n);assert(!t3p_capture_store_flush());continue;}
+            if(h[0]==3){assert(at<6&&!n);assert(t3p_capture_store_take_blank()==(int)at);continue;}
             assert(h[0]<=1&&fread(expected,1,n,flow)==n);
             if(h[0]==1)assert(!t3p_capture_store_program(at,expected,n));
             else {assert(!t3p_capture_store_read(at,actual,n));assert(!memcmp(expected,actual,n));}

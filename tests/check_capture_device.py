@@ -48,6 +48,7 @@ class FakeReader:
 
 
 class Checks(unittest.TestCase):
+    fixture_dir=ROOT/'build/capture-device'
     def test_observed_profile_transcript_and_exact_guard(self):
         text=(ROOT/'tests/t3p_856015_sfdp.h').read_text()
         body=re.search(r't3p_856015_bfpt\[\]=\{([^}]+)',text)[1]
@@ -103,7 +104,7 @@ class Checks(unittest.TestCase):
             with self.assertRaises(ValueError):host.bmp(data,zlib.crc32(data))
 
     def test_c_wire_crc_sequence_view(self):
-        wire=(ROOT/'build/capture-device/protocol-fixture.bin').read_bytes()
+        wire=(self.fixture_dir/'protocol-fixture.bin').read_bytes()
         info=decode(wire[:64],0,0,b'T3CR',2)
         self.assertEqual(struct.unpack_from('<4I',info),(0x90000,0xc0000,0x20000,6))
         self.assertEqual(decode(wire[64:128],7,9,b'T3CR',2),bytes(range(7,47)))
@@ -128,11 +129,53 @@ class Checks(unittest.TestCase):
         self.assertEqual((diag['step_name'],diag['io_error_name']),('SFDP transfer','cache idle timeout'))
         self.assertIsNone(diag['sfdp_header']);self.assertIsNone(diag['density_word']);self.assertIsNone(diag['page_word'])
 
+    def test_cached_timing_protocol(self):
+        wire=(self.fixture_dir/'protocol-fixture.bin').read_bytes()
+        for page in range(3):self.assertEqual(len(decode(wire[192+page*64:256+page*64],page,9,b'T3CR',2)),40)
+        class Hid:
+            def send_feature_report(self,q):self.q=q[1:];return 65
+            def get_feature_report(self,report_id,n):
+                q=self.q;page=struct.unpack_from('<I',q,8)[0]
+                a=bytearray(wire[192+page*64:256+page*64]);a[16:20]=q[12:16]
+                a[12:16]=bytes(4);struct.pack_into('<I',a,12,zlib.crc32(a));return b'\0'+a
+        measured=host.CaptureReader(Hid()).timings()
+        self.assertTrue(measured['available']);self.assertEqual(measured['total_ms'],39)
+        self.assertEqual(sum(measured['phase_ms'].values()),39)
+        self.assertTrue(measured['optimizations']['verified_blank_handoff'])
+        fields=list(struct.unpack('<30I',b''.join(decode(wire[192+p*64:256+p*64],p,9,b'T3CR',2) for p in range(3))))
+        r=host.CaptureReader(None)
+        for index,value in ((0,0),(29,2),(28,2),(27,0x8000),(3,1)):
+            bad=fields.copy();bad[index]=value
+            r.exchange=lambda op,page=0,length=0:struct.pack('<10I',*bad[page*10:page*10+10])
+            with self.assertRaises(ValueError):r.timings()
+        fields=[0]*30;fields[0]=0x31525043;fields[27]=0x107;fields[29]=1
+        r.exchange=lambda op,page=0,length=0:struct.pack('<10I',*fields[page*10:page*10+10])
+        missing=r.timings();self.assertFalse(missing['available']);self.assertIsNone(missing['total_ms'])
+        fields[1]=1;fields[28]=1;fields[27]=7
+        unavailable=r.timings();self.assertTrue(unavailable['completed'])
+        self.assertFalse(unavailable['available']);self.assertIsNone(unavailable['phase_ms'])
+        fields[27]=0x107
+        # A save completing between USB pages must retry as a whole snapshot.
+        fields[1]=1;fields[28]=1;calls=0
+        def changed(op,page=0,length=0):
+            nonlocal calls
+            calls+=1
+            if calls==3:fields[1]=2
+            return struct.pack('<10I',*fields[page*10:page*10+10])
+        r.exchange=changed
+        self.assertEqual(r.timings()['generation'],2);self.assertEqual(calls,8)
+        def unstable(op,page=0,length=0):
+            if page==0:fields[1]+=1
+            return struct.pack('<10I',*fields[page*10:page*10+10])
+        r.exchange=unstable
+        with self.assertRaisesRegex(ValueError,'changed during acquisition'):r.timings()
+
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--cc',required=True);p.add_argument('--device-view',type=Path)
     p.add_argument('--native-io',type=Path,help='Replay storage calls from the linked Pi32v2 writer through the C NOR backend')
     p.add_argument('--device-sfdp',type=Path,help='Verify the private two-pass SPI/USB SFDP acquisition against the public BFPT transcript')
+    p.add_argument('--build-dir',type=Path,default=ROOT/'build/capture-device')
     a=p.parse_args()
     if a.device_sfdp:
         data=a.device_sfdp.read_bytes();record=json.loads(Path(str(a.device_sfdp)+'.json').read_bytes())
@@ -146,16 +189,20 @@ def main():
         assert data[:24]==sfdp_read.REFERENCE_HEADER
         assert result['tables'][0]['sha256']=='2e71d6dbc5696d1ec4fb214ee353f4329d31f8dd1827c10b625bc6b40d57b079'
         print('Private acquired SFDP matches its two-pass evidence and public BFPT transcript.')
-    out=ROOT/'build/capture-device';out.mkdir(parents=True,exist_ok=True)
+    out=a.build_dir;out.mkdir(parents=True,exist_ok=True);Checks.fixture_dir=out
     plain,_=fixture();f=out/'layout-fixture.bin';f.write_bytes(plain[0x5000:0x5100]+plain[0x85000:0x85020])
-    for name in ('capture_store','capture_button','capture_usb','button','flash_usb','board_capture_device'):
+    for name in ('capture_store','capture_performance','capture_durability','capture_profile','capture_button','capture_usb','button','flash_usb','board_capture_device'):
         binary=out/(name+'-test.exe');sources=[str(ROOT/f'tests/{name}.c')]
         flags=[]
         if name=='flash_usb':
             flags=['-DT3P_CAPTURE_DEVICE','-DT3P_BOOT_HOST'];sources.append(str(ROOT/'native/t3p_capture_usb.c'))
         subprocess.run([a.cc,'-std=c11','-Wall','-Wextra','-Werror',*flags,*sources,'-o',str(binary)],check=True)
-        args=[str(f)]+([str(a.native_io)] if a.native_io else []) if name=='capture_store' else [str(out/'protocol-fixture.bin')] if name=='capture_usb' else []
+        args=[str(f)]+([str(a.native_io)] if a.native_io else []) if name=='capture_store' else [str(f)] if name in ('capture_performance','capture_durability') else [str(out/'protocol-fixture.bin')] if name=='capture_usb' else []
         subprocess.run([str(binary),*args],check=True)
+    for name in ('capture_store','capture_performance'):
+        binary=out/(name+'-baseline-test.exe')
+        subprocess.run([a.cc,'-std=c11','-Wall','-Wextra','-Werror','-DT3P_CAPTURE_TIMING_BASELINE',str(ROOT/f'tests/{name}.c'),'-o',str(binary)],check=True)
+        subprocess.run([str(binary),str(f)],check=True)
     if a.device_view:layout.verify_device(a.device_view.read_bytes())
     result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(Checks))
     if not result.wasSuccessful():raise SystemExit(1)

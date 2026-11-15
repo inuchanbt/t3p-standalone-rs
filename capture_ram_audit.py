@@ -19,7 +19,7 @@ def elf_tables(path):
     return data,rows,labels,symbols
 
 
-def inspect(obj,elf,read_only=False):
+def inspect(obj,elf,read_only=False,baseline=False):
     data,rows,labels,symbols=elf_tables(obj)
     island=labels.index('.data.flash_ram')
     checked=0
@@ -40,6 +40,7 @@ def inspect(obj,elf,read_only=False):
             raise ValueError('Read-only probe contains flash mutation machinery')
     else:
         names+=('status','operate')
+        if not baseline:names+=('blank_raw',)
     for name in names:
         if not 0x101a80<=functions.get(name,0)<0x132e00:
             raise ValueError(f'SPI function {name} is not in owned SRAM')

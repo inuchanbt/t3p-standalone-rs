@@ -4,8 +4,17 @@ pub const SYSTEM_PAGE: u32 = crate::pd::PD_PAGE_COUNT;
 pub const SYSTEM_SECTIONS: u8 = 3;
 #[cfg(not(feature = "capture-device"))]
 pub const FIRMWARE_VERSION: &[u8] = b"T3P RS SYSTEM V2";
-#[cfg(all(feature = "capture-device", not(feature = "capture-sfdp-probe")))]
-pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAPTURE V4";
+#[cfg(all(
+    feature = "capture-device",
+    not(feature = "capture-sfdp-probe"),
+    not(feature = "capture-timing-baseline")
+))]
+pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAPTURE V5";
+#[cfg(all(
+    feature = "capture-timing-baseline",
+    not(feature = "capture-sfdp-probe")
+))]
+pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAP V5 BASE";
 #[cfg(feature = "capture-sfdp-probe")]
 pub const FIRMWARE_VERSION: &[u8] = b"T3P RS SFDP PROBE";
 pub const BASE_IMAGE_VERSION: &[u8] = b"3.0.3";

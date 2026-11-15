@@ -1,5 +1,40 @@
 # Replay fixtures / リプレイ用データ
 
+## Capture V5 timings and durability
+
+The `capture-device` feature builds V5; `capture-timing-baseline` retains V4's
+256-byte blank verification, second full-slot scan and thirty strip flushes,
+with the same timing instrumentation. Use separate build/preview directories
+for the two variants (`--build-dir`); never overwrite a package's ELF or
+reference frames while packaging is running.
+
+`check_capture_device.py` now runs nine C checks plus two baseline variants and
+six Python checks. `capture_performance.c` checks a one-use blank certificate,
+revocation after buffered/rejected writes, fault, prepare and reboot, protected
+flash refusal and incomplete erases at byte/sector/slot edges. It compares
+32 streamed verification transactions with 512 baseline transactions while
+requiring all 131,072 bytes to be checked. These are model counts, not elapsed
+hardware times. `capture_durability.c` drops the volatile header and final commit
+buffers on restart, checks read barriers make bytes durable, and preserves an
+occupied slot. Rust additionally exercises the proof/fallback contracts and
+every-byte interruption with an earlier committed image.
+
+`capture_profile.c` uses a constructed clock to check exclusive phase sums,
+32-bit wrap, cached previous-attempt publication, reboot invalidation and
+cached reads that never sample a clock. USB/Python checks validate three timing
+pages, flags, generation, result and phase totals, plus unavailable timings.
+The linked writer trace includes a one-use claim only after the model proves
+the whole slot blank; replay it through the actual C backend to verify page
+buffer barriers and final commit. Neither model substitutes for physical
+programming, power-off retention or actual timing measurements.
+
+After generating both linked traces, run `python tests/check_capture_comparison.py
+--cc CLANG`. It compiles the baseline and optimized NOR backends independently,
+replays both exact traces, requires identical BMP bytes and program payloads,
+checks that precisely one redundant slot read disappeared, and requires fewer
+physical page programs without increasing per-page programs. The output JSON
+is explicitly labeled offline model counts, never hardware timing evidence.
+
 ## SFDP Probe V1
 
 `check_sfdp_probe.py` reuses the independent C SPI/NOR model for the read-only
