@@ -256,6 +256,65 @@ Record filenames above use UTC. The instrumented V4-path hardware timing
 comparison is still pending; both the original six V4 images and this V5 image
 have been exported before the next firmware change.
 
+### Hardware timing comparison (2026-11-16 JST)
+
+At **12:38 JST** the comparison firmware enumerated as `T3P Capture V5 Base`,
+with STORE `0`, no diagnostic error, no completed SAVE and all three optimization
+flags false. Two independent cached snapshots matched. The user then triggered
+one SAVE on the same reported wiring and OVERVIEW page and reported
+`SAVED TO FLASH`. At **12:39 JST**, two independent post-save snapshots matched
+with STORE `0`, result/generation `1`, a completed available timing record and
+all optimization flags still false. The single committed image was exported
+twice with matching acquisitions and CRC checks; the cached timing record was
+unchanged after export.
+
+Both measurements are the first SAVE after a fresh installation, so there were
+no prior committed images to validate. The baseline retains the V4 storage
+algorithm with measurement instrumentation; it is not the original uninstrumented
+V4 binary. Both totals exclude the three-second gesture and four-second result
+hold, include the two notice frames and use the device's existing timer.
+
+| Device-timer phase | Instrumented V4 path (ms) | V5 (ms) | Reduction (ms) |
+| --- | ---: | ---: | ---: |
+| SAVING/result notice rendering and LCD transfer | 796 | 796 | 0 |
+| Prepare: erase and complete raw blank check | 1,609 | 1,569 | 40 |
+| Journal/slot check, including fallback blank scan | 1,062 | 5 | 1,057 |
+| Frozen-image rendering | 40 | 38 | 2 |
+| Encoding and buffered writes | 817 | 639 | 178 |
+| Final verification, metadata and commit | 288 | 287 | 1 |
+| **Total** | **4,612** | **3,334** | **1,278** |
+
+This one-sample-per-build comparison observed **1.278 seconds / 27.7% less
+elapsed time** in V5. The BMPs contain different live measurement content:
+encoded sizes are 19,386 bytes for the baseline and 18,794 for V5. They are not
+identical-frame or repeated trials, so the percentage is a result for these
+captures rather than a general speed guarantee. The independent constructed
+identical-frame comparison above separately checks unchanged pixel output and
+reduced storage work.
+
+The largest measured phase change is the removal of the second full-slot blank
+scan (journal/slot setup: 1,062 to 5 ms). Erase itself remains **552 ms in both
+runs**, with the same 32 sector-erase attempts and all 131,072 blank-read requested
+bytes. Streamed prepare-stage blank checking measured 1,056 to 1,014 ms. Physical
+page-program attempts were 106 to 76; program I/O measured 371 to 264 ms, page
+readback 214 to 155 ms and other reads 1,337 to 305 ms. These I/O times overlap
+the phase times and must not be added to the total. Requested other-read bytes
+were 170,634 to 38,458, with zero versus one verified-blank claim. The transfer
+counts also reflect the different encoded image lengths.
+
+The baseline BMP is 115,266 bytes, SHA-256
+`3eed695784e7c1653ba4f67ea805c799c740ce939422a4e44ef8cb7a95866fff`.
+Private evidence (record filenames in UTC):
+
+- `build/capture-v5-baseline/device-baseline-pre-save-20261116-033819.json`
+- `build/capture-v5-baseline/device-baseline-first-save-20261116-033952.json`
+- `build/captures/hardware-v5-baseline-20261116/`
+- `build/capture-v5/device-hardware-comparison-20261116-033952.json`
+
+The original V4 images, V5 image and comparison image have all been exported.
+The next hardware step is to restore the already verified normal V5 package
+and confirm its product/ready status without another save.
+
 ## SFDP acquisition and Capture V4 / 実測表と保存対応
 
 Capture V3 exports only the
