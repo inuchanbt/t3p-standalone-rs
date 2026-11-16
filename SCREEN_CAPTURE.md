@@ -227,7 +227,34 @@ checks, with SHA-256
 The cached snapshots were unchanged after export. Private evidence is
 `build/capture-v5/device-optimized-first-save-20261115-194420.json` and
 `build/captures/hardware-v5-before-power-cycle-20261116/` (record filename in UTC).
-Power-off retention of this V5 image is a separate next check.
+At this save/export checkpoint, power-off retention of the V5 image had not
+yet been checked.
+
+V5 retention follow-up, **2026-11-16 12:32 JST**: the user confirmed removing
+all power, waiting after the display went dark and reconnecting, without
+another SAVE or firmware update. The unit enumerated as `T3P Capture V5` again.
+Two independent INFO/DIAGNOSTICS/TIMINGS snapshots matched with STORE `0`, no
+diagnostic error and last result `0`. The timing record had reset to generation
+`0`, no completed attempt and unavailable elapsed fields, as expected after
+restart; the three optimization flags remained enabled.
+
+The existing `SCRN0001.BMP` was then acquired twice from flash with matching
+payload/CRC checks. Its encoded size remained 18,794 bytes. A direct comparison
+with the pre-power-off BMP matched **every one of the 115,266 bytes**, including
+the header and all pixels, with the same SHA-256
+`49cffc0e7f97f38c3b567016a89846ffaa8f096bd50f6ed01a1f59aafbd4915a`.
+This confirms completed-save retention for the new V5 buffering path on this
+unit. The simulated interrupted-save tests are separate from this completed-save
+power-cycle test. All host operations were read-only, with no program, erase or
+flush command. The private evidence is:
+
+- `build/capture-v5/device-optimized-retention-20261116-033255.json`
+- `build/capture-v5/device-v5-retention-verification-20261116-033255.json`
+- `build/captures/hardware-v5-after-power-cycle-20261116/`
+
+Record filenames above use UTC. The instrumented V4-path hardware timing
+comparison is still pending; both the original six V4 images and this V5 image
+have been exported before the next firmware change.
 
 ## SFDP acquisition and Capture V4 / 実測表と保存対応
 
