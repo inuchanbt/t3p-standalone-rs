@@ -312,8 +312,21 @@ Private evidence (record filenames in UTC):
 - `build/capture-v5/device-hardware-comparison-20261116-033952.json`
 
 The original V4 images, V5 image and comparison image have all been exported.
-The next hardware step is to restore the already verified normal V5 package
-and confirm its product/ready status without another save.
+Normal V5 restoration was the next hardware step after this comparison.
+
+Normal V5 restored, **2026-11-16 12:49 JST**: the user reported reinstalling the
+normal V5 package and reconnecting on the measurement screen without a SAVE.
+The unit enumerated as `T3P Capture V5` (0483:5750, FF31/usage 1/interface 0).
+Two independent cached INFO/DIAGNOSTICS/TIMINGS snapshots matched: STORE `0`,
+JEDEC `856015`, SFDP `50444653`, diagnostic step/error `0` and last result `0`.
+All three optimizations were enabled, the clock owner was present, and the
+timing record was in its expected fresh-boot state (generation `0`, no completed
+attempt and unavailable elapsed fields). Host operations were read-only.
+The private record is
+`build/capture-v5/device-optimized-restored-pre-save-20261116-034925.json`
+(filename in UTC). This closes the hardware sequence with normal V5 running
+after the save/export/retention checks and the instrumented timing comparison;
+no new save was triggered after this final restoration.
 
 ## SFDP acquisition and Capture V4 / 実測表と保存対応
 
