@@ -2,6 +2,12 @@
 #include "t3p_capture_usb.h"
 #include "t3p_capture_store.h"
 #include "t3p_capture_profile.h"
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+#include "t3p_temperature_diag.h"
+#endif
+#ifdef T3P_TEMPERATURE_PROBE
+#include "t3p_temperature_probe.h"
+#endif
 int32_t t3p_capture_result;
 static uint32_t get(const uint8_t *p)
 {return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
@@ -14,7 +20,9 @@ void t3p_capture_usb_request(const uint8_t q[64],uint8_t a[64])
     unsigned bad=q[0]!='T'||q[1]!='3'||q[2]!='C'||q[3]!='Q'||q[5]||q[7];
     for(unsigned i=16;i<64;i++)bad|=q[i];
     if(bad||q[4]>
-#ifdef T3P_CAPTURE_SFDP_PROBE
+#ifdef T3P_TEMPERATURE_PROBE
+       5
+#elif defined(T3P_CAPTURE_SFDP_PROBE) || defined(T3P_TEMPERATURE_DIAGNOSTICS)
        4
 #else
        3
@@ -36,6 +44,18 @@ void t3p_capture_usb_request(const uint8_t q[64],uint8_t a[64])
     }else if(q[4]==3){
         uint32_t info[10];
         if(q[6]||t3p_capture_profile_page(at,info))a[5]=1;
+        else {for(unsigned i=0;i<10;i++)put(a+24+4*i,info[i]);a[6]=40;}
+#endif
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    }else if(q[4]==4){
+        uint32_t info[10];
+        if(q[6]||t3p_temperature_diag_page(at,info))a[5]=1;
+        else {for(unsigned i=0;i<10;i++)put(a+24+4*i,info[i]);a[6]=40;}
+#endif
+#ifdef T3P_TEMPERATURE_PROBE
+    }else if(q[4]==5){
+        uint32_t info[10];
+        if(q[6]||t3p_temperature_probe_page(at,info))a[5]=1;
         else {for(unsigned i=0;i<10;i++)put(a+24+4*i,info[i]);a[6]=40;}
 #endif
 #ifdef T3P_CAPTURE_SFDP_PROBE

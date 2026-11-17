@@ -13,6 +13,7 @@ from flash_read import Reader
 
 PRODUCTS=('T3P Capture V1','T3P Capture V2','T3P Capture V3','T3P Capture V4',
           'T3P Capture V5','T3P Capture V5 Base')
+PRODUCTS=(*PRODUCTS,'T3P Temp Diag V1','T3P Temp Probe V2','T3P ENS220 Temp V3','T3P Capture V6','T3P Capture V6.1')
 PROFILE_PRODUCTS=PRODUCTS[4:]
 SLOT=0x20000
 

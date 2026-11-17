@@ -13,10 +13,13 @@ def main():
     parser.add_argument("--build-dir", type=Path)
     mode = parser.add_mutually_exclusive_group()
     for name in ("measurement", "pd-profiles", "pd-cable-read", "pd-charger",
-                 "pd-rd-test", "pd-ack-test", "system", "capture-probe", "flash-reader", "capture-device", "capture-sfdp-probe", "capture-timing-baseline"):
+                 "pd-rd-test", "pd-ack-test", "system", "capture-probe", "flash-reader", "capture-device", "capture-sfdp-probe", "capture-timing-baseline", "temperature-diagnostics", "temperature-probe", "temperature-ens220", "capture-ens220"):
         mode.add_argument(f"--{name}", action="store_true")
     args = parser.parse_args()
-    if args.capture_sfdp_probe or args.capture_timing_baseline:
+    if args.temperature_ens220: args.temperature_probe=True
+    if args.temperature_probe: args.temperature_diagnostics=True
+    if args.capture_ens220: args.temperature_diagnostics=True
+    if args.capture_sfdp_probe or args.capture_timing_baseline or args.temperature_diagnostics:
         args.capture_device=True
     if args.capture_device:
         args.system=True
@@ -24,10 +27,13 @@ def main():
         args.system = True
     if args.system:
         args.pd_charger = True
-    variant = next((name for name in ("capture-timing-baseline", "capture-sfdp-probe", "capture-device", "flash-reader", "capture-probe", "system", "pd-charger", "pd-cable-read", "pd-profiles",
+    variant = next((name for name in ("capture-ens220", "temperature-ens220", "temperature-probe", "temperature-diagnostics", "capture-timing-baseline", "capture-sfdp-probe", "capture-device", "flash-reader", "capture-probe", "system", "pd-charger", "pd-cable-read", "pd-profiles",
                                     "pd-ack-test", "pd-rd-test", "measurement")
                     if getattr(args, name.replace("-", "_"))), "")
     out = args.build_dir or ROOT / "build" / variant
+    if args.build_dir is None and args.temperature_probe: out=ROOT/"build/temperature-probe-v2"
+    if args.build_dir is None and args.temperature_ens220: out=ROOT/"build/temperature-ens220-v3"
+    if args.build_dir is None and args.capture_ens220: out=ROOT/"build/capture-v6"
     out.mkdir(parents=True, exist_ok=True)
     profiles = args.pd_profiles or args.pd_cable_read or args.pd_charger
     common = ["--profiles-ui"] if profiles else []
@@ -70,6 +76,8 @@ def main():
             groups["system"] = {name: name for name in (
                 "info", "io", "input", "missing-info", "missing-io", "missing-input",
                 "fault", "max-io", "boot-io", "temperature", "cold")}
+            if args.temperature_diagnostics and not args.capture_ens220:
+                groups["system"].update({name:name for name in ("temp-bus","temp-pb","temp-pa","missing-temp-bus","missing-temp-pb","missing-temp-pa")})
         for group, states in groups.items():
             for name, flag in states.items():
                 frames[f"preview-{group}-{name}"] = ["--measurement", f"--{group}-{flag}"]

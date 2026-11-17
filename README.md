@@ -86,7 +86,7 @@ The supplied hardware evidence records all four query replies for Chicony A240AP
 
 The `--system` build includes the CHARGER V5 functions and adds **SYSTEM** after CHARGER. Tap through its three pages: **SYSTEM INFO → BUS AND FRAMES → INPUT AND RUNTIME → OVERVIEW**. Double press cycles the SYSTEM pages; hold exits to OVERVIEW without resetting energy, peaks or diagnostics. SYSTEM updates with the normal screen refresh. Meter/PD diagnostics reuse existing transactions; V2 adds the gated temperature transactions described below.
 
-V2 adds live **BMP TEMP** acquisition on the separate PA6/PA5 sensor bus using the existing fast timer. If that timer is unavailable, temperature stays N/A. Only while SYSTEM is visible and no PD capture or armed CHARGER operation is active, it verifies BMP280-compatible ID `58`, reads the sensor's temperature calibration and requests a temperature-only forced conversion (no pressure scan or sensor reset). Only completed, compensated values in −40…+85 °C are displayed. Transfer failures, bad ID/calibration, skipped/busy conversions or results older than 2.5 seconds produce `N/A`. This is sensor die temperature, not calibrated ambient temperature. [Acquisition evidence and serial limits](SYSTEM_ACQUISITION.md) · [Bosch BMP280 data sheet](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmp280-ds001.pdf)
+V2/Capture V5 attempts **BMP TEMP** acquisition on PA6/PA5, but physical acquisition has not succeeded. **2026-11-16 correction:** tracing the stock BMP ID helper establishes PB2/PB1 as its bus; the PA table was misattributed. The separate [temperature diagnostic candidate](TEMPERATURE_DIAGNOSTICS.md) trials that PB route and records failures/GPIO state while retaining V5 capture. The remaining acquisition policy uses the existing fast timer. If that timer is unavailable, temperature stays N/A. Only while SYSTEM is visible and no PD capture or armed CHARGER operation is active, it verifies BMP280-compatible ID `58`, reads the sensor's temperature calibration and requests a temperature-only forced conversion (no pressure scan or sensor reset). Only completed, compensated values in −40…+85 °C are displayed. Transfer failures, bad ID/calibration, skipped/busy conversions or results older than 2.5 seconds produce `N/A`. This is sensor die temperature, not calibrated ambient temperature. [Acquisition evidence and serial limits](SYSTEM_ACQUISITION.md) · [Bosch BMP280 data sheet](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmp280-ds001.pdf)
 
 The existing receive-priority pause during non-SPR captures also applies to SYSTEM. Temperature queries stop during captures; uptime and diagnostic counters continue while periodic redraws are paused. The next redraw publishes the current snapshot. I²C counters now include the separate temperature bus.
 
@@ -95,6 +95,31 @@ SYSTEM INFO shows the application build label (`T3P RS SYSTEM V2`), the separate
 BUS AND FRAMES shows attempted I²C read/write transactions and transfer errors across the meter and PD controller, plus meter sample attempts/errors and completed application redraws. FIFO writes count as I²C writes, not as a count of PD packets. Sample attempts include the existing cable/charger checks. Frame last/max times cover a completed snapshot, rendering, LCD transfers and intervening polling; they describe the previous completed redraw, not an instantaneous frame rate. Before any completed frame, timing is `N/A` while the known frame count is zero. INPUT AND RUNTIME shows the BSP's DBI operation counter, recognized short/double/hold events, and the last event's delay from the most recent raw button transition. That delay includes debounce and the short/double/hold recognition windows.
 
 Owned diagnostic counters accumulate until reboot and saturate at `4294967295`; the existing 32-bit DBI operation counter wraps and is separate from frame count. Unknown meter firmware, temperature, serial, stack use, reset reason and flash diagnostics show `N/A`. Failed ID/config reads invalidate those fields instead of inventing a value. A missing native snapshot also shows `N/A`; an observed zero remains zero. Host tests and target replay cover these states using constructed data. SYSTEM V2 still awaits on-device verification.
+
+The separate [temperature probe V2](TEMPERATURE_PROBE_V2.md) candidate retains
+V5 Capture and adds eight cached register reads to compare PB/PA BMP routes,
+known bus controls and the ENS220-compatible stock secondary route. Build it
+with `python build.py --temperature-probe --build-dir build/temperature-probe-v2`.
+The V2 hardware trial acquired ENS220-compatible PART_ID 0321 on PB address 20;
+V2's temperature task still performs only the BMP sequence.
+
+The [ENS220 temperature V3](ENS220_TEMPERATURE_V3.md) candidate implements the
+verified-ID, temperature-only single-shot path. Build with
+`python build.py --temperature-ens220 --build-dir build/temperature-ens220-v3`.
+The first V3 hardware trial acquired 27.52 C with 46 successful conversions and
+one earlier unresolved failure. A second record added 1,015 successes and zero
+failures over about 17 minutes, reaching 27.78 C. V3 subsequently saved and
+exported a verified SYSTEM BMP showing +27.64 C; that one SAVE took 3.110 s
+with all V5 optimizations enabled. The completed Capture V5 image remains unchanged.
+
+[Capture V6.1](CAPTURE_V6_1.md) retains three SYSTEM pages, cached temperature
+JSON and V5 Capture, without comparison probes. It services ENS220 between LCD
+strips to fix the repaint starvation reproduced after V6's failed temperature
+trial. Build with `python build.py --capture-ens220 --build-dir build/capture-v6-1`.
+The initial V6.1 hardware trial acquired 28.44 C with 21 successes and zero
+failures, then saved/exported a SYSTEM BMP showing +28.38 C. Its single SAVE
+took 3.111 s with all V5 optimizations enabled. V6's successful Capture export
+and failed temperature record remain preserved separately.
 
 ## CC1 Rd attach test
 

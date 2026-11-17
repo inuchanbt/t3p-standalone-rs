@@ -19,6 +19,9 @@ static unsigned capture_pending;
 #endif
 #ifdef T3P_SYSTEM
 #include "t3p_temperature.h"
+#ifdef T3P_TEMPERATURE_PROBE
+#include "t3p_temperature_probe.h"
+#endif
 #endif
 #ifdef T3P_MEASURE
 #include "t3p_meter.h"
@@ -63,6 +66,16 @@ static struct t3p_button button;
 #ifdef T3P_SYSTEM
 static struct t3p_system_stats system_stats;
 static uint32_t system_tick;
+
+static void poll_temperature(struct t3p_temperature *temperature,
+                             struct t3p_meter_bus *bus,uint32_t now,unsigned gate)
+{
+    if(!meter_on_system_page())gate|=1u;
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    t3p_temperature_diagnostics.gate=gate;
+#endif
+    t3p_temperature_poll(temperature,bus,&system_stats,now,!gate);
+}
 #endif
 
 static void init_key(void)
@@ -240,8 +253,16 @@ void t3p_board_start(void)
 #ifdef T3P_SYSTEM
     temperature_ready = fast_ready;
     if (fast_ready) temperature_bus.delay = fast_bus.delay;
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    t3p_temperature_diagnostics.timer_ready=fast_ready;
+    t3p_temperature_diagnostics.timer_con=board.io.read32(board.io.context,0xfd0614u);
+    t3p_temperature_diagnostics.timer_count=board.io.read32(board.io.context,0xfd0618u);
+#endif
 #endif
     meter_pd_status(pd.state, 0, pd.mode);
+#endif
+#ifdef T3P_TEMPERATURE_PROBE
+    t3p_temperature_probe_init(temperature_ready);
 #endif
 #ifdef T3P_PD_CHARGER
     uint32_t charger_armed_at = 0;
@@ -377,15 +398,18 @@ void t3p_board_start(void)
         if(capture_notice)refresh_due=0;
 #endif
 #ifdef T3P_SYSTEM
-        unsigned temperature_enabled = meter_on_system_page() && temperature_ready;
+        unsigned temperature_gate = temperature_ready?0u:2u;
 #ifdef T3P_PD_PROFILES
-        temperature_enabled &= pd.state != T3P_PD_LISTENING;
+        if(pd.state==T3P_PD_LISTENING)temperature_gate|=4u;
 #endif
 #ifdef T3P_PD_CHARGER
-        temperature_enabled &= charger_state != CHARGER_ARMED;
+        if(charger_state==CHARGER_ARMED)temperature_gate|=8u;
 #endif
-        t3p_temperature_poll(&temperature, &temperature_bus, &system_stats,
-            t3p_bsp_millis(&board), temperature_enabled);
+        poll_temperature(&temperature,&temperature_bus,t3p_bsp_millis(&board),temperature_gate);
+#ifdef T3P_TEMPERATURE_PROBE
+        t3p_temperature_probe_poll(&board,&temperature_bus,t3p_bsp_millis(&board),
+                                   !temperature_gate&&meter_on_system_page());
+#endif
 #endif
 #ifdef T3P_PD_PROFILES
         /* Give fast captures priority over automatic repaints. Key presses
@@ -401,6 +425,9 @@ void t3p_board_start(void)
             uint32_t frame_started = t3p_bsp_millis(&board);
             t3p_system_tick(&system_stats, &system_tick, frame_started);
             system_stats.dbi_ops = board.operations;
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+            system_stats.temperature=t3p_temperature_diagnostics;
+#endif
             if (meter_on_system_page()) meter_system_status(&system_stats);
 #endif
 #ifdef T3P_PD_CHARGER
@@ -440,6 +467,21 @@ void t3p_board_start(void)
                     t3p_rd_test_poll(&rd_test, rd_bus, between_strips);
                     if (rd_test.state != T3P_RD_ON) redraw |= REDRAW;
                 }
+#endif
+#ifdef T3P_TEMPERATURE_ENS220
+                /* A full LCD repaint exceeds the 200 ms acquisition deadline.
+                 * Advance ENS220 between strips, after key/PD polling, using
+                 * fresh gates and time. The Rust frame stays frozen. Capture
+                 * SAVE/notice rendering does not use this loop. */
+                temperature_gate=temperature_ready?0u:2u;
+#ifdef T3P_PD_PROFILES
+                if(pd.state==T3P_PD_LISTENING)temperature_gate|=4u;
+#endif
+#ifdef T3P_PD_CHARGER
+                if(charger_state==CHARGER_ARMED)temperature_gate|=8u;
+#endif
+                poll_temperature(&temperature,&temperature_bus,
+                                  t3p_bsp_millis(&board),temperature_gate);
 #endif
             }
             t3p_bsp_backlight(&board, 1);

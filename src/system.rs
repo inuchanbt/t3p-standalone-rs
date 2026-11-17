@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 pub const SYSTEM_PAGE: u32 = crate::pd::PD_PAGE_COUNT;
-pub const SYSTEM_SECTIONS: u8 = 3;
+pub const SYSTEM_SECTIONS: u8 =
+    if cfg!(feature = "temperature-diagnostics") && !cfg!(feature = "capture-ens220") {
+        6
+    } else {
+        3
+    };
 #[cfg(not(feature = "capture-device"))]
 pub const FIRMWARE_VERSION: &[u8] = b"T3P RS SYSTEM V2";
 #[cfg(all(
     feature = "capture-device",
     not(feature = "capture-sfdp-probe"),
-    not(feature = "capture-timing-baseline")
+    not(feature = "capture-timing-baseline"),
+    not(feature = "temperature-diagnostics")
 ))]
 pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAPTURE V5";
 #[cfg(all(
@@ -17,6 +23,20 @@ pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAPTURE V5";
 pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAP V5 BASE";
 #[cfg(feature = "capture-sfdp-probe")]
 pub const FIRMWARE_VERSION: &[u8] = b"T3P RS SFDP PROBE";
+#[cfg(all(
+    feature = "temperature-diagnostics",
+    not(feature = "capture-sfdp-probe"),
+    not(feature = "capture-timing-baseline"),
+    not(feature = "temperature-probe"),
+    not(feature = "capture-ens220")
+))]
+pub const FIRMWARE_VERSION: &[u8] = b"T3P TEMP DIAG V1";
+#[cfg(all(feature = "temperature-probe", not(feature = "temperature-ens220")))]
+pub const FIRMWARE_VERSION: &[u8] = b"T3P TEMP PROBE V2";
+#[cfg(all(feature = "temperature-ens220", not(feature = "capture-ens220")))]
+pub const FIRMWARE_VERSION: &[u8] = b"T3P ENS220 TEMP V3";
+#[cfg(feature = "capture-ens220")]
+pub const FIRMWARE_VERSION: &[u8] = b"T3P RS CAPTURE V6.1";
 pub const BASE_IMAGE_VERSION: &[u8] = b"3.0.3";
 
 /// Native snapshot, matching native/t3p_system.h. Unknown values use flags,
@@ -48,6 +68,56 @@ pub struct SystemStats {
     pub key_ms: u32,
     pub temp_centi: i32,
     pub temp_valid: u32,
+    #[cfg(feature = "temperature-diagnostics")]
+    pub temperature: TemperatureDiagnostics,
+}
+
+/// All words match native/t3p_temperature_diag.h; validity flags qualify data.
+#[cfg(feature = "temperature-diagnostics")]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TemperatureDiagnostics {
+    pub magic: u32,
+    pub version: u32,
+    pub sequence: u32,
+    pub attempts: u32,
+    pub successes: u32,
+    pub failures: u32,
+    pub gate: u32,
+    pub phase: u32,
+    pub result: u32,
+    pub transactions: u32,
+    pub reg: u32,
+    pub direction: u32,
+    pub stage: u32,
+    pub bus_error: u32,
+    pub byte_index: u32,
+    pub bit_index: u32,
+    pub ack_seen: u32,
+    pub ack_valid: u32,
+    pub valid: u32,
+    pub id: u32,
+    pub status: u32,
+    pub adc: u32,
+    pub cal0: u32,
+    pub cal1: u32,
+    pub control: u32,
+    pub timer_ready: u32,
+    pub timer_con: u32,
+    pub timer_count: u32,
+    pub gpio_valid: u32,
+    pub stop_error: u32,
+    pub bus_port: u32,
+    pub scl_mask: u32,
+    pub sda_mask: u32,
+    pub init_port: u32,
+    pub active_port: u32,
+    pub temp_centi: i32,
+    pub temp_valid: u32,
+    pub updated_ms: u32,
+    pub attempted_ms: u32,
+    pub sensor_kind: u32,
+    pub pins: [[u32; 14]; 5],
 }
 
 impl SystemStats {
@@ -62,7 +132,20 @@ mod tests {
 
     #[test]
     fn native_snapshot_layout_and_clock_carry_are_preserved() {
-        assert_eq!(core::mem::size_of::<SystemStats>(), 23 * 4);
+        assert_eq!(
+            core::mem::size_of::<SystemStats>(),
+            (23 + if cfg!(feature = "temperature-diagnostics") {
+                110
+            } else {
+                0
+            }) * 4
+        );
+        #[cfg(feature = "temperature-diagnostics")]
+        {
+            assert_eq!(core::mem::size_of::<TemperatureDiagnostics>(), 440);
+            assert_eq!(core::mem::offset_of!(SystemStats, temperature), 92);
+            assert_eq!(core::mem::offset_of!(TemperatureDiagnostics, pins), 160);
+        }
         assert_eq!(core::mem::offset_of!(SystemStats, key_ms), 20 * 4);
         let stats = SystemStats {
             uptime_low: 123,

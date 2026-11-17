@@ -2,8 +2,13 @@
 #ifndef T3P_SYSTEM_H
 #define T3P_SYSTEM_H
 #include <stdint.h>
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+#include "t3p_temperature_diag.h"
+#endif
 
-/* Word-for-word ABI with src/system.rs. Owned counters saturate; uptime carries.
+/* Word-for-word ABI with src/system.rs. The original prefix remains 23 words.
+ * Optional cached temperature diagnostics adds a 110-word tail on both sides.
+ * Owned counters saturate; uptime carries.
  * dbi_ops is the BSP's existing wrapping 32-bit operation counter. */
 struct t3p_system_stats {
     uint32_t uptime_low, uptime_high;
@@ -14,7 +19,13 @@ struct t3p_system_stats {
     uint32_t short_presses, double_presses, long_presses, key_event, key_ms;
     int32_t temp_centi;
     uint32_t temp_valid;
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    struct t3p_temperature_diag temperature;
+#endif
 };
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+_Static_assert(sizeof(struct t3p_system_stats)==133*4,"SYSTEM temperature ABI");
+#endif
 
 static inline void t3p_system_count(uint32_t *value)
 {

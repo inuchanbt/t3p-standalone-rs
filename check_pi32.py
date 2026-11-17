@@ -28,6 +28,9 @@ def main():
     parser.add_argument("--pd-cable-read", action="store_true")
     parser.add_argument("--pd-charger", action="store_true")
     parser.add_argument("--system", action="store_true")
+    parser.add_argument("--temperature-diagnostics", action="store_true")
+    parser.add_argument("--temperature-ens220", action="store_true")
+    parser.add_argument("--capture-ens220", action="store_true")
     parser.add_argument("--capture-probe", action="store_true")
     parser.add_argument("--flash-reader", action="store_true")
     parser.add_argument("--capture-device", action="store_true")
@@ -36,6 +39,11 @@ def main():
     parser.add_argument("--pd-rd-test", action="store_true")
     parser.add_argument("--pd-ack-test", action="store_true")
     args = parser.parse_args()
+    if args.capture_ens220: args.temperature_ens220=True
+    if args.temperature_ens220: args.temperature_diagnostics=True
+    if args.temperature_diagnostics: args.capture_device=True
+    temperature_ui=args.temperature_diagnostics and not args.capture_ens220
+    system_sections=6 if temperature_ui else 3
     if args.writer_only:args.capture_device=args.capture_only=True
     if args.capture_device:
         args.system=True
@@ -381,7 +389,7 @@ def main():
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-cable-ready.ppm").read_bytes():
                 raise ValueError("Pi32v2 did not advance after the oldest sniff page")
-            for _ in range(8 + int(args.pd_charger) + 3 * int(args.system)):
+            for _ in range(8 + int(args.pd_charger) + system_sections * int(args.system)):
                 cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_next_page"], [])
             if cpu.call(symbols["meter_double_press"], [])[0] != 3:
@@ -395,7 +403,7 @@ def main():
             cpu.call(symbols["meter_snapshot"], [])
             if render() != (out / "preview-cable-ready.ppm").read_bytes():
                 raise ValueError("Pi32v2 sniff recapture did not reset the history cursor")
-            for _ in range(8 + int(args.pd_charger) + 3 * int(args.system)):
+            for _ in range(8 + int(args.pd_charger) + system_sections * int(args.system)):
                 cpu.call(symbols["meter_next_page"], [])
             cpu.call(symbols["meter_long_press"], [])
             cpu.call(symbols["meter_snapshot"], [])
@@ -572,6 +580,14 @@ def main():
                         raise ValueError("Pi32v2 native temperature compensation mismatch")
                 if cpu.call(symbols["t3p_temperature_compensate"], [strip, 0x80000, strip + 8])[0] != 0xffffffff:
                     raise ValueError("Pi32v2 accepted a skipped temperature conversion")
+                if args.temperature_ens220:
+                    for raw,expected in ((0x9513,2500),(34963,0),(0x8000,-1715),(29843,-4000),(45843,8500)):
+                        result=cpu.call(symbols["t3p_ens220_centidegrees"],[raw,strip])[0]
+                        value=int.from_bytes(cpu.mem.read(strip,4),'little',signed=True)
+                        if result or value!=expected:raise ValueError('Pi32v2 ENS220 temperature conversion mismatch')
+                    for raw in (0,0xffff,0x10000,29842,45844):
+                        if cpu.call(symbols["t3p_ens220_centidegrees"],[raw,strip])[0]!=0xffffffff:
+                            raise ValueError('Pi32v2 accepted out-of-range ENS220 output')
                 def enter_system():
                     for _ in range(64):
                         if cpu.call(symbols["meter_on_system_page"], [])[0]:
@@ -585,7 +601,9 @@ def main():
                         raise ValueError(f"Pi32v2 SYSTEM {page} frame differs from host preview")
 
                 def publish_system(words):
-                    cpu.mem.write(strip, struct.pack("<23I", *words))
+                    words=list(words)
+                    if args.temperature_diagnostics and len(words)==23: words += [0]*110
+                    cpu.mem.write(strip, struct.pack(f"<{len(words)}I", *words))
                     cpu.call(symbols["meter_system_status"], [strip])
 
                 def check_system_exit():
@@ -595,7 +613,8 @@ def main():
 
                 enter_system()
                 cpu.call(symbols["meter_system_status"], [0])  # Null is ignored, never dereferenced.
-                for page in ("missing-info", "missing-io", "missing-input"):
+                for page in (("missing-info", "missing-io", "missing-input") +
+                             (("missing-temp-bus","missing-temp-pb","missing-temp-pa") if temperature_ui else ())):
                     check_system(page)
                     cpu.call(symbols["meter_next_page"], [])
                 check_system_exit()
@@ -607,6 +626,14 @@ def main():
                     if page != "input": cpu.call(symbols["meter_next_page"], [])
                 if cpu.call(symbols["meter_double_press"], [])[0] != 0:
                     raise ValueError("Pi32v2 SYSTEM double press requested a protocol action")
+                if temperature_ui:
+                    fixture="ens220_diag.words" if args.temperature_ens220 else "temperature_diag.words"
+                    diag=[int(w,16) for w in (ROOT/"tests"/fixture).read_text().split()]
+                    publish_system(words+diag)
+                    for page in ("temp-bus","temp-pb","temp-pa"):
+                        check_system(page)
+                        cpu.call(symbols["meter_next_page"],[])
+                    enter_system();publish_system(words)
                 check_system("info")
                 cpu.call(symbols["meter_long_press"], [])
                 check_system_exit()
@@ -624,6 +651,8 @@ def main():
                 check_system("boot-io")
                 cpu.call(symbols["meter_next_page"], [])
                 cpu.call(symbols["meter_next_page"], [])
+                if temperature_ui:
+                    for _ in range(3): cpu.call(symbols["meter_next_page"],[])
                 check_system_exit()
                 enter_system()
                 for page, value in (("temperature", 2508), ("cold", -512)):

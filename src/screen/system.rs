@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 use super::cable::hex;
-use super::{AMPS, GRID, MUTED, Overview, Strip, TEXT, VOLTS, WATTS};
+use super::{Overview, Strip, AMPS, GRID, MUTED, TEXT, VOLTS, WATTS};
 use crate::system::{BASE_IMAGE_VERSION, FIRMWARE_VERSION, SYSTEM_SECTIONS};
 
 fn decimal(mut value: u32) -> [u8; 10] {
@@ -28,6 +28,17 @@ fn uptime(ms: u64) -> Option<[u8; 20]> {
     Some(text)
 }
 
+fn temperature_label() -> &'static [u8] {
+    if cfg!(any(
+        feature = "temperature-ens220",
+        feature = "capture-ens220"
+    )) {
+        b"ENS220 TEMP"
+    } else {
+        b"BMP TEMP"
+    }
+}
+
 fn row(p: &mut Strip<'_>, index: usize, label: &[u8], value: &[u8], color: u16) {
     let y = 49 + index * 18;
     p.text(12, y, label, 1, MUTED);
@@ -37,6 +48,11 @@ fn row(p: &mut Strip<'_>, index: usize, label: &[u8], value: &[u8], color: u16) 
 
 pub(super) fn render(p: &mut Strip<'_>, view: &Overview) {
     let section = view.system_section;
+    #[cfg(all(feature = "temperature-diagnostics", not(feature = "capture-ens220")))]
+    if section >= 3 {
+        render_temperature(p, view);
+        return;
+    }
     p.text(
         8,
         36,
@@ -106,9 +122,9 @@ pub(super) fn render(p: &mut Strip<'_>, view: &Overview) {
                 text[2] += (n / 100 % 10) as u8;
                 text[4] += (n / 10 % 10) as u8;
                 text[5] += (n % 10) as u8;
-                row(p, 7, b"BMP TEMP", &text, WATTS);
+                row(p, 7, temperature_label(), &text, WATTS);
             } else {
-                row(p, 7, b"BMP TEMP", b"N/A", MUTED);
+                row(p, 7, temperature_label(), b"N/A", MUTED);
             }
             row(p, 8, b"SERIAL", b"N/A", MUTED);
         }
@@ -159,6 +175,193 @@ pub(super) fn render(p: &mut Strip<'_>, view: &Overview) {
             row(p, 7, b"RESET REASON", b"N/A", MUTED);
             row(p, 8, b"FLASH CHECK", b"N/A", MUTED);
         }
+    }
+}
+
+#[cfg(all(feature = "temperature-diagnostics", not(feature = "capture-ens220")))]
+fn render_temperature(p: &mut Strip<'_>, view: &Overview) {
+    use crate::system::TemperatureDiagnostics;
+    let d = view.system.map(|s| s.temperature).filter(|d| {
+        d.magic == 0x31444d54 && (d.version == 1 || (d.version == 3 && d.sensor_kind == 2))
+    });
+    let section = view.system_section;
+    let title: &[u8] = match section {
+        3 => b"TEMP ACQUISITION",
+        4 => b"TEMP PB2/PB1 R/F",
+        _ => b"TEMP PA5/PA6 B/A",
+    };
+    p.text(8, 36, title, 1, VOLTS);
+    p.text(
+        215,
+        36,
+        &[b'1' + section, b'/', b'0' + SYSTEM_SECTIONS],
+        1,
+        AMPS,
+    );
+    let Some(d) = d else {
+        row(p, 0, b"DIAGNOSTICS", b"N/A", MUTED);
+        return;
+    };
+    if section == 3 {
+        row(p, 0, b"ATTEMPTS", &decimal(d.attempts), TEXT);
+        row(p, 1, b"FAILURES", &decimal(d.failures), TEXT);
+        let phase: &[u8] = match d.phase {
+            1 => b"ID",
+            2 => b"PRE STATUS",
+            3 => b"CALIBRATION",
+            4 => b"TRIGGER",
+            5 => b"WAIT",
+            6 => b"POST STATUS",
+            7 => b"RAW",
+            8 => b"COMPENSATE",
+            9 => b"DONE",
+            10 => b"CONFIGURE",
+            11 => b"CLEANUP",
+            _ => b"IDLE",
+        };
+        row(p, 2, b"PHASE", phase, TEXT);
+        let reason: &[u8] = if d.result == 1 {
+            match d.bus_error {
+                1 => b"IO DELAY",
+                2 => b"IO SCL LOW",
+                3 => b"IO SDA LOW",
+                4 => b"IO NACK",
+                5 => b"IO ARGUMENT",
+                _ => {
+                    if d.stop_error != 0 {
+                        b"IO STOP"
+                    } else {
+                        b"IO"
+                    }
+                }
+            }
+        } else {
+            match d.result {
+                0 => b"OK",
+                2 => b"BAD ID",
+                3 => b"BUSY",
+                4 => b"BAD CAL",
+                5 => b"TIMEOUT",
+                6 => b"SKIPPED",
+                7 => b"RANGE",
+                8 => b"CANCELLED",
+                9 => b"CONFIG MISMATCH",
+                _ => b"UNKNOWN",
+            }
+        };
+        row(p, 3, b"RESULT", reason, VOLTS);
+        let stage: &[u8] = match d.stage {
+            1 => b"IDLE",
+            2 => b"START",
+            3 => b"ADDR W",
+            4 => b"REG",
+            5 => b"RESTART",
+            6 => b"ADDR R",
+            7 => b"DATA",
+            8 => b"STOP",
+            9 => b"DONE",
+            _ => b"NONE",
+        };
+        let mut text = [b' '; 18];
+        text[..2].copy_from_slice(&hex::<2>(d.reg));
+        text[3..3 + stage.len()].copy_from_slice(stage);
+        row(
+            p,
+            4,
+            b"REG / STAGE",
+            if d.transactions != 0 { &text } else { b"N/A" },
+            TEXT,
+        );
+        let mut ack = *b"0000/0000";
+        ack[..4].copy_from_slice(&hex::<4>(d.ack_valid));
+        ack[5..].copy_from_slice(&hex::<4>(d.ack_seen));
+        row(
+            p,
+            5,
+            b"ACK V / OK",
+            if d.transactions != 0 { &ack } else { b"N/A" },
+            TEXT,
+        );
+        let ens = d.version == 3 && d.sensor_kind == 2;
+        if ens {
+            let mut ids = *b"---- / --";
+            if d.valid & 1 != 0 {
+                ids[..4].copy_from_slice(&hex::<4>(d.id));
+            }
+            if d.valid & 2 != 0 {
+                ids[7..].copy_from_slice(&hex::<2>(d.status));
+            }
+            row(p, 6, b"ID / STATUS", &ids, TEXT);
+        } else {
+            let mut ids = *b"-- / --";
+            if d.valid & 1 != 0 {
+                ids[..2].copy_from_slice(&hex::<2>(d.id));
+            }
+            if d.valid & 2 != 0 {
+                ids[5..].copy_from_slice(&hex::<2>(d.status));
+            }
+            row(p, 6, b"ID / STATUS", &ids, TEXT);
+        }
+        let adc = hex::<6>(d.adc);
+        row(
+            p,
+            7,
+            if ens { b"TEMP RAW" } else { b"RAW ADC" },
+            if d.valid & 16 != 0 { &adc } else { b"N/A" },
+            TEXT,
+        );
+        let mut gate = *b"00 / TIMER N/A";
+        gate[..2].copy_from_slice(&hex::<2>(d.gate));
+        if d.timer_ready != 0 {
+            gate[11..].copy_from_slice(b"OK ");
+        }
+        row(p, 8, b"GATE / CLOCK", &gate, TEXT);
+    } else {
+        let (a, b, mask) = if section == 4 {
+            (2, 3, 6)
+        } else {
+            (0, 1, 0x60)
+        };
+        fn field(d: &TemperatureDiagnostics, snapshot: usize, index: usize, mask: u32) -> [u8; 2] {
+            if d.gpio_valid & (1 << snapshot) != 0 {
+                hex::<2>(d.pins[snapshot][index] & mask)
+            } else {
+                *b"--"
+            }
+        }
+        for (row_index, label, first, second) in [
+            (0, b"IN" as &[u8], 0, None),
+            (1, b"DIR", 2, None),
+            (2, b"OUT", 1, None),
+            (3, b"DIE / DIEH", 3, Some(4)),
+            (4, b"PU0 / PU1", 5, Some(6)),
+            (5, b"PD0 / PD1", 7, Some(8)),
+            (6, b"HD0 / HD1", 9, Some(10)),
+            (7, b"SPL / CON", 11, Some(12)),
+        ] {
+            let mut value = *b"--,--/--,--";
+            value[..2].copy_from_slice(&field(&d, a, first, mask));
+            value[6..8].copy_from_slice(&field(&d, b, first, mask));
+            if let Some(second) = second {
+                value[3..5].copy_from_slice(&field(&d, a, second, mask));
+                value[9..].copy_from_slice(&field(&d, b, second, mask));
+                row(p, row_index, label, &value, TEXT);
+            } else {
+                let pair = [value[0], value[1], b'/', value[6], value[7]];
+                row(p, row_index, label, &pair, TEXT);
+            }
+        }
+        row(
+            p,
+            8,
+            b"LEFT / RIGHT",
+            if section == 4 {
+                b"RELEASE / FAULT"
+            } else {
+                b"BEFORE / AFTER"
+            },
+            TEXT,
+        );
     }
 }
 

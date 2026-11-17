@@ -75,6 +75,14 @@ static void setup(const uint8_t q[8])
             "T3P SFDP Probe V1";
 #elif defined(T3P_CAPTURE_TIMING_BASELINE)
             "T3P Capture V5 Base";
+#elif defined(T3P_CAPTURE_ENS220)
+            "T3P Capture V6.1";
+#elif defined(T3P_TEMPERATURE_ENS220)
+            "T3P ENS220 Temp V3";
+#elif defined(T3P_TEMPERATURE_PROBE)
+            "T3P Temp Probe V2";
+#elif defined(T3P_TEMPERATURE_DIAGNOSTICS)
+            "T3P Temp Diag V1";
 #elif defined(T3P_CAPTURE_DEVICE)
             "T3P Capture V5";
 #else

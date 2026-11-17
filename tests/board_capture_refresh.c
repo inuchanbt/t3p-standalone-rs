@@ -22,8 +22,29 @@ int t3p_temperature_read(struct t3p_meter_bus *bus, uint8_t reg, uint8_t *data, 
 { assert(bus->delay == fast_delay); ++temperature_reads; (void)reg; (void)data; (void)count; return -1; }
 int t3p_temperature_write(struct t3p_meter_bus *bus, uint8_t reg, uint8_t value)
 { (void)bus; (void)reg; (void)value; abort(); }
+#ifdef T3P_TEMPERATURE_ENS220
+int t3p_ens220_read(struct t3p_meter_bus *bus,uint8_t reg,uint8_t *data,unsigned count)
+{
+    assert(!capturing&&!fail_fast_timer&&bus->delay==fast_delay);
+    ++temperature_reads;(void)reg;(void)data;(void)count;return -1;
+}
+int t3p_ens220_write(struct t3p_meter_bus *bus,uint8_t reg,uint8_t value)
+{(void)bus;(void)reg;(void)value;abort();}
+#endif
+#ifdef T3P_TEMPERATURE_PROBE
+int t3p_temperature_probe_sample(struct t3p_bsp *board,struct t3p_meter_bus *bus,
+                                unsigned index,struct t3p_temperature_probe_record *record)
+{
+    (void)board;(void)index;
+    assert(!capturing&&!fail_fast_timer&&bus->delay==fast_delay);
+    record->meta[4]=UINT32_MAX;return -1;
+}
+#endif
 void meter_system_status(const struct t3p_system_stats *s)
 {
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    assert(s->temperature.timer_ready==!fail_fast_timer);
+#endif
     assert(s->frames == completed_strips / 30);
     assert(s->uptime_high == 0 && s->uptime_low == clock_ms);
     if (s->frames) assert(s->frame_ms == 30 && s->frame_max_ms == 30);

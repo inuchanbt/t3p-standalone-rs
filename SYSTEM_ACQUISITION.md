@@ -6,13 +6,46 @@ V1 の３ページは実機写真で確認しました。V2 のセンサー取�
 
 ## Temperature
 
-The stock 3.0.3 app SHA-256 is `ecd03d659db7c961585ffd1e090a7325a82433a1c270f5964f268ddb5c1bdc0c`. Its sensor I²C configuration at `0C111A10` contains SCL 6 / SDA 5 on PA, distinct from the meter/PD PB2/PB1 bus. The existing board research traces this table into GPIO initialization. Sensor initialization checks wire address `EE` (7-bit `77`), ID register `D0` and ID `58`, then reads 24 calibration bytes from `88`. The relevant instructions include `0C0E6D74`, `0C0E6D7E`, `0C0E6D8E`, `0C0E6D96`, `0C0E6DBE` and control register `F4` at `0C0E6DE6`.
+**V2 device trial, 2026-11-16:** PB address 20 returned bytes 21 03, matching
+ENS220 PART_ID 0321. The meter/PD controls succeeded, while all four PA/PB BMP
+76/77 probes address-NACKed. The V1/V2 temperature task supports only BMP;
+the missing ENS220 acquisition path explains N/A on this unit. Actual
+temperature is still unacquired. See [the V2 device result](TEMPERATURE_PROBE_V2.md#v2-on-device-result-2026-11-16)
+for file hash, cache CRC, GPIO restoration and the limits of this observation.
+
+The separate [ENS220 temperature V3](ENS220_TEMPERATURE_V3.md) candidate now
+implements acquisition after verified PART_ID, using a first-initialization
+reset, temperature-only single shots, configuration readback and fresh-data
+checks. Its first hardware snapshot acquired 27.52 C (46 successes, one earlier
+unresolved failure). A second snapshot added 1,015 successes without another
+failure over 1,015.749 seconds, reaching 27.78 C. Continued acquisition across
+this interval is verified. The subsequent V3 SYSTEM Capture SAVE/HID BMP export
+also succeeded, showing +27.64 C; its image integrity and 3.110 s SAVE were
+checked. This is the recorded trial scope, not a new power-cycle retention claim.
+The original V5 image
+and the BMP/V1/V2 paths retain their previous behavior.
+
+[Capture V6.1](CAPTURE_V6_1.md) retains three SYSTEM pages and cached temperature
+JSON without the comparison matrix. V6's hardware trial saved/exported Capture
+successfully but acquired no temperature (16 attempts, 15 failures, 60 bus
+transactions). The archived board loop reproduces those counts when a repaint
+exceeds the 200 ms pending deadline. V6.1 services ENS220 between LCD strips
+with fresh gates/time. Its initial hardware trial acquired 28.44 C with 21
+successes and zero failures, verified configuration mask 0F and idle cleanup,
+then saved/exported a SYSTEM BMP showing +28.38 C. That single SAVE took
+3.111 s with all V5 optimizations enabled. This is the recorded initial V6.1
+temperature/Capture scope; earlier V3 interval and V5 retention evidence remain
+attached to their original images.
+
+**2026-11-16 correction:** the BMP280 ID call chain uses **PB2 SCL / PB1 SDA**, shared with the meter/PD bus. The previous association with PA6/PA5 was incorrect. The PA table at `0C111A10` is a separate hardware-I2C configuration, not the route used by the BMP ID helper. See [TEMPERATURE_DIAGNOSTICS.md](TEMPERATURE_DIAGNOSTICS.md) for byte-verified call edges and the separate diagnostic candidate. Released Capture V5 artifacts remain unchanged; their old temperature implementation still uses PA and has not acquired a verified temperature.
+
+The stock 3.0.3 app SHA-256 is `ecd03d659db7c961585ffd1e090a7325a82433a1c270f5964f268ddb5c1bdc0c`. The BMP ID read at `0C0E6D84` calls `0C0CF502`, whose START and byte operations call `0C0EA5E6` and `0C0EA64C`. Software-I2C initialization at `0C0EA578` copies table `0C11BCFC`: `(0,18,17,0x11,0,400000)`, and explicitly configures port 1 (PB), masks 4/2, input with internal 10k pull-up. Sensor initialization checks wire address `EE` (7-bit `77`), register `D0` and ID `58`, then reads 24 calibration bytes from `88`. After ID and calibration, stock writes reset `E0=B6`, control `F4=B3`, and configuration `F5=14`; the diagnostic candidate retains the existing temperature-only forced conversion policy.
 
 V2 reads the first six calibration bytes (T1/T2/T3) and requests temperature x1 / pressure skipped / forced mode with `F4=21`. It does not copy the stock pressure/normal-mode configuration and does not reset the sensor. Conversion status `F3` must be clear and raw temperature `FA..FC` must not be the skipped-measurement code. Compensation follows the [Bosch BMP280 data sheet](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmp280-ds001.pdf), with 64-bit intermediates to avoid overflow on bad calibration inputs. Invalid ID/calibration, I/O failure, timeout, unavailable raw data, range failure or stale data gives N/A. A valid 0.00 °C remains a value.
 
-The scheduler runs at most one attempt per second, only on SYSTEM and outside active PD capture / armed CHARGER operation. Pending conversions are abandoned on leaving that state. Sensor reads/writes share the diagnostic counters but use separate PA pins and the existing TIMER1 fast-bus delay. If fast-timer setup failed, acquisition is disabled (N/A), with no slow fallback. Positive and negative compensation, error paths, GPIO preservation, bus framing and display are tested offline. The actual sensor on this unit and its calibration still require a V2 hardware trial.
+The scheduler runs at most one attempt per second, only on SYSTEM and outside active PD capture / armed CHARGER operation. Pending conversions are abandoned on leaving that state. The V1 diagnostic candidate uses the existing meter PB GPIO setup and TIMER1 fast-bus delay, leaving PA unchanged; V2 temporarily configures and restores PA during its finite probe matrix. If fast-timer setup failed, acquisition is disabled (N/A), with no slow fallback. Positive and negative compensation, error paths, GPIO preservation, bus framing and display are tested offline. The BMP path remains unverified on this unit. The optional ENS220 V3 path now has the initial hardware temperature result above; continued acquisition and candidate Capture SAVE checks remain.
 
-純正と同じセンサーバス・ID・校正値の経路を使用します。生値をそのまま ℃ と扱わず、温度校正値で補正してから表示します。BMP TEMP は気圧センサー内部の温度です。純正メイン画面の温度と同じ取得元であることや、室温としての精度は未確認です。失敗や古い値は N/A とし、実機で実際に読めるかは V2 の試験対象です。
+2026-11-16訂正：純正BMPの照会経路はPB2/PB1です。以前のPA6/PA5との対応付けは誤りでした。修正は温度診断候補のみで試し、完成済みCapture V5配布物は保持します。個体のID・校正値・生値・温度の実取得は未確認です。失敗・未取得・古い値はN/Aを維持します。
 
 ## Serial
 
@@ -24,4 +57,4 @@ The producer/lifetime and validity of that updater state during normal applicati
 
 ## Reproduce
 
-Run `python system_source_evidence.py --bsp PATH_TO_DOOM_ON_T3P`. It checks both stock image hashes, the sensor bus table, and 16 disassembled instructions against their original bytes, writing `build/system/acquisition-evidence.json`. All work is offline; the script sends no USB/flash commands. `python tests/check_system.py --cc PATH_TO_HOST_CLANG` runs the C checks. Packaging also executes the native compensation function and SYSTEM display cases on the Pi32v2 simulator.
+Run `python system_source_evidence.py --bsp PATH_TO_DOOM_ON_T3P`. It checks both stock image hashes, both I2C tables, 42 disassembled instructions, 11 resolved BMP call edges and four secondary sensor call edges against their original bytes, writing `build/system/acquisition-evidence.json`. The secondary route has an ENS220-compatible software fingerprint; see [TEMPERATURE_PROBE_V2.md](TEMPERATURE_PROBE_V2.md) for the separate ID probe. All work is offline; the script sends no USB/flash commands. `python tests/check_system.py --cc PATH_TO_HOST_CLANG` runs the C checks. Packaging also executes the native compensation function and SYSTEM display cases on the Pi32v2 simulator.

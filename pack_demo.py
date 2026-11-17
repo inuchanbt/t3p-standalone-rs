@@ -62,6 +62,12 @@ def main():
         check.append("--pd-charger")
     if "SYSTEM diagnostics" in build_audit["status"]:
         check.append("--system")
+    if "temperature diagnostics V1" in build_audit["status"]:
+        check.append("--temperature-diagnostics")
+    if "ENS220 temperature acquisition V3" in build_audit["status"]:
+        check.append("--temperature-ens220")
+    if "normal Capture V6" in build_audit["status"]:
+        check.append("--capture-ens220")
     if "capture storage read-only preflight" in build_audit["status"]:
         check.append("--capture-probe")
     if "USB HID mapped flash reader" in build_audit["status"]:

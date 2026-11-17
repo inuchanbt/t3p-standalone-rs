@@ -859,3 +859,50 @@ user-confirmed complete power-off/reconnect on this unit. No host program,
 erase or flush command was issued; the device save was triggered by the
 user's single three-second button hold. Physical interruption during an active
 save remains distinct from the completed-save power-cycle test above.
+
+
+## ENS220 V3 integration trial / 温度対応版の実機確認
+
+On 2026-11-16, the separate ENS220 temperature V3 candidate completed a native
+SYSTEM SAVE and HID BMP export after its temperature continuity check. The
+exported 240 x 240 `SCRN0001.BMP` is 115,266 bytes (13,960 compressed bytes in
+slot 0), SHA-256 `df959721021bccb860bc31513511d3729c883dae78dc09f63a0730baa2121690`.
+The exporter's independent second header/payload acquisition matched. The local
+BMP hash, decoding and preview pixels were checked, and the actual image shows
+ENS220 TEMP +27.64 C, meter 2260/config 4127/state OK, APP T3P ENS220 TEMP V3.
+
+SAVE generation/result are 1/1, backend status/step/error are zero and all three
+V5 optimization flags are enabled. That single SAVE took 3,110 ms; this is not a
+controlled speed comparison with another image. This trial verifies V3 SAVE and
+export, and does not add a V3 power-cycle retention claim. The original V5
+binary and its earlier retention result remain unchanged.
+
+See [ENS220_TEMPERATURE_V3.md](ENS220_TEMPERATURE_V3.md) and local evidence in
+`build/temperature-ens220-v3/capture-01/` and
+`build/temperature-ens220-v3/hardware-validation-complete.json`.
+
+温度対応V3でもSYSTEM保存・USB取り出しが成功しました。実画像の+27.64℃を確認し、
+独立2回読み取り・SHA-256・画像デコードも一致しています。今回1回は3.110秒、
+V5最適化も有効です。完成済みV5配布物と、既存の電源断保持の実機記録は維持します。
+
+
+## Capture V6.1 initial hardware regression (2026-11-16)
+
+After the V6.1 temperature snapshot recorded 28.44 C, 21 successful
+acquisitions and zero failures, its SYSTEM native SAVE and HID BMP export
+succeeded. The actual 240 x 240 image shows APP T3P RS CAPTURE V6.1, ENS220
+TEMP +28.38 C and meter 2260/config 4127/state OK. The 115,266-byte BMP contains
+14,006 stored compressed bytes. SHA-256 is
+`42904166ed8176a8ffa625011d0bf6ed5e92506657a27024efa381626d544081`.
+The exporter reports two matching acquisitions; the local hash, BMP decoding
+and lossless PNG pixels agree.
+
+SAVE result/generation are 1/1, backend status/step/error are zero, and all
+three V5 optimizations are enabled. This single SAVE took 3,111 ms. This
+initial V6.1 temperature/SAVE/export trial adds no controlled speed comparison,
+post-SAVE temperature-continuity or power-cycle retention result.
+The preserved V5 and V3 binaries/evidence retain their previous scope.
+
+See [CAPTURE_V6_1.md](CAPTURE_V6_1.md) and local records in
+`build/capture-v6-1/hardware-validation-01.json`,
+`build/capture-v6-1/device-v6-1-01.json` and `build/capture-v6-1/capture-01/`.

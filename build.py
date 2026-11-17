@@ -116,10 +116,18 @@ def main():
     pd_mode.add_argument("--capture-device", action="store_true", help="Persistent capture partition and read-only HID export")
     pd_mode.add_argument("--capture-sfdp-probe", action="store_true", help="Read-only SFDP acquisition; flash mutation code excluded")
     pd_mode.add_argument("--capture-timing-baseline", action="store_true", help="Instrumented V4 storage path for V5 timing comparison")
+    pd_mode.add_argument("--temperature-diagnostics", action="store_true", help="Capture V5 plus cached temperature bus diagnosis and stock PB route")
+    pd_mode.add_argument("--temperature-probe", action="store_true", help="V2 finite read-only ID matrix on PB and restored PA GPIO")
+    pd_mode.add_argument("--temperature-ens220", action="store_true", help="V3 verified ENS220 temperature single-shot acquisition, plus V2 probes")
+    pd_mode.add_argument("--capture-ens220", action="store_true", help="Capture V6.1: ENS220 temperature serviced during LCD repaint, three SYSTEM pages, no comparison probes")
     pd_mode.add_argument("--pd-rd-test", action="store_true", help="Build the CC1 Rd attach test candidate")
     pd_mode.add_argument("--pd-ack-test", action="store_true", help="Build the CC1 GoodCRC test candidate")
     args = parser.parse_args()
-    if args.capture_sfdp_probe or args.capture_timing_baseline:
+    if args.temperature_ens220: args.temperature_probe=True
+    if args.temperature_probe: args.temperature_diagnostics=True
+    if args.capture_ens220: args.temperature_diagnostics=True
+    ens220 = args.temperature_ens220 or args.capture_ens220
+    if args.capture_sfdp_probe or args.capture_timing_baseline or args.temperature_diagnostics:
         args.capture_device = True
     if args.capture_device:
         args.system = True
@@ -155,6 +163,14 @@ def main():
         variant = "capture-sfdp-probe"
     if args.capture_timing_baseline:
         variant = "capture-timing-baseline"
+    if args.temperature_diagnostics:
+        variant = "temperature-diagnostics-v1"
+    if args.temperature_probe:
+        variant = "temperature-probe-v2"
+    if args.temperature_ens220:
+        variant = "temperature-ens220-v3"
+    if args.capture_ens220:
+        variant = "capture-v6-1"
     out = args.build_dir or ROOT / "build" / variant
     out.mkdir(parents=True, exist_ok=True)
 
@@ -177,6 +193,14 @@ def main():
         rust_features += ["--cfg", 'feature="capture-sfdp-probe"']
     if args.capture_timing_baseline:
         rust_features += ["--cfg", 'feature="capture-timing-baseline"']
+    if args.temperature_diagnostics:
+        rust_features += ["--cfg", 'feature="temperature-diagnostics"']
+    if args.temperature_probe:
+        rust_features += ["--cfg", 'feature="temperature-probe"']
+    if args.temperature_ens220:
+        rust_features += ["--cfg", 'feature="temperature-ens220"']
+    if args.capture_ens220:
+        rust_features += ["--cfg", 'feature="capture-ens220"']
     if args.flash_reader:
         rust_features += ["--cfg", 'feature="flash-reader"']
     if args.capture_probe:
@@ -215,6 +239,10 @@ def main():
         sources.append(bsp / "t3p_charger.c")
     if args.system:
         sources.append(bsp / "t3p_temperature.c")
+    if args.temperature_probe:
+        sources.append(bsp / "t3p_temperature_probe.c")
+    if ens220:
+        sources.append(bsp / "t3p_ens220.c")
     if args.capture_probe:
         sources.append(bsp / "t3p_capture_probe.c")
     if args.flash_reader:
@@ -238,6 +266,14 @@ def main():
                 flags.append("-DT3P_CAPTURE_SFDP_PROBE")
             if args.capture_timing_baseline:
                 flags.append("-DT3P_CAPTURE_TIMING_BASELINE")
+            if args.temperature_diagnostics:
+                flags.append("-DT3P_TEMPERATURE_DIAGNOSTICS")
+            if args.temperature_probe:
+                flags.append("-DT3P_TEMPERATURE_PROBE")
+            if ens220:
+                flags.append("-DT3P_TEMPERATURE_ENS220")
+            if args.capture_ens220:
+                flags.append("-DT3P_CAPTURE_ENS220")
             if args.flash_reader:
                 flags.append("-DT3P_FLASH_READER")
             if args.pd_diagnostic:
@@ -268,6 +304,8 @@ def main():
                       ("meter_demo_sample", "meter_snapshot", "meter_demo_render")]
     if args.system:
         keep_demo.append("--undefined=t3p_temperature_compensate")
+    if ens220:
+        keep_demo.append("--undefined=t3p_ens220_centidegrees")
     if args.capture_device:
         keep_demo.append("--defsym=__capture_build=1")
     run(bins / "ld.lld.exe", "-T", bsp / "runtime_layout.ld", "--gc-sections", "--no-relax", *keep_demo,
@@ -309,6 +347,15 @@ def main():
         report["status"] += "; read-only SFDP probe; erase/program implementation excluded"
     if args.capture_timing_baseline:
         report["status"] += "; instrumented V4 storage baseline for V5 comparison"
+    if args.temperature_diagnostics:
+        report["status"] += "; temperature diagnostics V1 ABI family; PB2/PB1 route; temperature hardware unverified"
+    if args.temperature_probe:
+        report["status"] += "; bounded temperature probe V2; eight register reads; PA bits restored"
+    if ens220:
+        report["status"] += "; ENS220 temperature acquisition V3; verified ID 0321; temperature-only single shot"
+    if args.capture_ens220:
+        report["status"] += "; normal Capture V6; three SYSTEM pages; comparison probes excluded"
+        report["status"] += "; Capture V6.1; ENS220 serviced between LCD strips"
     if args.pd_rd_test:
         report["status"] += "; CC1 Rd attach test"
     if args.pd_ack_test:

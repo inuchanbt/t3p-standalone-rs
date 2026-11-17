@@ -26,6 +26,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--build-dir',type=Path,default=ROOT/'build/capture-device')
     p.add_argument('--sfdp-probe',action='store_true',help='Read-only SFDP acquisition variant')
+    p.add_argument('--capture-ens220',action='store_true',help='Require normal V6 build without comparison probes')
     a=p.parse_args();out=a.build_dir
     sim=ROOT/'local/pi32v2-isa-66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f'
     sys.path.insert(0,str(sim/'tools/llvm'))
@@ -175,9 +176,105 @@ def main():
                                       controller_writes=len(cpu.mem.controller_writes),result=result))
             print(f'Pi32v2 SRAM entry: {name} passed',flush=True)
         finally:cpu.mem.controller_probe=False
+    temperature_probe_cases=None
+    if 't3p_temperature_probe_page' in symbols:
+        # Exercise the linked finite-probe cache/USB implementation with a
+        # synthetic C fixture. No GPIO/SPI MMIO is mapped for these calls.
+        from temperature_read import decode_probes
+        wire=(out/'probe-usb-check.frames').read_bytes()
+        assert len(wire)==98*64
+        fixture_pages=[decode(wire[i*64:(i+1)*64],i,123,b'T3CR',2) for i in range(98)]
+        expected=b''.join(fixture_pages[:97])
+        symbols=cpu.load_elf(elf);cpu.sp=symbols['__runtime_stack_end']
+        request=symbols['__runtime_heap_start'];answer=request+64
+        cpu.call(symbols['t3p_temperature_probe_init'],[1])
+        assert cpu.call(symbols['t3p_temperature_probe_page'],[1,answer])[0]==0xffffffff
+        cpu.mem.write(symbols['live'],expected)
+        original_read,original_write=cpu.mem.read,cpu.mem.write
+        def cache_read(at,count):
+            assert not (0xfd0000<=at<0x1000000),'Probe USB tried hardware MMIO'
+            return original_read(at,count)
+        def cache_write(at,data):
+            assert not (0xfd0000<=at<0x1000000),'Probe USB tried hardware MMIO'
+            return original_write(at,data)
+        cpu.mem.read, cpu.mem.write=cache_read,cache_write
+        pages=[]
+        try:
+            for page in range(98):
+                q=bytearray(64);q[:5]=b'T3CQ\x05';struct.pack_into('<II',q,8,page,123)
+                cpu.mem.write(request,q)
+                cpu.call(symbols['t3p_capture_usb_request'],[request,answer])
+                pages.append(decode(cpu.mem.read(answer,64),page,123,b'T3CR',2))
+                if page==0:
+                    # Changing the live count cannot refresh a frozen record.
+                    cpu.mem.write(symbols['live']+5*4,bytes(4))
+            actual=b''.join(pages[:97]);assert actual==expected
+            decoded=decode_probes(actual,pages[97]);assert decoded['completed']==8
+            q[6]=1;cpu.mem.write(request,q)
+            cpu.call(symbols['t3p_capture_usb_request'],[request,answer])
+            assert cpu.mem.read(answer+5,1)==b'\x01'
+            temperature_probe_cases=dict(cached_pages=98,GPIO_SPI_MMIO_accesses=0,
+                live_change_did_not_refresh=True,decoded_records=8,synthetic_only=True)
+            print('Pi32v2 temperature probe: 98 cached USB pages, frozen CRC and 8 synthetic records match; no GPIO/SPI MMIO',flush=True)
+        finally:cpu.mem.read,cpu.mem.write=original_read,original_write
+    ens220_cases=None
+    if 't3p_ens220_centidegrees' in symbols:
+        from temperature_read import decode as decode_temperature
+        symbols=cpu.load_elf(elf);cpu.sp=symbols['__runtime_stack_end']
+        request=symbols['__runtime_heap_start'];answer=request+64
+        for raw,expected_value in ((0x9513,2500),(34963,0),(0x8000,-1715),(29843,-4000),(45843,8500)):
+            assert cpu.call(symbols['t3p_ens220_centidegrees'],[raw,answer])[0]==0
+            assert int.from_bytes(cpu.mem.read(answer,4),'little',signed=True)==expected_value
+        for raw in (0,0xffff,0x10000,29842,45844):
+            assert cpu.call(symbols['t3p_ens220_centidegrees'],[raw,answer])[0]==0xffffffff
+        fixture=[int(x,16) for x in (ROOT/'tests/ens220_diag.words').read_text().split()]
+        expected=struct.pack('<110I',*fixture)
+        cpu.mem.write(symbols['t3p_temperature_diagnostics'],expected)
+        original_read,original_write=cpu.mem.read,cpu.mem.write
+        def cached_temperature_read(at,count):
+            assert not (0xfd0000<=at<0x1000000),'Temperature USB tried hardware MMIO'
+            return original_read(at,count)
+        def cached_temperature_write(at,data):
+            assert not (0xfd0000<=at<0x1000000),'Temperature USB tried hardware MMIO'
+            return original_write(at,data)
+        cpu.mem.read,cpu.mem.write=cached_temperature_read,cached_temperature_write
+        pages=[]
+        try:
+            for page in range(12):
+                q=bytearray(64);q[:5]=b'T3CQ\x04';struct.pack_into('<II',q,8,page,79)
+                cpu.mem.write(request,q);cpu.call(symbols['t3p_capture_usb_request'],[request,answer])
+                pages.append(decode(cpu.mem.read(answer,64),page,79,b'T3CR',2))
+                if page==0:cpu.mem.write(symbols['t3p_temperature_diagnostics']+4,bytes(4))
+            actual=b''.join(pages[:11]);assert actual==expected
+            result=decode_temperature(actual,pages[11])
+            assert result['sensor']=='ENS220' and result['temperature_C']==25 and result['ID']=='0321'
+            ens220_cases=dict(conversion_cases=10,cached_pages=12,GPIO_SPI_MMIO_accesses=0,synthetic_only=True)
+            print('Pi32v2 ENS220: ten conversion cases and 12 frozen V3 USB pages match; no GPIO/SPI MMIO',flush=True)
+        finally:cpu.mem.read,cpu.mem.write=original_read,original_write
+    normal_capture=None
+    if a.capture_ens220:
+        assert not any(name.startswith('t3p_temperature_probe_') for name in symbols),'Comparison probes linked into normal V6'
+        assert 't3p_ens220_poll' in symbols and ens220_cases is not None
+        symbols=cpu.load_elf(elf);cpu.sp=symbols['__runtime_stack_end']
+        request=symbols['__runtime_heap_start'];answer=request+64
+        original_read,original_write=cpu.mem.read,cpu.mem.write
+        def normal_read(at,count):
+            assert not (0xfd0000<=at<0x1000000),'Rejected probe request reached MMIO'
+            return original_read(at,count)
+        def normal_write(at,data):
+            assert not (0xfd0000<=at<0x1000000),'Rejected probe request reached MMIO'
+            return original_write(at,data)
+        cpu.mem.read,cpu.mem.write=normal_read,normal_write
+        try:
+            q=bytearray(64);q[:5]=b'T3CQ\x05';struct.pack_into('<II',q,8,0,81)
+            cpu.mem.write(request,q);cpu.call(symbols['t3p_capture_usb_request'],[request,answer])
+            reply=cpu.mem.read(answer,64);assert reply[:4]==b'T3CR' and reply[5]==1 and reply[6]==0
+            normal_capture=dict(comparison_probe_symbols=0,operation_5_rejected=True,GPIO_SPI_MMIO_accesses=0)
+            print('Pi32v2 normal V6: comparison probe code absent; operation 5 rejected without MMIO',flush=True)
+        finally:cpu.mem.read,cpu.mem.write=original_read,original_write
     (out/'OFFLINE-probe-pi32.json').write_text(json.dumps(dict(
         format='SYNTHETIC READ/MMIO; not hardware SPI',cases=results,
-        sram_entry_cases=enter_results),indent=2)+'\n')
+        sram_entry_cases=enter_results,temperature_probe_cache=temperature_probe_cases,ens220=ens220_cases,normal_capture=normal_capture),indent=2)+'\n')
     print(f'Pi32v2 capture: {len(cases)} compiled profile/USB cases and 4 actual SRAM entry cases passed')
 
 

@@ -36,6 +36,19 @@ int main(int argc,char **argv)
     }
     q[8]=3;t3p_capture_usb_request(q,a);assert(a[5]==1&&reads==1);
     q[8]=0;q[6]=1;t3p_capture_usb_request(q,a);assert(a[5]==1&&reads==1);
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    t3p_temperature_diagnostics=(struct t3p_temperature_diag){.magic=T3P_TEMP_DIAG_MAGIC,.version=1,
+        .bus_port=1,.scl_mask=4,.sda_mask=2,.init_port=0,.active_port=1,.id=0x58};
+    /* ID has deliberately not been read: its validity flag is clear. */
+    q[4]=4;q[6]=0;
+    for(unsigned p=0;p<=T3P_TEMP_DIAG_WORDS/10;p++){
+        q[8]=(uint8_t)p;t3p_capture_usb_request(q,a);assert(!a[5]&&a[6]==40&&reads==1);
+        if(!p)t3p_temperature_diagnostics.attempts=123; /* Cache stays frozen. */
+        if(f)assert(fwrite(a,1,64,f)==64);
+    }
+    q[8]=T3P_TEMP_DIAG_WORDS/10+1;t3p_capture_usb_request(q,a);assert(a[5]==1&&reads==1);
+    q[8]=0;q[6]=1;t3p_capture_usb_request(q,a);assert(a[5]==1&&reads==1);
+#endif
     if(f)fclose(f);
     return 0;
 }

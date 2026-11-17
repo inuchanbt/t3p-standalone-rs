@@ -4,12 +4,12 @@ use std::{
     fs::File,
     io::{self, BufWriter, Write},
 };
-#[cfg(feature = "pd-charger")]
-use t3p_standalone::{CHARGER_PAGE, ChargerCapture};
 use t3p_standalone::{
-    CableCapture, EprCapture, EprEvent, Meter, Overview, PdSniff, Reading, SIDE, STRIP_ROWS,
-    SourceCaps, demo_reading, render_demo_strip,
+    demo_reading, render_demo_strip, CableCapture, EprCapture, EprEvent, Meter, Overview, PdSniff,
+    Reading, SourceCaps, SIDE, STRIP_ROWS,
 };
+#[cfg(feature = "pd-charger")]
+use t3p_standalone::{ChargerCapture, CHARGER_PAGE};
 
 fn main() -> io::Result<()> {
     let mut args = env::args_os().skip(1);
@@ -342,12 +342,44 @@ fn main() -> io::Result<()> {
         "--system-boot-io" => Some((1, 4)),
         "--system-temperature" => Some((0, 5)),
         "--system-cold" => Some((0, 6)),
+        #[cfg(feature = "temperature-diagnostics")]
+        "--system-temp-bus" => Some((3, 7)),
+        #[cfg(feature = "temperature-diagnostics")]
+        "--system-temp-pb" => Some((4, 7)),
+        #[cfg(feature = "temperature-diagnostics")]
+        "--system-temp-pa" => Some((5, 7)),
+        #[cfg(feature = "temperature-diagnostics")]
+        "--system-missing-temp-bus" => Some((3, 1)),
+        #[cfg(feature = "temperature-diagnostics")]
+        "--system-missing-temp-pb" => Some((4, 1)),
+        #[cfg(feature = "temperature-diagnostics")]
+        "--system-missing-temp-pa" => Some((5, 1)),
         _ => None,
     }) {
-        let words: Vec<u32> = include_str!("../../tests/system_stats.words")
+        let mut words: Vec<u32> = include_str!("../../tests/system_stats.words")
             .split_whitespace()
             .map(|word| u32::from_str_radix(word, 16).unwrap())
             .collect();
+        #[cfg(feature = "temperature-diagnostics")]
+        {
+            words.resize(133, 0);
+            if mode == 7 {
+                let fixture = if cfg!(any(
+                    feature = "temperature-ens220",
+                    feature = "capture-ens220"
+                )) {
+                    include_str!("../../tests/ens220_diag.words")
+                } else {
+                    include_str!("../../tests/temperature_diag.words")
+                };
+                let diag: Vec<u32> = fixture
+                    .split_whitespace()
+                    .map(|word| u32::from_str_radix(word, 16).unwrap())
+                    .collect();
+                assert_eq!(diag.len(), 110);
+                words[23..].copy_from_slice(&diag);
+            }
+        }
         assert_eq!(
             words.len() * 4,
             core::mem::size_of::<t3p_standalone::SystemStats>()
@@ -374,7 +406,7 @@ fn main() -> io::Result<()> {
         if mode == 4 {
             stats = Default::default();
         }
-        if mode >= 5 {
+        if (5..=6).contains(&mode) {
             stats.temp_valid = 1;
             stats.temp_centi = if mode == 5 { 2508 } else { -512 };
         }
@@ -386,14 +418,35 @@ fn main() -> io::Result<()> {
     for top in (0..SIDE).step_by(STRIP_ROWS) {
         render_demo_strip(&view, top, &mut pixels);
         #[cfg(feature = "capture-device")]
-        if let Some(result)=flags.iter().find_map(|f| f.to_str()?.strip_prefix("--capture-status=")?.parse::<i32>().ok()) {
-            t3p_standalone::render_capture_status_strip(result,if result == -1 {2}else{0},0xef4015,0x50444653,top,&mut pixels);
+        if let Some(result) = flags.iter().find_map(|f| {
+            f.to_str()?
+                .strip_prefix("--capture-status=")?
+                .parse::<i32>()
+                .ok()
+        }) {
+            t3p_standalone::render_capture_status_strip(
+                result,
+                if result == -1 { 2 } else { 0 },
+                0xef4015,
+                0x50444653,
+                top,
+                &mut pixels,
+            );
         }
         #[cfg(feature = "flash-reader")]
         if flags.iter().any(|f| f == "--flash-reader") {
-            let mut words=if flags.iter().any(|f| f == "--reader-locked") {[0;17]} else {[1,1,123,0,2,0,0x5000,0x1fa000,25,0x1000680,0x400000,1,8,0x83c,4,0x40,0]};
-            if flags.iter().any(|f| f == "--reader-usb") {words[16]=1;}
-            t3p_standalone::render_flash_reader_strip(&words,top,&mut pixels);
+            let mut words = if flags.iter().any(|f| f == "--reader-locked") {
+                [0; 17]
+            } else {
+                [
+                    1, 1, 123, 0, 2, 0, 0x5000, 0x1fa000, 25, 0x1000680, 0x400000, 1, 8, 0x83c, 4,
+                    0x40, 0,
+                ]
+            };
+            if flags.iter().any(|f| f == "--reader-usb") {
+                words[16] = 1;
+            }
+            t3p_standalone::render_flash_reader_strip(&words, top, &mut pixels);
         }
         #[cfg(feature = "capture-probe")]
         if let Some(section) = flags.iter().find_map(|f| {

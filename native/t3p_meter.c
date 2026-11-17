@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "t3p_meter.h"
+#ifdef T3P_TEMPERATURE_PROBE
+#include "t3p_temperature_probe.h"
+#endif
 #ifdef T3P_PD_CABLE_READ
 #include "t3p_pd.h"
 #endif
@@ -83,43 +86,118 @@ void t3p_meter_gpio_init(struct t3p_bsp *b, struct t3p_meter_bus *bus)
         .read_scl = read_scl, .read_sda = read_sda, .delay = delay};
 }
 
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+static void sensor_capture(struct t3p_meter_bus *b, unsigned which)
+{
+    if (b->temperature_diag && b->temperature_pins) {
+        b->temperature_pins(b->context, b->temperature_diag->pins[which]);
+        b->temperature_diag->gpio_valid |= 1u << which;
+    }
+}
+static int bus_fault(struct t3p_meter_bus *b, unsigned error)
+{
+    if (b->temperature_diag) {
+        if (b->temperature_diag->stage == TEMP_BUS_STOP) {
+            b->temperature_diag->stop_error = error;
+            if (!b->temperature_diag->bus_error) sensor_capture(b,TEMP_PINS_FAULT);
+        }
+        else if (!b->temperature_diag->bus_error) {
+            b->temperature_diag->bus_error = error;
+            sensor_capture(b, TEMP_PINS_FAULT);
+        }
+    }
+    return -1;
+}
+static void bus_stage(struct t3p_meter_bus *b, unsigned stage)
+{ if (b->temperature_diag && !b->temperature_diag->bus_error) b->temperature_diag->stage=stage; }
+static int bus_delay(struct t3p_meter_bus *b)
+{ return b->delay(b->context) ? bus_fault(b,TEMP_BUS_DELAY) : 0; }
+static void bus_begin(struct t3p_meter_bus *b, uint8_t reg, unsigned write)
+{
+    if (!b->temperature_diag) return;
+    struct t3p_temperature_diag *d=b->temperature_diag;
+    t3p_system_count(&d->transactions); d->reg=reg; d->direction=write;
+    d->stage=TEMP_BUS_IDLE; d->bus_error=d->stop_error=0;
+    d->ack_seen=d->ack_valid=0; d->byte_index=d->bit_index=0;
+    d->gpio_valid &= ~((1u<<TEMP_PINS_RELEASED)|(1u<<TEMP_PINS_FAULT)|(1u<<TEMP_PINS_STOPPED));
+}
+#else
+#define bus_delay(b) ((b)->delay((b)->context))
+#define bus_stage(b,stage) ((void)0)
+#define bus_begin(b,reg,write) ((void)0)
+#define bus_fault(b,error) (-1)
+#endif
 static int clock_high(struct t3p_meter_bus *b)
 {
     b->scl(b->context, 1);
     for (unsigned i = 0; i < 30; ++i) {
-        if (b->delay(b->context)) return -1;
+        if (bus_delay(b)) return -1;
         if (b->read_scl(b->context)) return 0;
     }
-    return -1;
+    return bus_fault(b,TEMP_BUS_SCL_LOW);
 }
 static int start(struct t3p_meter_bus *b)
 {
     b->sda(b->context, 1);
-    if (clock_high(b) || !b->read_sda(b->context)) return -1;
+    if (clock_high(b)) return -1;
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    if (b->temperature_diag && b->temperature_diag->stage==TEMP_BUS_IDLE)
+        sensor_capture(b,TEMP_PINS_RELEASED);
+#endif
+    if (!b->read_sda(b->context)) return bus_fault(b,TEMP_BUS_SDA_LOW);
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    if (b->temperature_diag && b->temperature_diag->stage==TEMP_BUS_IDLE)
+        bus_stage(b,TEMP_BUS_START);
+#endif
     b->sda(b->context, 0);
-    if (b->delay(b->context)) return -1;
+    if (bus_delay(b)) return -1;
     b->scl(b->context, 0);
-    return b->delay(b->context);
+    return bus_delay(b);
 }
 static void stop(struct t3p_meter_bus *b)
 {
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    unsigned saved_stage=b->temperature_diag?b->temperature_diag->stage:0;
+    if (b->temperature_diag) b->temperature_diag->stage=TEMP_BUS_STOP;
+#endif
     b->scl(b->context, 0);
     b->sda(b->context, 0);
-    if (!b->delay(b->context)) (void)clock_high(b);
+    if (!bus_delay(b)) (void)clock_high(b);
     b->sda(b->context, 1);
     b->scl(b->context, 1);
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    if (b->temperature_diag) {
+        sensor_capture(b,TEMP_PINS_STOPPED);
+        b->temperature_diag->stage=b->temperature_diag->bus_error?saved_stage:
+            (b->temperature_diag->stop_error?TEMP_BUS_STOP:TEMP_BUS_DONE);
+    }
+#endif
 }
 static int write_byte(struct t3p_meter_bus *b, uint8_t value)
 {
     for (unsigned bit = 0; bit < 8; ++bit) {
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+        if (b->temperature_diag) b->temperature_diag->bit_index=bit;
+#endif
         b->sda(b->context, !!(value & 0x80));
-        if (b->delay(b->context) || clock_high(b)) return -1;
+        if (bus_delay(b) || clock_high(b)) return -1;
         b->scl(b->context, 0);
         value <<= 1;
     }
     b->sda(b->context, 1);
-    if (b->delay(b->context) || clock_high(b)) return -1;
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    if (b->temperature_diag) b->temperature_diag->bit_index=8;
+#endif
+    if (bus_delay(b) || clock_high(b)) return -1;
     int nack = b->read_sda(b->context);
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    if (b->temperature_diag) {
+        unsigned bit=1u<<b->temperature_diag->stage;
+        b->temperature_diag->ack_valid |= bit;
+        if (!nack) b->temperature_diag->ack_seen |= bit;
+    }
+    if (nack) (void)bus_fault(b,TEMP_BUS_NACK); /* Before lowering ACK clock. */
+#endif
     b->scl(b->context, 0);
     return nack ? -1 : 0;
 }
@@ -128,12 +206,18 @@ static int read_byte(struct t3p_meter_bus *b, uint8_t *out, int acknowledge)
     uint8_t value = 0;
     b->sda(b->context, 1);
     for (unsigned bit = 0; bit < 8; ++bit) {
-        if (b->delay(b->context) || clock_high(b)) return -1;
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+        if (b->temperature_diag) b->temperature_diag->bit_index=bit;
+#endif
+        if (bus_delay(b) || clock_high(b)) return -1;
         value = (uint8_t)((value << 1) | !!b->read_sda(b->context));
         b->scl(b->context, 0);
     }
     b->sda(b->context, !acknowledge);
-    if (b->delay(b->context) || clock_high(b)) return -1;
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    if (b->temperature_diag) b->temperature_diag->bit_index=8;
+#endif
+    if (bus_delay(b) || clock_high(b)) return -1;
     b->scl(b->context, 0);
     b->sda(b->context, 1);
     *out = value;
@@ -143,22 +227,41 @@ static int read_register(struct t3p_meter_bus *b, uint8_t address, uint8_t reg,
                          uint8_t *data, unsigned count)
 {
     if (!b || !data || !b->scl || !b->sda || !b->read_scl || !b->read_sda || !b->delay)
+    {
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+        if (b && b->temperature_diag) { bus_begin(b,reg,0); return bus_fault(b,TEMP_BUS_ARGUMENT); }
+#endif
         return -1;
+    }
 #ifdef T3P_SYSTEM
     if (b->system) t3p_system_count(&b->system->reads);
 #endif
-    int error = start(b) || write_byte(b, address) || write_byte(b, reg) ||
-                start(b) || write_byte(b, address | 1);
-    for (unsigned i = 0; i < count && !error; ++i)
+    bus_begin(b,reg,0);
+    int error = start(b);
+    if (!error) { bus_stage(b,TEMP_BUS_ADDRESS_W); error=write_byte(b,address); }
+    if (!error) { bus_stage(b,TEMP_BUS_REGISTER); error=write_byte(b,reg); }
+    if (!error) { bus_stage(b,TEMP_BUS_RESTART); error=start(b); }
+    if (!error) { bus_stage(b,TEMP_BUS_ADDRESS_R); error=write_byte(b,address|1); }
+    if (!error) bus_stage(b,TEMP_BUS_DATA);
+    for (unsigned i = 0; i < count && !error; ++i) {
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+        if (b->temperature_diag) b->temperature_diag->byte_index=i;
+#endif
         error = read_byte(b, &data[i], i + 1 < count);
+    }
     stop(b);
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    if (b->temperature_diag && b->temperature_diag->stop_error) error=1;
+#endif
 #ifdef T3P_SYSTEM
     if (error && b->system) t3p_system_count(&b->system->read_errors);
 #endif
     return error ? -1 : 0;
 }
 #ifdef T3P_SYSTEM
-/* Stock sensor bus: PA6 SCL / PA5 SDA, distinct from meter/PD PB2/PB1. */
+/* Released V2/V5 used PA6/PA5 after misattributing a stock hardware-I2C table.
+ * The diagnostic candidate below follows the verified BMP PB2/PB1 call route
+ * and only observes PA. Preserve the released build's behavior for now. */
 static void sensor_line(void *ctx, uint32_t pin, int high)
 {
     struct t3p_bsp *b = ctx;
@@ -175,8 +278,42 @@ static int sensor_read_sda(void *ctx) {
     struct t3p_bsp *b = ctx;
     return !!(b->io.read32(b->io.context, 0xfd3000u) & (1u << 5));
 }
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+static void sensor_pins(void *ctx, uint32_t out[14])
+{
+    struct t3p_bsp *b=ctx;
+    for (unsigned i=0;i<13;i++) out[i]=b->io.read32(b->io.context,0xfd3000u+4*i);
+    out[13]=b->io.read32(b->io.context,0xfd0618u);
+}
+static void active_sensor_pins(void *ctx, uint32_t out[14])
+{
+    struct t3p_bsp *b=ctx;
+    for (unsigned i=0;i<13;i++) out[i]=b->io.read32(b->io.context,PB+4*i);
+    out[13]=b->io.read32(b->io.context,0xfd0618u);
+}
+#endif
 void t3p_temperature_bus_init(struct t3p_bsp *b, struct t3p_meter_bus *bus)
 {
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    t3p_temperature_diagnostics=(struct t3p_temperature_diag){.magic=T3P_TEMP_DIAG_MAGIC,
+        .version=1,.gate=1,.bus_port=1,.scl_mask=SCL,.sda_mask=SDA,.init_port=0,.active_port=1};
+    sensor_pins(b,t3p_temperature_diagnostics.pins[TEMP_PINS_BEFORE]);
+    t3p_temperature_diagnostics.gpio_valid=1u<<TEMP_PINS_BEFORE;
+    /* Stock BMP ID -> 0C0CF502 -> 0C0EA5E6/0C0EA64C uses PB2/PB1.
+     * Keep the completed V5 build untouched; trial this correction only in the
+     * diagnostic candidate. Meter GPIO has already initialized PB. Observe PA
+     * before/after without changing it; never initialize the stock drivers. */
+    *bus=(struct t3p_meter_bus){.context=b,.scl=scl,.sda=sda,
+        .read_scl=read_scl,.read_sda=read_sda,.delay=delay,
+        .temperature_diag=&t3p_temperature_diagnostics,.temperature_pins=active_sensor_pins};
+    sensor_pins(b,t3p_temperature_diagnostics.pins[TEMP_PINS_INIT]);
+    t3p_temperature_diagnostics.gpio_valid|=1u<<TEMP_PINS_INIT;
+#ifdef T3P_TEMPERATURE_ENS220
+    t3p_temperature_diagnostics.version=3;
+    t3p_temperature_diagnostics.sensor_kind=2;
+#endif
+    return;
+#endif
     const uint32_t pins = (1u << 6) | (1u << 5);
     /* Release before enabling digital inputs; use board pull-ups, drive low only. */
     uint32_t value = b->io.read32(b->io.context, 0xfd3008u);
@@ -190,15 +327,118 @@ void t3p_temperature_bus_init(struct t3p_bsp *b, struct t3p_meter_bus *bus)
 }
 int t3p_temperature_read(struct t3p_meter_bus *b, uint8_t reg, uint8_t *data, unsigned count)
 { return read_register(b, 0xee, reg, data, count); }
+#ifdef T3P_TEMPERATURE_PROBE
+int t3p_temperature_probe_target(unsigned index,uint32_t out[4])
+{
+    static const uint8_t targets[T3P_TEMP_PROBE_COUNT][4]={
+        {1,0x40,0xff,2}, /* Meter die ID, established read-only control. */
+        {1,0x22,0x01,1}, /* PD controller device ID. */
+        {1,0x76,0xd0,1},{1,0x77,0xd0,1},
+        {0,0x19,0x0f,1}, /* Stock accelerometer ID. */
+        {1,0x20,0x00,2}, /* ENS220 PART_ID; stock secondary sensor route. */
+        {0,0x76,0xd0,1},{0,0x77,0xd0,1},
+    };
+    if(index>=T3P_TEMP_PROBE_COUNT||!out)return -1;
+    for(unsigned i=0;i<4;i++)out[i]=targets[index][i];
+    return 0;
+}
+int t3p_temperature_probe_sample(struct t3p_bsp *board,struct t3p_meter_bus *base,
+                                unsigned index,struct t3p_temperature_probe_record *record)
+{
+    uint32_t target[4];
+    if(!board||!base||!record||base->context!=board||!base->delay||
+       t3p_temperature_probe_target(index,target))return -1;
+    for(unsigned i=0;i<4;i++)record->meta[i]=target[i];
+    unsigned pa=!target[0];uint32_t mask=pa?0x60u:6u;
+    struct t3p_temperature_diag *d=&record->trace;
+    *d=(struct t3p_temperature_diag){.magic=T3P_TEMP_DIAG_MAGIC,.version=1,
+        .attempts=1,.phase=TEMP_ID,.bus_port=target[0],.scl_mask=pa?0x40u:4u,
+        .sda_mask=pa?0x20u:2u,.init_port=target[0],.active_port=target[0],.timer_ready=1,
+        .timer_con=board->io.read32(board->io.context,0xfd0614u),
+        .timer_count=board->io.read32(board->io.context,0xfd0618u)};
+    struct t3p_meter_bus bus=*base;
+    bus.temperature_diag=d;bus.temperature_pins=pa?sensor_pins:active_sensor_pins;
+    if(pa){bus.scl=sensor_scl;bus.sda=sensor_sda;bus.read_scl=sensor_read_scl;bus.read_sda=sensor_read_sda;}
+    else {bus.scl=scl;bus.sda=sda;bus.read_scl=read_scl;bus.read_sda=read_sda;}
+    sensor_capture(&bus,TEMP_PINS_BEFORE);
+    /* Input/pull-up mode matches the stock 0x11 setting. Do not touch power,
+     * reset, mux registers or any GPIO outside PA5/PA6. Restore on all exits. */
+    static const uint8_t offsets[]={8,4,12,16,20,24,28,32,36,40};
+    if(pa)for(unsigned i=0;i<sizeof offsets;i++){
+        uint32_t address=0xfd3000u+offsets[i];
+        uint32_t value=board->io.read32(board->io.context,address);
+        if(i==0||i==2||i==4)value|=mask;else value&=~mask;
+        board->io.write32(board->io.context,address,value);
+    }
+    sensor_capture(&bus,TEMP_PINS_INIT);
+    uint8_t data[2]={0};
+    int error=read_register(&bus,(uint8_t)(target[1]<<1),(uint8_t)target[2],data,target[3]);
+    if(!error){
+        uint32_t value=data[0];if(target[3]==2)value=value<<8|data[1];
+        record->meta[5]=1;record->meta[6]=value;
+        d->valid=TEMP_VALID_ID;d->id=value;d->phase=TEMP_DONE;d->successes=1;
+    }else {d->result=TEMP_IO;d->failures=1;}
+    record->meta[4]=(uint32_t)(int32_t)error;
+    if(pa){
+        /* Release first; restore output/configuration bits, then direction last. */
+        uint32_t direction=board->io.read32(board->io.context,0xfd3008u);
+        board->io.write32(board->io.context,0xfd3008u,direction|mask);
+        for(unsigned i=1;i<sizeof offsets;i++){
+            uint32_t address=0xfd3000u+offsets[i];
+            uint32_t value=board->io.read32(board->io.context,address);
+            value=(value&~mask)|(d->pins[TEMP_PINS_BEFORE][offsets[i]/4]&mask);
+            board->io.write32(board->io.context,address,value);
+        }
+        direction=board->io.read32(board->io.context,0xfd3008u);
+        board->io.write32(board->io.context,0xfd3008u,(direction&~mask)|(d->pins[TEMP_PINS_BEFORE][2]&mask));
+        record->meta[9]=1;
+        for(unsigned i=0;i<sizeof offsets;i++)
+            if((board->io.read32(board->io.context,0xfd3000u+offsets[i])&mask)!=
+               (d->pins[TEMP_PINS_BEFORE][offsets[i]/4]&mask))record->meta[9]=2;
+    }
+    return error;
+}
+#endif
 int t3p_temperature_write(struct t3p_meter_bus *b, uint8_t reg, uint8_t value)
 {
     if (reg != 0xf4 || value != 0x21) return -1;
     if (b->system) t3p_system_count(&b->system->writes);
-    int error = start(b) || write_byte(b, 0xee) || write_byte(b, reg) || write_byte(b, value);
+    bus_begin(b,reg,1);
+    int error=start(b);
+    if (!error) { bus_stage(b,TEMP_BUS_ADDRESS_W); error=write_byte(b,0xee); }
+    if (!error) { bus_stage(b,TEMP_BUS_REGISTER); error=write_byte(b,reg); }
+    if (!error) { bus_stage(b,TEMP_BUS_DATA); error=write_byte(b,value); }
     stop(b);
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    if (b->temperature_diag && b->temperature_diag->stop_error) error=1;
+#endif
     if (error && b->system) t3p_system_count(&b->system->write_errors);
     return error ? -1 : 0;
 }
+#ifdef T3P_TEMPERATURE_ENS220
+int t3p_ens220_read(struct t3p_meter_bus *b,uint8_t reg,uint8_t *data,unsigned count)
+{
+    if(!((reg==0x00&&count==2)||(reg==0x1a&&count==2)||
+         ((reg==0x06||reg==0x08||reg==0x09||reg==0x14)&&count==1)))return -1;
+    return read_register(b,0x40,reg,data,count);
+}
+int t3p_ens220_write(struct t3p_meter_bus *b,uint8_t reg,uint8_t value)
+{
+    if(!b||!b->scl||!b->sda||!b->read_scl||!b->read_sda||!b->delay)return -1;
+    if(!((reg==0x06&&(value==0x08||value==0x80||value==0||value==0x12))||
+         (reg==0x08&&value==1)||(reg==0x09&&value==0)))return -1;
+    if(b->system)t3p_system_count(&b->system->writes);
+    bus_begin(b,reg,1);
+    int error=start(b);
+    if(!error){bus_stage(b,TEMP_BUS_ADDRESS_W);error=write_byte(b,0x40);}
+    if(!error){bus_stage(b,TEMP_BUS_REGISTER);error=write_byte(b,reg);}
+    if(!error){bus_stage(b,TEMP_BUS_DATA);error=write_byte(b,value);}
+    stop(b);
+    if(b->temperature_diag&&b->temperature_diag->stop_error)error=1;
+    if(error&&b->system)t3p_system_count(&b->system->write_errors);
+    return error?-1:0;
+}
+#endif
 #endif
 int t3p_meter_read_register(struct t3p_meter_bus *b, uint8_t reg, uint16_t *out)
 {

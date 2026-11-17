@@ -6,6 +6,9 @@
 #ifdef T3P_SYSTEM
 #include "t3p_system.h"
 #endif
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+#include "t3p_temperature_diag.h"
+#endif
 
 struct t3p_meter_bus {
     void *context;
@@ -16,6 +19,10 @@ struct t3p_meter_bus {
     int (*delay)(void *);
 #ifdef T3P_SYSTEM
     struct t3p_system_stats *system;
+#endif
+#ifdef T3P_TEMPERATURE_DIAGNOSTICS
+    struct t3p_temperature_diag *temperature_diag;
+    void (*temperature_pins)(void *, uint32_t [14]);
 #endif
 };
 
